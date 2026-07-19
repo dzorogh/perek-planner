@@ -1,0 +1,80 @@
+# generated: 2026-07-20T00:32:39+03:00
+# last_updated: 2026-07-20T00:38:00+03:00
+# project: perek-planner
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: {project-root}/_bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog → in-progress: Automatically when first story is created (via create-story)
+#   - in-progress → done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# Action Item Status:
+#   - open: Committed during a retrospective, not yet addressed
+#   - in-progress: Actively being worked on
+#   - done: Completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - Retrospective appends its action items to action_items; sprint-status surfaces open ones
+
+generated: 2026-07-20T00:32:39+03:00
+last_updated: 2026-07-20T00:38:00+03:00
+project: perek-planner
+project_key: NOKEY
+tracking_system: file-system
+story_location: "{project-root}/_bmad-output/implementation-artifacts"
+
+development_status:
+  epic-1: in-progress
+  1-1-app-shell-with-soft-workshop-brand: in-progress
+  1-2-login-and-password: backlog
+  1-3-store-picker-in-settings: backlog
+  1-4-perekrestok-catalog-sync-worker: backlog
+  1-5-block-planning-on-stale-catalog: backlog
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-create-menu-skeleton-by-day-length: backlog
+  2-2-buyable-matching-and-eligibility: backlog
+  2-3-ai-generate-buyable-menu: backlog
+  2-4-edit-slots-with-uj-1-gate: backlog
+  2-5-add-snacks-to-menu: backlog
+  2-6-record-refusal: backlog
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  3-1-portion-plan-by-day-and-meal: backlog
+  3-2-build-shopping-list-snapshot: backlog
+  3-3-copy-shopping-list: backlog
+  3-4-optional-perekrestok-store-link: backlog
+  3-5-price-and-nutrition-when-present: backlog
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  4-1-history-of-menus-and-recipes: backlog
+  4-2-rate-recipe-or-snack: backlog
+  4-3-view-recipe-text: backlog
+  epic-4-retrospective: optional

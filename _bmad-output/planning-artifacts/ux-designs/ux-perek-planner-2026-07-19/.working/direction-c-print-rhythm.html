@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Direction C — Print Rhythm · perek-planner</title>
+<style>
+  /* ── Palette (documented) ──
+     #FAFAFA  page (newsprint white, not cream)
+     #FFFFFF  surface
+     #111111  ink black
+     #525252  secondary ink
+     #A3A3A3  rules / muted
+     #DC2626  accent red (alert ink, not terracotta)
+     #FEE2E2  empty slot tint
+     #E5E5E5  hairline rules
+  */
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: #FAFAFA;
+    color: #111111;
+    line-height: 1.55;
+    padding: 36px 48px 56px;
+  }
+
+  .rationale {
+    max-width: 1200px;
+    margin: 0 auto 32px;
+    padding: 0 0 20px;
+    border-bottom: 3px double #111111;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 16px;
+    color: #525252;
+    line-height: 1.65;
+  }
+
+  .rationale strong {
+    display: block;
+    font-size: 28px;
+    font-weight: 700;
+    color: #111111;
+    letter-spacing: -0.02em;
+    margin-bottom: 10px;
+  }
+
+  .browser {
+    max-width: 1200px;
+    margin: 0 auto;
+    background: #FFFFFF;
+    border: 2px solid #111111;
+    box-shadow: 8px 8px 0 #E5E5E5;
+  }
+
+  .browser-chrome {
+    border-bottom: 1px solid #111111;
+    padding: 8px 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: #FAFAFA;
+  }
+
+  .dots { display: none; }
+
+  .url-bar {
+    flex: 1;
+    font-family: Georgia, serif;
+    font-size: 13px;
+    color: #525252;
+    font-style: italic;
+  }
+
+  .masthead {
+    padding: 24px 32px 16px;
+    border-bottom: 1px solid #111111;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 16px;
+    align-items: end;
+  }
+
+  .masthead-title {
+    font-family: Georgia, "Times New Roman", serif;
+  }
+
+  .masthead-title h1 {
+    font-size: 36px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1;
+  }
+
+  .masthead-title .deck {
+    font-size: 15px;
+    color: #525252;
+    margin-top: 8px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+
+  .masthead-meta {
+    text-align: right;
+    font-size: 12px;
+    color: #525252;
+    line-height: 1.6;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .section-rule {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 32px;
+    border-bottom: 1px solid #E5E5E5;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #525252;
+  }
+
+  .section-rule .current {
+    color: #111111;
+    font-weight: 700;
+    border-bottom: 2px solid #DC2626;
+    padding-bottom: 2px;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 280px;
+  }
+
+  .main-col { padding: 24px 32px 32px; }
+
+  .lede {
+    font-family: Georgia, serif;
+    font-size: 20px;
+    line-height: 1.45;
+    margin-bottom: 24px;
+    color: #111111;
+  }
+
+  .lede em { font-style: italic; color: #525252; }
+
+  .day-block {
+    margin-bottom: 28px;
+    break-inside: avoid;
+  }
+
+  .day-block h2 {
+    font-family: Georgia, serif;
+    font-size: 22px;
+    font-weight: 700;
+    border-top: 2px solid #111111;
+    padding-top: 8px;
+    margin-bottom: 12px;
+  }
+
+  .day-block h2 span {
+    font-size: 14px;
+    font-weight: 400;
+    color: #525252;
+    margin-left: 8px;
+  }
+
+  .meals-columns {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0;
+    border: 1px solid #E5E5E5;
+  }
+
+  .meal-col {
+    padding: 14px 16px;
+    border-right: 1px solid #E5E5E5;
+  }
+
+  .meal-col:last-child { border-right: none; }
+
+  .meal-col h3 {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: #A3A3A3;
+    margin-bottom: 8px;
+    font-weight: 600;
+  }
+
+  .meal-col p {
+    font-family: Georgia, serif;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.35;
+    margin-bottom: 10px;
+  }
+
+  .meal-col .links {
+    font-size: 12px;
+    color: #525252;
+  }
+
+  .meal-col .links span {
+    margin-right: 10px;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: default;
+  }
+
+  .meal-col.empty {
+    background: #FEE2E2;
+  }
+
+  .meal-col.empty p {
+    color: #991B1B;
+    font-style: italic;
+    font-weight: 500;
+  }
+
+  .snacks {
+    margin-top: 8px;
+    padding-top: 16px;
+    border-top: 1px solid #E5E5E5;
+  }
+
+  .snacks h3 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+
+  .snacks ul {
+    list-style: none;
+    font-size: 15px;
+  }
+
+  .snacks li {
+    padding: 4px 0;
+    border-bottom: 1px dotted #E5E5E5;
+  }
+
+  .cta-bar {
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 3px double #111111;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .cta-bar button {
+    font-family: inherit;
+    font-size: 14px;
+    padding: 10px 20px;
+    border: 2px solid #111111;
+    background: #111111;
+    color: #FFFFFF;
+    cursor: default;
+    font-weight: 600;
+  }
+
+  .side-col {
+    border-left: 1px solid #111111;
+    padding: 24px 20px;
+    background: #FAFAFA;
+  }
+
+  .side-col h2 {
+    font-family: Georgia, serif;
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 4px;
+    border-bottom: 1px solid #111111;
+    padding-bottom: 6px;
+  }
+
+  .side-col .label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #A3A3A3;
+    margin-bottom: 14px;
+  }
+
+  .side-item {
+    font-size: 13px;
+    padding: 8px 0;
+    border-bottom: 1px dotted #E5E5E5;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .side-item span:last-child { color: #525252; }
+
+  .copy-block {
+    margin-top: 16px;
+    padding: 12px;
+    border: 1px solid #111111;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .copy-block strong {
+    display: block;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+  }
+</style>
+</head>
+<body>
+
+<div class="rationale">
+  <strong>Direction C — Print Rhythm</strong>
+  Типографика «газетного листа»: Georgia для заголовков, чёрные правила, красный акцент (#DC2626) как маркер правки — не кремовый editorial.
+  Просторнее по вертикали, меньше UI-хрома: Sergey читает меню как расписание, а не как dashboard.
+</div>
+
+<div class="browser">
+  <div class="browser-chrome">
+    <div class="url-bar">perek-planner — выпуск меню · 3 дня · правки</div>
+  </div>
+
+  <header class="masthead">
+    <div class="masthead-title">
+      <h1>Меню</h1>
+      <p class="deck">Три дня · одна cook session · два человека · Перекрёсток, д. Алабино, 92</p>
+    </div>
+    <div class="masthead-meta">
+      perek-planner<br>
+      19 июля 2026<br>
+      шаг 2 из 4
+    </div>
+  </header>
+
+  <nav class="section-rule">
+    <span>Дни</span>
+    <span>·</span>
+    <span class="current">Меню и слоты</span>
+    <span>·</span>
+    <span>План порций</span>
+    <span>·</span>
+    <span>Shopping list</span>
+  </nav>
+
+  <div class="layout">
+    <main class="main-col">
+      <p class="lede">Предложения подобраны из библиотеки с учётом Refusals и Ratings. <em>Проверь каждый слот</em> — замени Recipe, откажись до готовки или оставь пустым.</p>
+
+      <article class="day-block">
+        <h2>Понедельник <span>19 июл</span></h2>
+        <div class="meals-columns">
+          <div class="meal-col">
+            <h3>Завтрак</h3>
+            <p>Омлет с сыром и зеленью</p>
+            <div class="links"><span>Заменить</span><span>Refusal</span></div>
+          </div>
+          <div class="meal-col">
+            <h3>Обед</h3>
+            <p>Куриный суп с лапшой</p>
+            <div class="links"><span>Заменить</span><span>Refusal</span></div>
+          </div>
+          <div class="meal-col">
+            <h3>Ужин</h3>
+            <p>Запечённая курица с овощами</p>
+            <div class="links"><span>Заменить</span><span>Refusal</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="day-block">
+        <h2>Вторник <span>20 июл</span></h2>
+        <div class="meals-columns">
+          <div class="meal-col">
+            <h3>Завтрак</h3>
+            <p>Творожная запеканка</p>
+            <div class="links"><span>Заменить</span><span>Refusal</span></div>
+          </div>
+          <div class="meal-col empty">
+            <h3>Обед · пусто</h3>
+            <p>Пустой слот</p>
+            <div class="links"><span>Выбрать Recipe</span></div>
+          </div>
+          <div class="meal-col">
+            <h3>Ужин</h3>
+            <p>Гречка с тушёной говядиной</p>
+            <div class="links"><span>Заменить</span><span>Refusal</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="day-block">
+        <h2>Среда <span>21 июл</span></h2>
+        <div class="meals-columns">
+          <div class="meal-col">
+            <h3>Завтрак</h3>
+            <p>Овсянка с ягодами</p>
+            <div class="links"><span>Заменить</span><span>Refusal</span></div>
+          </div>
+          <div class="meal-col">
+            <h3>Обед</h3>
+            <p>Салат с курицей и авокадо</p>
+            <div class="links"><span>Заменить</span><span>Refusal</span></div>
+          </div>
+          <div class="meal-col">
+            <h3>Ужин</h3>
+            <p>Лапша wok с овощами</p>
+            <div class="links"><span>Заменить</span><span>Refusal</span></div>
+          </div>
+        </div>
+      </article>
+
+      <div class="snacks">
+        <h3>Snacks</h3>
+        <ul>
+          <li>Греческий йогурт</li>
+          <li>Яблоки</li>
+        </ul>
+      </div>
+
+      <div class="cta-bar">
+        <span style="font-size:13px;color:#525252">Checked match · без match-review в v1</span>
+        <button>Далее — План порций →</button>
+      </div>
+    </main>
+
+    <aside class="side-col">
+      <h2>Shopping list</h2>
+      <p class="label">черновик · peek</p>
+      <div class="side-item"><span>Куриное филе</span><span>800 г</span></div>
+      <div class="side-item"><span>Лапша яичная</span><span>300 г</span></div>
+      <div class="side-item"><span>Яйца</span><span>10 шт</span></div>
+      <div class="side-item"><span>Авокадо</span><span>2 шт</span></div>
+      <div class="copy-block">
+        <strong>Копирование</strong>
+        Список всегда copyable — даже если ссылка на Перекрёсток недоступна. Order — вне приложения.
+      </div>
+    </aside>
+  </div>
+</div>
+
+</body>
+</html>

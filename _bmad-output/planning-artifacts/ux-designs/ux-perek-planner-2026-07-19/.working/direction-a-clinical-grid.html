@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Direction A — Clinical Grid · perek-planner</title>
+<style>
+  /* ── Palette (documented) ──
+     #F8FAFC  page bg
+     #FFFFFF  surface
+     #E2E8F0  border
+     #64748B  muted text
+     #0F172A  primary text
+     #0F766E  accent (teal)
+     #CCFBF1  accent tint
+     #FEF3C7  warning bg
+     #92400E  warning text
+     #F1F5F9  empty slot bg
+  */
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: #F8FAFC; /* page bg */
+    color: #0F172A; /* primary text */
+    line-height: 1.4;
+    padding: 32px 40px 48px;
+  }
+
+  .rationale {
+    max-width: 1280px;
+    margin: 0 auto 28px;
+    padding: 16px 20px;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-left: 4px solid #0F766E;
+    font-size: 14px;
+    color: #475569;
+  }
+
+  .rationale strong {
+    display: block;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #0F766E;
+    margin-bottom: 6px;
+  }
+
+  .browser {
+    max-width: 1280px;
+    margin: 0 auto;
+    background: #FFFFFF;
+    border: 1px solid #CBD5E1;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08);
+  }
+
+  .browser-chrome {
+    background: #F1F5F9;
+    border-bottom: 1px solid #E2E8F0;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .dots { display: flex; gap: 6px; }
+  .dots span {
+    width: 11px; height: 11px; border-radius: 50%;
+    background: #CBD5E1;
+  }
+  .dots span:first-child { background: #FCA5A5; }
+  .dots span:nth-child(2) { background: #FCD34D; }
+  .dots span:nth-child(3) { background: #86EFAC; }
+
+  .url-bar {
+    flex: 1;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 12px;
+    color: #64748B;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  .app {
+    display: grid;
+    grid-template-columns: 1fr 260px;
+    min-height: 620px;
+  }
+
+  .main { padding: 0; }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    border-bottom: 1px solid #E2E8F0;
+    background: #FFFFFF;
+    font-size: 12px;
+  }
+
+  .brand {
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+
+  .store {
+    color: #64748B;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px;
+  }
+
+  .nav-steps {
+    display: flex;
+    gap: 4px;
+  }
+
+  .step {
+    padding: 4px 10px;
+    font-size: 11px;
+    border: 1px solid #E2E8F0;
+    color: #64748B;
+  }
+
+  .step.active {
+    background: #0F766E;
+    color: #FFFFFF;
+    border-color: #0F766E;
+    font-weight: 600;
+  }
+
+  .toolbar {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid #E2E8F0;
+  }
+
+  .toolbar h1 {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+  }
+
+  .meta {
+    font-size: 11px;
+    color: #64748B;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    margin-top: 4px;
+  }
+
+  .actions { display: flex; gap: 8px; }
+
+  .btn {
+    font-size: 12px;
+    padding: 7px 14px;
+    border: 1px solid #E2E8F0;
+    background: #FFFFFF;
+    color: #0F172A;
+    cursor: default;
+    font-family: inherit;
+  }
+
+  .btn-primary {
+    background: #0F766E;
+    color: #FFFFFF;
+    border-color: #0F766E;
+    font-weight: 600;
+  }
+
+  .grid-wrap { padding: 0 20px 20px; overflow-x: auto; }
+
+  table.menu-grid {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .menu-grid th {
+    text-align: left;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #64748B;
+    padding: 10px 8px;
+    border-bottom: 2px solid #0F172A;
+    font-weight: 600;
+  }
+
+  .menu-grid td {
+    border: 1px solid #E2E8F0;
+    vertical-align: top;
+    padding: 0;
+    width: 22%;
+  }
+
+  .menu-grid td.day-col {
+    width: 12%;
+    background: #F8FAFC;
+    padding: 10px 8px;
+    font-weight: 600;
+    font-size: 13px;
+  }
+
+  .slot {
+    padding: 10px 8px;
+    min-height: 72px;
+    position: relative;
+  }
+
+  .slot-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #94A3B8;
+    margin-bottom: 4px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  .recipe-name {
+    font-weight: 600;
+    font-size: 12px;
+    line-height: 1.3;
+    margin-bottom: 6px;
+  }
+
+  .slot-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .slot-actions a {
+    font-size: 10px;
+    color: #0F766E;
+    text-decoration: none;
+    border-bottom: 1px solid #99F6E4;
+  }
+
+  .slot-actions a.danger { color: #B45309; border-color: #FDE68A; }
+
+  .slot.empty {
+    background: #F1F5F9;
+    border: 1px dashed #CBD5E1;
+  }
+
+  .slot.empty .recipe-name {
+    color: #94A3B8;
+    font-weight: 500;
+    font-style: italic;
+  }
+
+  .snacks-row {
+    margin-top: 16px;
+    border: 1px solid #E2E8F0;
+    padding: 12px 14px;
+  }
+
+  .snacks-row h3 {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #64748B;
+    margin-bottom: 8px;
+  }
+
+  .snack-tags {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .tag {
+    font-size: 11px;
+    padding: 4px 8px;
+    border: 1px solid #E2E8F0;
+    background: #FFFFFF;
+  }
+
+  .sidebar {
+    border-left: 1px solid #E2E8F0;
+    background: #F8FAFC;
+    padding: 16px 14px;
+    font-size: 11px;
+  }
+
+  .sidebar h2 {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #64748B;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .peek-badge {
+    background: #E2E8F0;
+    color: #475569;
+    font-size: 9px;
+    padding: 2px 5px;
+    border-radius: 2px;
+  }
+
+  .list-item {
+    padding: 6px 0;
+    border-bottom: 1px solid #E2E8F0;
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .list-item span:last-child {
+    color: #64748B;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    white-space: nowrap;
+  }
+
+  .copy-hint {
+    margin-top: 12px;
+    padding: 8px;
+    background: #CCFBF1;
+    border: 1px solid #99F6E4;
+    font-size: 10px;
+    color: #115E59;
+  }
+
+  .footnote {
+    margin-top: 14px;
+    font-size: 10px;
+    color: #94A3B8;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+
+<div class="rationale">
+  <strong>Direction A — Clinical Grid</strong>
+  Табличная плотность как у внутреннего инструмента учёта: моноширинные метки, жёсткая сетка, минимум декора.
+  Акцент — холодный бирюзовый (#0F766E), не SaaS-фиолетовый. Подходит Sergey, который хочет быстро сканировать слоты и править без «дизайнерского» шума.
+</div>
+
+<div class="browser">
+  <div class="browser-chrome">
+    <div class="dots"><span></span><span></span><span></span></div>
+    <div class="url-bar">perek-planner.local/menu/edit · 3 дня · 2 чел.</div>
+  </div>
+
+  <div class="app">
+    <div class="main">
+      <div class="topbar">
+        <div>
+          <span class="brand">perek-planner</span>
+          <span class="store"> · Перекрёсток, д. Алабино, 92</span>
+        </div>
+        <div class="nav-steps">
+          <span class="step">Дни</span>
+          <span class="step active">Меню</span>
+          <span class="step">План порций</span>
+          <span class="step">Shopping list</span>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div>
+          <h1>Меню · 3 дня</h1>
+          <div class="meta">1 cook session · 3×2 порции · предложено из библиотеки</div>
+        </div>
+        <div class="actions">
+          <button class="btn">+ Snack</button>
+          <button class="btn btn-primary">Далее → План порций</button>
+        </div>
+      </div>
+
+      <div class="grid-wrap">
+        <table class="menu-grid">
+          <thead>
+            <tr>
+              <th>День</th>
+              <th>Завтрак</th>
+              <th>Обед</th>
+              <th>Ужин</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="day-col">Пн<br><span style="font-weight:400;font-size:10px;color:#64748B">19 июл</span></td>
+              <td>
+                <div class="slot">
+                  <div class="slot-label">slot · breakfast</div>
+                  <div class="recipe-name">Омлет с сыром и зеленью</div>
+                  <div class="slot-actions">
+                    <a href="#">Заменить</a>
+                    <a href="#" class="danger">Refusal</a>
+                  </div>
+                </div>
+              </td>
+              <td>
+                <div class="slot">
+                  <div class="slot-label">slot · lunch</div>
+                  <div class="recipe-name">Куриный суп с лапшой</div>
+                  <div class="slot-actions">
+                    <a href="#">Заменить</a>
+                    <a href="#" class="danger">Refusal</a>
+                  </div>
+                </div>
+              </td>
+              <td>
+                <div class="slot">
+                  <div class="slot-label">slot · dinner</div>
+                  <div class="recipe-name">Запечённая курица с овощами</div>
+                  <div class="slot-actions">
+                    <a href="#">Заменить</a>
+                    <a href="#" class="danger">Refusal</a>
+                  </div>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td class="day-col">Вт<br><span style="font-weight:400;font-size:10px;color:#64748B">20 июл</span></td>
+              <td>
+                <div class="slot">
+                  <div class="slot-label">slot · breakfast</div>
+                  <div class="recipe-name">Творожная запеканка</div>
+                  <div class="slot-actions">
+                    <a href="#">Заменить</a>
+                    <a href="#" class="danger">Refusal</a>
+                  </div>
+                </div>
+              </td>
+              <td>
+                <div class="slot empty">
+                  <div class="slot-label">slot · lunch · empty</div>
+                  <div class="recipe-name">Пустой слот</div>
+                  <div class="slot-actions">
+                    <a href="#">Выбрать Recipe</a>
+                  </div>
+                </div>
+              </td>
+              <td>
+                <div class="slot">
+                  <div class="slot-label">slot · dinner</div>
+                  <div class="recipe-name">Гречка с тушёной говядиной</div>
+                  <div class="slot-actions">
+                    <a href="#">Заменить</a>
+                    <a href="#" class="danger">Refusal</a>
+                  </div>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td class="day-col">Ср<br><span style="font-weight:400;font-size:10px;color:#64748B">21 июл</span></td>
+              <td>
+                <div class="slot">
+                  <div class="slot-label">slot · breakfast</div>
+                  <div class="recipe-name">Овсянка с ягодами</div>
+                  <div class="slot-actions">
+                    <a href="#">Заменить</a>
+                    <a href="#" class="danger">Refusal</a>
+                  </div>
+                </div>
+              </td>
+              <td>
+                <div class="slot">
+                  <div class="slot-label">slot · lunch</div>
+                  <div class="recipe-name">Салат с курицей и авокадо</div>
+                  <div class="slot-actions">
+                    <a href="#">Заменить</a>
+                    <a href="#" class="danger">Refusal</a>
+                  </div>
+                </div>
+              </td>
+              <td>
+                <div class="slot">
+                  <div class="slot-label">slot · dinner</div>
+                  <div class="recipe-name">Лапша wok с овощами</div>
+                  <div class="slot-actions">
+                    <a href="#">Заменить</a>
+                    <a href="#" class="danger">Refusal</a>
+                  </div>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="snacks-row">
+          <h3>Snacks · без готовки</h3>
+          <div class="snack-tags">
+            <span class="tag">Греческий йогурт</span>
+            <span class="tag">Яблоки</span>
+            <span class="tag">+ добавить Snack</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <aside class="sidebar">
+      <h2>Shopping list <span class="peek-badge">peek</span></h2>
+      <div class="list-item"><span>Куриное филе</span><span>800 г</span></div>
+      <div class="list-item"><span>Гречка</span><span>400 г</span></div>
+      <div class="list-item"><span>Яйца С0</span><span>10 шт</span></div>
+      <div class="list-item"><span>Творог 5%</span><span>400 г</span></div>
+      <div class="list-item"><span>… ещё 12 Product</span><span></span></div>
+      <div class="copy-hint">Список обновится после «План порций». Всегда можно скопировать — даже без ссылки на магазин.</div>
+      <p class="footnote">Checked match · без ручного подтверждения Product в v1</p>
+    </aside>
+  </div>
+</div>
+
+</body>
+</html>
