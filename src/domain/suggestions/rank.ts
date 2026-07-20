@@ -11,6 +11,8 @@ export type RankableCandidate = {
   /** Appeared on one of the user's most recent menus — demote for cross-menu variety. */
   recentlyUsed: boolean;
   rating: RecipeRatingValue | "none";
+  /** From invent persist; null/undefined = legacy/seed (treat as main-capable). */
+  plateRole?: "main" | "companion" | null;
 };
 
 /**

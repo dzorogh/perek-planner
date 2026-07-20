@@ -42,3 +42,12 @@
 - Stacked Radix dialogs (recipe panel + comment/create) — shared modal host if focus traps bite in practice.
 - Filled slot with `recipeId` but missing `recipeName` — empty cell without actions; harden when loader contracts change.
 - `continueToPortionsAction` name vs redirect to shopping-list — rename when next touching slot-actions API.
+
+## Deferred from: code review of project-context.md — Chunk 2 Domain (2026-07-20)
+
+- Parallel resuggest/replace races on same menu — serialize if it becomes a real issue.
+- Snack label colliding with ingredient name skips snack shopping line — dedupe policy product call.
+- `looksLikeNoCookSnack` keyword-only filter — expand heuristics when snack leakage shows up.
+- `menu/actions.ts` vs `*-actions.ts` naming — rename when next large menu-actions touch.
+- History load ignoring ratings query errors — surface soft warning if users report missing stars.
+- Create-skeleton `_userId` unused (relies on RPC/`auth.uid()`) — document or assert caller identity later.

@@ -13,15 +13,15 @@ const MAX_NOTES = 40;
 
 /**
  * Load operator constraints for AI prompts from Settings taste_preferences.
- * Refusal/dislike comments are written into the same table as bans.
+ * Fail-closed: null on query error (callers must abort invent/assign/snacks).
  */
 export async function loadTasteNotes(
   supabase: SupabaseClient,
   userId: string,
-): Promise<TasteNote[]> {
+): Promise<TasteNote[] | null> {
   const prefs = await loadTastePreferences(supabase, userId);
   if (!prefs) {
-    return [];
+    return null;
   }
 
   return prefs.slice(0, MAX_NOTES).map((pref) => ({

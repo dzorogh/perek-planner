@@ -175,8 +175,11 @@ export function pickCompanionCandidate(
       : candidates.filter((c) => c.recipeId !== mainRecipeId);
   if (pool.length === 0) return null;
 
-  const unused = pool.find((c) => !alreadyUsed.has(c.recipeId));
-  return (unused ?? pool[0])?.recipeId ?? null;
+  const companions = pool.filter((c) => c.plateRole === "companion");
+  const prefer = companions.length > 0 ? companions : pool;
+
+  const unused = prefer.find((c) => !alreadyUsed.has(c.recipeId));
+  return (unused ?? prefer[0])?.recipeId ?? null;
 }
 
 export function parsePlateKind(raw: unknown): PlateKind | null {

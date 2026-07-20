@@ -1,8 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { mealAllowsCompanion, type MealSlot } from "@/domain/menu/constants";
+import { passesFridgeKeep } from "@/domain/matching/eligibility";
 import { assignProposalsToSlots } from "@/domain/suggestions/assign";
 import { buildCandidates } from "@/domain/suggestions/candidates";
+import { SUGGESTIONS_RU } from "@/domain/suggestions/constants";
 import {
   SUGGESTION_FAIL_RU,
   SuggestionError,
@@ -34,6 +36,12 @@ import {
   OpenRouterError,
   type ChatCompletionsFn,
 } from "@/lib/openrouter/client";
+
+function resuggestFailMessage(err: unknown): string {
+  if (err instanceof SuggestionError) return err.message;
+  if (err instanceof OpenRouterError) return SUGGESTION_FAIL_RU.openrouter;
+  return SUGGESTION_FAIL_RU.openrouter;
+}
 
 export type ResuggestSlotResult =
   | { ok: true }
@@ -212,6 +220,9 @@ export async function resuggestSlotForUser(
   };
 
   const tasteNotes = await loadTasteNotes(supabase, userId);
+  if (!tasteNotes) {
+    return { ok: false, error: SUGGESTIONS_RU.tasteNotesFail };
+  }
 
   let proposals;
   try {
@@ -225,10 +236,7 @@ export async function resuggestSlotForUser(
       siblingNames,
     );
   } catch (err) {
-    if (err instanceof OpenRouterError || err instanceof SuggestionError) {
-      return { ok: false, error: SUGGESTION_FAIL_RU.openrouter };
-    }
-    return { ok: false, error: SUGGESTION_FAIL_RU.openrouter };
+    return { ok: false, error: resuggestFailMessage(err) };
   }
 
   if (proposals.length === 0) {
@@ -259,7 +267,10 @@ export async function resuggestSlotForUser(
     suppress,
   );
 
-  if (assignResult.assignedCount === 0) {
+  if (
+    assignResult.assignedCount === 0 ||
+    assignResult.failedSlots.length > 0
+  ) {
     return { ok: false, error: SUGGESTION_FAIL_RU.assign };
   }
 
@@ -316,19 +327,35 @@ async function resuggestCompanionOnly(
     }
   }
 
+  const { data: menu, error: menuError } = await supabase
+    .from("menus")
+    .select("day_count")
+    .eq("id", menuId)
+    .maybeSingle();
+  if (menuError || !menu?.day_count) {
+    return { ok: false, error: SUGGESTION_FAIL_RU.query };
+  }
+  const dayCount = menu.day_count;
+
   const exclude = new Set(
     [slot.recipe_id, slot.companion_recipe_id].filter(
       (id): id is string => typeof id === "string",
     ),
   );
+  const fridgeOk = (c: (typeof built.candidates)[number]) =>
+    passesFridgeKeep(c.fridgeKeepDays, dayCount);
   const sidePool = built.candidates.filter(
     (c) =>
       !exclude.has(c.recipeId) &&
       !looksLikeNoCookSnack(c.name) &&
-      looksLikeCompanionOnly(c.name),
+      fridgeOk(c) &&
+      (c.plateRole === "companion" || looksLikeCompanionOnly(c.name)),
   );
   const anyPool = built.candidates.filter(
-    (c) => !exclude.has(c.recipeId) && !looksLikeNoCookSnack(c.name),
+    (c) =>
+      !exclude.has(c.recipeId) &&
+      !looksLikeNoCookSnack(c.name) &&
+      fridgeOk(c),
   );
   const pool = sidePool.length > 0 ? sidePool : anyPool;
   const candidates = preferInventedCandidates(pool, inventedIds, 1);
@@ -345,6 +372,9 @@ async function resuggestCompanionOnly(
     meal,
   };
   const tasteNotes = await loadTasteNotes(supabase, userId);
+  if (!tasteNotes) {
+    return { ok: false, error: SUGGESTIONS_RU.tasteNotesFail };
+  }
 
   let companionId: string | null = null;
   try {
@@ -380,12 +410,15 @@ async function resuggestCompanionOnly(
   if (!suppress) {
     return { ok: false, error: SUGGESTION_FAIL_RU.query };
   }
-  if (suppress.refusedIds.has(companionId) || suppress.dislikedIds.has(companionId)) {
-    const alt = candidates.find(
-      (c) =>
-        !suppress.refusedIds.has(c.recipeId) &&
-        !suppress.dislikedIds.has(c.recipeId),
-    );
+  const isUsable = (id: string) => {
+    if (suppress.refusedIds.has(id) || suppress.dislikedIds.has(id)) {
+      return false;
+    }
+    const cand = candidates.find((c) => c.recipeId === id);
+    return cand != null && passesFridgeKeep(cand.fridgeKeepDays, dayCount);
+  };
+  if (!isUsable(companionId)) {
+    const alt = candidates.find((c) => isUsable(c.recipeId));
     if (!alt) {
       return { ok: false, error: SUGGESTION_FAIL_RU.assign };
     }
@@ -559,11 +592,26 @@ export async function refuseAndReplaceRecipeAcrossMenu(
     comment,
   });
 
-  return replaceRecipeIdAcrossMenu(supabase, userId, menuId, refusedRecipeId, {
-    chat: options.chat,
-    now: options.now,
-    forceSuppressIds: [refusedRecipeId],
-  });
+  const replaced = await replaceRecipeIdAcrossMenu(
+    supabase,
+    userId,
+    menuId,
+    refusedRecipeId,
+    {
+      chat: options.chat,
+      now: options.now,
+      forceSuppressIds: [refusedRecipeId],
+    },
+  );
+  if (!replaced.ok) {
+    await supabase
+      .from("recipe_refusals")
+      .delete()
+      .eq("user_id", userId)
+      .eq("recipe_id", refusedRecipeId);
+    return replaced;
+  }
+  return replaced;
 }
 
 async function replaceRecipeIdAcrossMenu(
@@ -682,6 +730,9 @@ async function replaceRecipeIdAcrossMenu(
       meal: row.meal as MealSlot,
     }));
     const tasteNotes = await loadTasteNotes(supabase, userId);
+    if (!tasteNotes) {
+      return { ok: false, error: SUGGESTIONS_RU.tasteNotesFail };
+    }
     try {
       const llm = await proposeAssignmentsViaOpenRouter(
         promptSlots,
@@ -699,8 +750,9 @@ async function replaceRecipeIdAcrossMenu(
         chosenPlateKind = first.plateKind ?? chosenPlateKind;
       }
     } catch (err) {
+      // OpenRouter/Suggestion parse issues → keep deterministic sharedId below.
       if (!(err instanceof OpenRouterError || err instanceof SuggestionError)) {
-        return { ok: false, error: SUGGESTION_FAIL_RU.openrouter };
+        return { ok: false, error: resuggestFailMessage(err) };
       }
     }
 
@@ -729,7 +781,10 @@ async function replaceRecipeIdAcrossMenu(
       suppress,
     );
 
-    if (assignResult.assignedCount === 0) {
+    if (
+      assignResult.assignedCount === 0 ||
+      assignResult.failedSlots.length > 0
+    ) {
       return { ok: false, error: SUGGESTION_FAIL_RU.assign };
     }
 

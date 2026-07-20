@@ -43,7 +43,7 @@ export async function buildCandidates(
 
   const { data: recipes, error } = await supabase
     .from("recipes")
-    .select("id, name, fridge_keep_days")
+    .select("id, name, fridge_keep_days, plate_role")
     .order("name", { ascending: true });
 
   if (error || !recipes) {
@@ -71,6 +71,10 @@ export async function buildCandidates(
     }
 
     const rating = suppress.ratings.get(recipe.id) ?? "none";
+    const plateRole =
+      recipe.plate_role === "main" || recipe.plate_role === "companion"
+        ? recipe.plate_role
+        : null;
     eligible.push({
       recipeId: recipe.id,
       name: recipe.name,
@@ -78,6 +82,7 @@ export async function buildCandidates(
       longIdle: isLongIdle(lastAssigned.get(recipe.id), now),
       recentlyUsed: recentIds.has(recipe.id),
       rating,
+      plateRole,
     });
   }
 

@@ -30,12 +30,18 @@ export async function assignProposalsToSlots(
   const failedSlots: string[] = [];
   const selectedFridge: number[] = [];
 
-  const { data: menu } = await supabase
+  const { data: menu, error: menuError } = await supabase
     .from("menus")
     .select("day_count")
     .eq("id", menuId)
     .maybeSingle();
-  const dayCount = menu?.day_count ?? 4;
+  if (menuError || !menu?.day_count) {
+    return {
+      assignedCount: 0,
+      failedSlots: proposals.map((p) => p.slotId),
+    };
+  }
+  const dayCount = menu.day_count;
 
   for (const proposal of proposals) {
     const tryOrder = uniquePreserve([

@@ -216,6 +216,15 @@ export async function buildShoppingList(
     .maybeSingle();
 
   let listId = existing?.id as string | undefined;
+  type PreviousLine = {
+    ingredient_name: string;
+    line_kind: string;
+    quantity_amount: number | string | null;
+    quantity_unit: string | null;
+    sort_order: number;
+  };
+  let previousLines: PreviousLine[] | null = null;
+
   if (!listId) {
     const { data: created, error: createError } = await supabase
       .from("shopping_lists")
@@ -231,6 +240,16 @@ export async function buildShoppingList(
       .from("shopping_lists")
       .update({ updated_at: new Date().toISOString() })
       .eq("id", listId);
+
+    const { data: prior } = await supabase
+      .from("shopping_list_lines")
+      .select(
+        "ingredient_name, line_kind, quantity_amount, quantity_unit, sort_order",
+      )
+      .eq("shopping_list_id", listId)
+      .order("sort_order", { ascending: true });
+    previousLines = (prior as PreviousLine[] | null) ?? [];
+
     await supabase
       .from("shopping_list_lines")
       .delete()
@@ -251,6 +270,18 @@ export async function buildShoppingList(
         })),
       );
     if (linesError) {
+      if (previousLines && previousLines.length > 0) {
+        await supabase.from("shopping_list_lines").insert(
+          previousLines.map((l) => ({
+            shopping_list_id: listId,
+            ingredient_name: l.ingredient_name,
+            line_kind: l.line_kind,
+            quantity_amount: l.quantity_amount,
+            quantity_unit: l.quantity_unit,
+            sort_order: l.sort_order,
+          })),
+        );
+      }
       return { ok: false, error: "Не удалось сохранить строки списка." };
     }
   }

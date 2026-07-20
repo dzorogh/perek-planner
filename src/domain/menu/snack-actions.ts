@@ -189,12 +189,25 @@ export async function suggestSnackForDayAction(
 ): Promise<SnackActionState> {
   const menuId = String(formData.get("menuId") ?? "");
   const dayIndex = Number(formData.get("dayIndex"));
-  if (!menuId || !Number.isInteger(dayIndex) || dayIndex < 1 || dayIndex > 4) {
+  if (!menuId || !Number.isInteger(dayIndex) || dayIndex < 1) {
     return { ok: false, error: "Некорректный день." };
   }
 
   const { supabase, user, error } = await requireUser();
   if (!user) return { ok: false, error: error! };
+
+  const { data: menu, error: menuError } = await supabase
+    .from("menus")
+    .select("day_count")
+    .eq("id", menuId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (menuError || !menu) {
+    return { ok: false, error: "Меню не найдено." };
+  }
+  if (dayIndex > menu.day_count) {
+    return { ok: false, error: "Некорректный день." };
+  }
 
   const { data: existing } = await supabase
     .from("menu_snacks")

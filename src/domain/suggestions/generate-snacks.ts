@@ -5,7 +5,10 @@ import {
   normalizeFeedbackComment,
 } from "@/domain/history/constants";
 import { inventPriceToKopecks } from "@/domain/suggestions/invent-recipes";
-import { RECENT_SNACK_MENUS_COOLDOWN } from "@/domain/suggestions/constants";
+import {
+  RECENT_SNACK_MENUS_COOLDOWN,
+  SUGGESTIONS_RU,
+} from "@/domain/suggestions/constants";
 import { loadRecentSnackLabels } from "@/domain/suggestions/history";
 import {
   formatSnackLabel,
@@ -270,6 +273,9 @@ export async function generateSnacksForMenu(
   }
 
   const tasteNotes = await loadTasteNotes(supabase, userId);
+  if (!tasteNotes) {
+    return { ok: false, error: SUGGESTIONS_RU.tasteNotesFail };
+  }
   const chat = options.chat ?? openRouterChatCompletions;
 
   let drafts: SnackDraft[] = [];
@@ -381,6 +387,9 @@ export async function resuggestSnackForMenu(
   }
 
   const tasteNotes = await loadTasteNotes(supabase, userId);
+  if (!tasteNotes) {
+    return { ok: false, error: SUGGESTIONS_RU.tasteNotesFail };
+  }
   const chat = options.chat ?? openRouterChatCompletions;
 
   let next: SnackDraft | null = null;

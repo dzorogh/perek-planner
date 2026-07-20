@@ -205,90 +205,102 @@ async function fillCookableSlots(
     peoplePerMeal: options.peopleCount,
   });
   if (!invented.ok) {
-    if (invented.reason === "openrouter") {
-      throw new SuggestionError("openrouter", SUGGESTION_FAIL_RU.openrouter);
-    }
     throw new SuggestionError(
-      "zero_eligible",
-      SUGGESTION_FAIL_RU.zero_eligible,
+      invented.reason,
+      SUGGESTION_FAIL_RU[invented.reason],
     );
   }
   for (const id of invented.inventedIds) inventedIds.add(id);
 
-  built = await buildCandidates(supabase, userId, menuId, now);
-  if (!built.ok) {
-    throw new SuggestionError("query", SUGGESTION_FAIL_RU.query);
-  }
+  const cleanupInvented = async () => {
+    if (inventedIds.size === 0) return;
+    await supabase.from("recipes").delete().in("id", [...inventedIds]);
+  };
 
-  if (built.candidates.length === 0) {
-    throw new SuggestionError(
-      "zero_eligible",
-      SUGGESTION_FAIL_RU.zero_eligible,
+  try {
+    built = await buildCandidates(supabase, userId, menuId, now);
+    if (!built.ok) {
+      throw new SuggestionError("query", SUGGESTION_FAIL_RU.query);
+    }
+
+    if (built.candidates.length === 0) {
+      throw new SuggestionError(
+        "zero_eligible",
+        SUGGESTION_FAIL_RU.zero_eligible,
+      );
+    }
+
+    // Prefer this menu's inventions so consecutive menus don't reshuffle the same stack.
+    // Drop snack-like library leftovers — перекусы live in menu_snacks, not cookable slots.
+    const cookable = built.candidates.filter(
+      (c) => !looksLikeNoCookSnack(c.name),
     );
-  }
+    const assignPool = preferInventedCandidates(
+      cookable.length > 0 ? cookable : built.candidates,
+      inventedIds,
+      candidateDeficitThreshold(slotCount),
+    );
 
-  // Prefer this menu's inventions so consecutive menus don't reshuffle the same stack.
-  // Drop snack-like library leftovers — перекусы live in menu_snacks, not cookable slots.
-  const cookable = built.candidates.filter((c) => !looksLikeNoCookSnack(c.name));
-  const assignPool = preferInventedCandidates(
-    cookable.length > 0 ? cookable : built.candidates,
-    inventedIds,
-    candidateDeficitThreshold(slotCount),
-  );
+    const { data: slotRows, error: slotsError } = await supabase
+      .from("menu_slots")
+      .select("id, day_index, meal")
+      .eq("menu_id", menuId)
+      .order("day_index", { ascending: true });
 
-  const { data: slotRows, error: slotsError } = await supabase
-    .from("menu_slots")
-    .select("id, day_index, meal")
-    .eq("menu_id", menuId)
-    .order("day_index", { ascending: true });
-
-  if (slotsError || !slotRows?.length) {
-    throw new SuggestionError("query", SUGGESTION_FAIL_RU.query);
-  }
-
-  if (slotRows.length !== slotCount) {
-    throw new SuggestionError("query", SUGGESTION_FAIL_RU.query);
-  }
-
-  const slots: SlotPrompt[] = [];
-  for (const row of slotRows) {
-    if (!isMealSlot(row.meal)) {
+    if (slotsError || !slotRows?.length) {
       throw new SuggestionError("query", SUGGESTION_FAIL_RU.query);
     }
-    if (row.day_index < 1 || row.day_index > dayCount) {
+
+    if (slotRows.length !== slotCount) {
       throw new SuggestionError("query", SUGGESTION_FAIL_RU.query);
     }
-    slots.push({
-      slotId: row.id,
-      dayIndex: row.day_index,
-      meal: row.meal,
-    });
-  }
 
-  // Create-flow: deterministic batch assign (LLM assign kept for resuggest only).
-  let proposals = deterministicAssignments(slots, assignPool);
-  proposals = enforceDayVariety(slots, proposals, assignPool);
-  proposals = normalizePlateAssignments(slots, proposals, assignPool);
+    const slots: SlotPrompt[] = [];
+    for (const row of slotRows) {
+      if (!isMealSlot(row.meal)) {
+        throw new SuggestionError("query", SUGGESTION_FAIL_RU.query);
+      }
+      if (row.day_index < 1 || row.day_index > dayCount) {
+        throw new SuggestionError("query", SUGGESTION_FAIL_RU.query);
+      }
+      slots.push({
+        slotId: row.id,
+        dayIndex: row.day_index,
+        meal: row.meal,
+      });
+    }
 
-  if (proposals.length === 0) {
-    throw new SuggestionError("parse", SUGGESTION_FAIL_RU.parse);
-  }
+    // Create-flow: deterministic batch assign (LLM assign kept for resuggest only).
+    let proposals = deterministicAssignments(slots, assignPool);
+    proposals = enforceDayVariety(slots, proposals, assignPool);
+    proposals = normalizePlateAssignments(slots, proposals, assignPool);
 
-  const suppress = await loadSuppressSets(supabase, userId);
-  if (!suppress) {
-    throw new SuggestionError("query", SUGGESTION_FAIL_RU.query);
-  }
+    if (proposals.length === 0) {
+      throw new SuggestionError("parse", SUGGESTION_FAIL_RU.parse);
+    }
 
-  const assignResult = await assignProposalsToSlots(
-    supabase,
-    menuId,
-    proposals,
-    assignPool,
-    suppress,
-  );
+    const suppress = await loadSuppressSets(supabase, userId);
+    if (!suppress) {
+      throw new SuggestionError("query", SUGGESTION_FAIL_RU.query);
+    }
 
-  if (assignResult.assignedCount === 0) {
-    throw new SuggestionError("assign", SUGGESTION_FAIL_RU.assign);
+    const assignResult = await assignProposalsToSlots(
+      supabase,
+      menuId,
+      proposals,
+      assignPool,
+      suppress,
+    );
+
+    if (
+      assignResult.assignedCount === 0 ||
+      assignResult.failedSlots.length > 0
+    ) {
+      throw new SuggestionError("assign", SUGGESTION_FAIL_RU.assign);
+    }
+  } catch (err) {
+    await cleanupInvented();
+    throw err;
   }
 }
 

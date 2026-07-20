@@ -6,6 +6,7 @@ import type { SuggestionCandidate } from "@/domain/suggestions/candidates";
 import {
   normalizePlateAssignments,
   parsePlateKind,
+  pickCompanionCandidate,
   type PlateAssignment,
 } from "@/domain/suggestions/plate-complete";
 import {
@@ -213,20 +214,39 @@ function extractJsonObject(text: string): string {
 
 /**
  * Deterministic batch fill when LLM returns nothing usable but candidates exist.
- * Leaves companions empty — plate pairing is AI-owned; do not invent sides in code.
+ * Pairs lunch/dinner with invent companions (plate_role) when available.
  */
 export function deterministicAssignments(
   slots: SlotPrompt[],
   candidates: SuggestionCandidate[],
 ): ProposedAssignment[] {
-  const base = assignWithBatchVariety(slots, candidates).map((p) => ({
-    ...p,
-    companionRecipeId: null as string | null,
-    plateKind: mealAllowsCompanion(
-      slots.find((s) => s.slotId === p.slotId)?.meal ?? "breakfast",
-    )
-      ? ("complete" as const)
-      : null,
-  }));
+  const mainPool = candidates.filter((c) => c.plateRole !== "companion");
+  const assignPool = mainPool.length > 0 ? mainPool : candidates;
+  const usedCompanions = new Set<string>();
+
+  const base = assignWithBatchVariety(slots, assignPool).map((p) => {
+    const meal =
+      slots.find((s) => s.slotId === p.slotId)?.meal ?? "breakfast";
+    if (!mealAllowsCompanion(meal)) {
+      return {
+        ...p,
+        companionRecipeId: null as string | null,
+        plateKind: null,
+      };
+    }
+    const companionId = pickCompanionCandidate(
+      candidates,
+      p.recipeId,
+      usedCompanions,
+    );
+    if (companionId) usedCompanions.add(companionId);
+    return {
+      ...p,
+      companionRecipeId: companionId,
+      plateKind: companionId
+        ? ("needs_companion" as const)
+        : ("complete" as const),
+    };
+  });
   return normalizePlateAssignments(slots, base, candidates);
 }

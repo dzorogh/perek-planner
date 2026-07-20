@@ -5,6 +5,7 @@ export type SuggestionFailReason =
   | "openrouter"
   | "zero_eligible"
   | "parse"
+  | "persist"
   | "assign"
   | "query";
 
@@ -25,6 +26,7 @@ export const SUGGESTION_FAIL_RU: Record<SuggestionFailReason, string> = {
   openrouter: SUGGESTIONS_RU.openRouterFail,
   zero_eligible: SUGGESTIONS_RU.zeroEligible,
   parse: SUGGESTIONS_RU.parseFail,
+  persist: SUGGESTIONS_RU.persistFail,
   assign: SUGGESTIONS_RU.assignFail,
   query: "Не удалось подготовить кандидатов для меню. Попробуйте снова.",
 };

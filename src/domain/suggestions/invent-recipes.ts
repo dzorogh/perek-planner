@@ -60,7 +60,7 @@ export type InventRecipeDraft = {
   bodyText: string;
   fridgeKeepDays: number;
   ingredients: InventIngredientDraft[];
-  /** Prompt-only role; not persisted on recipes. */
+  /** Persisted on recipes.plate_role for create/resuggest pairing. */
   plateRole: InventPlateRole;
   /** Estimated cost per 1 adult serving in kopecks; omit when uncertain. */
   priceCentsPerServing: number | null;
@@ -167,7 +167,14 @@ export async function inventAndPersistRecipes(
   }
 
   const userId = options.userId ?? menu.user_id;
-  const tasteNotes = userId ? await loadTasteNotes(supabase, userId) : [];
+  let tasteNotes: TasteNote[] = [];
+  if (userId) {
+    const loaded = await loadTasteNotes(supabase, userId);
+    if (!loaded) {
+      return { ok: false, reason: "query" };
+    }
+    tasteNotes = loaded;
+  }
   const avoidNames = options.avoidNames ?? [];
   const exactAvoidNames = options.exactAvoidNames ?? [];
   const peopleFromMenu =
@@ -229,20 +236,19 @@ export async function inventAndPersistRecipes(
     return { ok: false, reason: "parse" };
   }
 
-  const persisted = await Promise.all(
-    drafts.map((draft) => persistInventedRecipe(supabase, draft)),
-  );
-
   const inventedIds: string[] = [];
   const eligibleIds: string[] = [];
 
   for (let i = 0; i < drafts.length; i += 1) {
-    const row = persisted[i];
-    if (!row?.ok) {
+    const draft = drafts[i]!;
+    const row = await persistInventedRecipe(supabase, draft);
+    if (!row.ok) {
+      if (inventedIds.length > 0) {
+        await supabase.from("recipes").delete().in("id", inventedIds);
+      }
       return { ok: false, reason: "persist" };
     }
     inventedIds.push(row.recipeId);
-    const draft = drafts[i]!;
     if (passesFridgeKeep(draft.fridgeKeepDays, menu.day_count)) {
       eligibleIds.push(row.recipeId);
     }
@@ -544,6 +550,7 @@ async function persistInventedRecipe(
       name: draft.name,
       body_text: draft.bodyText,
       fridge_keep_days: draft.fridgeKeepDays,
+      plate_role: draft.plateRole,
       price_cents_per_serving: draft.priceCentsPerServing,
       calories_kcal_per_serving: draft.caloriesKcalPerServing,
       protein_g_per_serving: draft.proteinGPerServing,
