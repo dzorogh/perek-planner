@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Direction D — Night Kitchen · Keplo</title>
+<style>
+  /* ── Palette (documented) ──
+     #141820  page / app bg (night)
+     #1C2230  elevated surface
+     #252D3D  card / slot bg
+     #3D4A5C  borders
+     #8B95A8  muted text
+     #E8ECF1  primary text on dark
+     #F59E0B  warm amber accent (task light)
+     #FBBF24  amber highlight
+     #78350F  stale warning dark
+     #422006  stale warning bg
+     #FDE68A  stale warning text
+  */
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: #0D1017;
+    color: #E8ECF1;
+    line-height: 1.5;
+    padding: 32px 40px 48px;
+  }
+
+  .rationale {
+    max-width: 1240px;
+    margin: 0 auto 28px;
+    padding: 18px 22px;
+    background: #1C2230;
+    border: 1px solid #3D4A5C;
+    border-left: 4px solid #F59E0B;
+    border-radius: 8px;
+    font-size: 14px;
+    color: #8B95A8;
+  }
+
+  .rationale strong {
+    display: block;
+    font-size: 13px;
+    color: #FBBF24;
+    margin-bottom: 8px;
+    letter-spacing: 0.02em;
+  }
+
+  .browser {
+    max-width: 1240px;
+    margin: 0 auto;
+    background: #141820;
+    border: 1px solid #3D4A5C;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 0 80px rgba(245, 158, 11, 0.06), 0 24px 48px rgba(0,0,0,0.5);
+  }
+
+  .browser-chrome {
+    background: #1C2230;
+    border-bottom: 1px solid #3D4A5C;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .dots { display: flex; gap: 6px; }
+  .dots span {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #3D4A5C;
+  }
+
+  .url-bar {
+    flex: 1;
+    background: #252D3D;
+    border: 1px solid #3D4A5C;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 12px;
+    color: #8B95A8;
+  }
+
+  .app {
+    min-height: 640px;
+  }
+
+  .top {
+    padding: 16px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #3D4A5C;
+    background: linear-gradient(180deg, #1C2230 0%, #141820 100%);
+  }
+
+  .brand-block h1 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #E8ECF1;
+  }
+
+  .brand-block p {
+    font-size: 12px;
+    color: #8B95A8;
+    margin-top: 2px;
+  }
+
+  .time-badge {
+    font-size: 11px;
+    padding: 4px 10px;
+    background: #252D3D;
+    border: 1px solid #3D4A5C;
+    border-radius: 999px;
+    color: #FBBF24;
+  }
+
+  .stale-chip {
+    margin: 14px 24px 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: #422006;
+    border: 1px solid #78350F;
+    border-radius: 6px;
+    font-size: 12px;
+    color: #FDE68A;
+  }
+
+  .stale-dot {
+    width: 7px; height: 7px;
+    background: #F59E0B;
+    border-radius: 50%;
+    box-shadow: 0 0 8px #F59E0B;
+  }
+
+  .hero {
+    padding: 20px 24px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+
+  .hero h2 {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: #E8ECF1;
+  }
+
+  .hero .sub {
+    font-size: 13px;
+    color: #8B95A8;
+    margin-top: 6px;
+  }
+
+  .nav-chips {
+    display: flex;
+    gap: 6px;
+  }
+
+  .nav-chip {
+    font-size: 11px;
+    padding: 5px 10px;
+    border-radius: 4px;
+    color: #8B95A8;
+    border: 1px solid #3D4A5C;
+  }
+
+  .nav-chip.on {
+    background: #F59E0B;
+    color: #141820;
+    border-color: #F59E0B;
+    font-weight: 700;
+  }
+
+  .board {
+    display: grid;
+    grid-template-columns: 1fr 240px;
+    gap: 0;
+    padding: 0 24px 24px;
+  }
+
+  .slots-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+
+  .day-panel {
+    background: #1C2230;
+    border: 1px solid #3D4A5C;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .day-panel header {
+    padding: 10px 14px;
+    background: #252D3D;
+    font-size: 13px;
+    font-weight: 600;
+    color: #FBBF24;
+    border-bottom: 1px solid #3D4A5C;
+  }
+
+  .day-panel header span {
+    color: #8B95A8;
+    font-weight: 400;
+    font-size: 11px;
+    margin-left: 6px;
+  }
+
+  .slot-row {
+    padding: 10px 14px;
+    border-bottom: 1px solid #252D3D;
+  }
+
+  .slot-row:last-child { border-bottom: none; }
+
+  .slot-meal {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #8B95A8;
+    margin-bottom: 4px;
+  }
+
+  .slot-recipe {
+    font-size: 13px;
+    font-weight: 500;
+    color: #E8ECF1;
+    margin-bottom: 8px;
+    line-height: 1.35;
+  }
+
+  .slot-btns {
+    display: flex;
+    gap: 10px;
+  }
+
+  .slot-btns span {
+    font-size: 11px;
+    color: #F59E0B;
+    cursor: default;
+  }
+
+  .slot-btns span.dim { color: #5C677A; }
+
+  .slot-row.empty {
+    background: #252D3D;
+    border-left: 3px solid #3D4A5C;
+  }
+
+  .slot-row.empty .slot-recipe {
+    color: #5C677A;
+    font-style: italic;
+  }
+
+  .snacks-strip {
+    grid-column: 1 / -1;
+    margin-top: 4px;
+    padding: 12px 14px;
+    background: #1C2230;
+    border: 1px dashed #3D4A5C;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .snacks-strip label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #8B95A8;
+    white-space: nowrap;
+  }
+
+  .snack-pills {
+    display: flex;
+    gap: 8px;
+  }
+
+  .snack-pill {
+    font-size: 12px;
+    padding: 4px 10px;
+    background: #252D3D;
+    border-radius: 4px;
+    color: #E8ECF1;
+  }
+
+  .side-peek {
+    margin-left: 16px;
+    background: #1C2230;
+    border: 1px solid #3D4A5C;
+    border-radius: 8px;
+    padding: 14px;
+    align-self: start;
+  }
+
+  .side-peek h3 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #FBBF24;
+    margin-bottom: 12px;
+  }
+
+  .peek-line {
+    font-size: 12px;
+    padding: 6px 0;
+    border-bottom: 1px solid #252D3D;
+    color: #8B95A8;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .copy-btn {
+    margin-top: 14px;
+    width: 100%;
+    padding: 10px;
+    background: transparent;
+    border: 1px solid #F59E0B;
+    color: #FBBF24;
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: inherit;
+    cursor: default;
+  }
+
+  .footer-bar {
+    padding: 14px 24px;
+    border-top: 1px solid #3D4A5C;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #1C2230;
+  }
+
+  .footer-bar p {
+    font-size: 11px;
+    color: #5C677A;
+  }
+
+  .footer-bar button {
+    padding: 10px 20px;
+    background: #F59E0B;
+    color: #141820;
+    border: none;
+    border-radius: 6px;
+    font-weight: 700;
+    font-size: 13px;
+    font-family: inherit;
+    cursor: default;
+  }
+</style>
+</head>
+<body>
+
+<div class="rationale">
+  <strong>Direction D — Night Kitchen</strong>
+  Единственное направление с тёмной темой по замыслу: вечерний сценарий UJ-1 (дети спят, планируешь batch-cook).
+  Тёплый янтарный акцент (#F59E0B) как свет над столом; slate-фон (#141820), компактные панели по дням, stale chip светится, не кричит.
+</div>
+
+<div class="browser">
+  <div class="browser-chrome">
+    <div class="dots"><span></span><span></span><span></span></div>
+    <div class="url-bar">keplo.local · Меню · правки · 22:47</div>
+  </div>
+
+  <div class="app">
+    <div class="top">
+      <div class="brand-block">
+        <h1>Keplo</h1>
+        <p>Магазин · д. Алабино, 92 · 2 чел. · 1 cook session</p>
+      </div>
+      <span class="time-badge">вечерний режим</span>
+    </div>
+
+    <div class="stale-chip">
+      <span class="stale-dot"></span>
+      Stale catalog — план по последнему каталогу, не свежий sync
+    </div>
+
+    <div class="hero">
+      <div>
+        <h2>Меню · 3 дня</h2>
+        <p class="sub">Предложения готовы. Правь слоты, Refusal до готовки, пустые слоты — ок.</p>
+      </div>
+      <div class="nav-chips">
+        <span class="nav-chip">Дни</span>
+        <span class="nav-chip on">Меню</span>
+        <span class="nav-chip">План порций</span>
+        <span class="nav-chip">Shopping list</span>
+      </div>
+    </div>
+
+    <div class="board">
+      <div>
+        <div class="slots-grid">
+          <div class="day-panel">
+            <header>Пн <span>19 июл</span></header>
+            <div class="slot-row">
+              <div class="slot-meal">Завтрак</div>
+              <div class="slot-recipe">Омлет с сыром и зеленью</div>
+              <div class="slot-btns"><span>Заменить</span><span class="dim">Refusal</span></div>
+            </div>
+            <div class="slot-row">
+              <div class="slot-meal">Обед</div>
+              <div class="slot-recipe">Куриный суп с лапшой</div>
+              <div class="slot-btns"><span>Заменить</span><span class="dim">Refusal</span></div>
+            </div>
+            <div class="slot-row">
+              <div class="slot-meal">Ужин</div>
+              <div class="slot-recipe">Запечённая курица с овощами</div>
+              <div class="slot-btns"><span>Заменить</span><span class="dim">Refusal</span></div>
+            </div>
+          </div>
+
+          <div class="day-panel">
+            <header>Вт <span>20 июл</span></header>
+            <div class="slot-row">
+              <div class="slot-meal">Завтрак</div>
+              <div class="slot-recipe">Творожная запеканка</div>
+              <div class="slot-btns"><span>Заменить</span><span class="dim">Refusal</span></div>
+            </div>
+            <div class="slot-row empty">
+              <div class="slot-meal">Обед · empty</div>
+              <div class="slot-recipe">Пустой слот</div>
+              <div class="slot-btns"><span>+ Recipe</span></div>
+            </div>
+            <div class="slot-row">
+              <div class="slot-meal">Ужин</div>
+              <div class="slot-recipe">Гречка с тушёной говядиной</div>
+              <div class="slot-btns"><span>Заменить</span><span class="dim">Refusal</span></div>
+            </div>
+          </div>
+
+          <div class="day-panel">
+            <header>Ср <span>21 июл</span></header>
+            <div class="slot-row">
+              <div class="slot-meal">Завтрак</div>
+              <div class="slot-recipe">Овсянка с ягодами</div>
+              <div class="slot-btns"><span>Заменить</span><span class="dim">Refusal</span></div>
+            </div>
+            <div class="slot-row">
+              <div class="slot-meal">Обед</div>
+              <div class="slot-recipe">Салат с курицей и авокадо</div>
+              <div class="slot-btns"><span>Заменить</span><span class="dim">Refusal</span></div>
+            </div>
+            <div class="slot-row">
+              <div class="slot-meal">Ужин</div>
+              <div class="slot-recipe">Лапша wok с овощами</div>
+              <div class="slot-btns"><span>Заменить</span><span class="dim">Refusal</span></div>
+            </div>
+          </div>
+
+          <div class="snacks-strip">
+            <label>Snacks</label>
+            <div class="snack-pills">
+              <span class="snack-pill">Греческий йогурт</span>
+              <span class="snack-pill">Яблоки</span>
+              <span class="snack-pill" style="color:#F59E0B">+</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="side-peek">
+        <h3>Shopping list · peek</h3>
+        <div class="peek-line"><span>Курица</span><span>800 г</span></div>
+        <div class="peek-line"><span>Гречка</span><span>400 г</span></div>
+        <div class="peek-line"><span>Яйца</span><span>10</span></div>
+        <div class="peek-line"><span>… +14 Product</span><span></span></div>
+        <button class="copy-btn">Скопировать список</button>
+      </aside>
+    </div>
+
+    <div class="footer-bar">
+      <p>Checked match · без match-review · Order вне приложения</p>
+      <button>Далее → План порций</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

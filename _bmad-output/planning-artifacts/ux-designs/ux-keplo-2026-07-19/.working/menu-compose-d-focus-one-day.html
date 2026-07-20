@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>D · Фокус на одном дне — Keplo</title>
+<style>
+  /*
+    Soft Workshop / Lavender Workshop
+    bg #EEF2FF · surface #FFFFFF · fg #1E293B · muted #64748B
+    primary #4338CA · accent #312E81 · border #E0E7FF
+    warning #FEF9C3 / #854D0E / #FDE047
+  */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #EEF2FF;
+    color: #1E293B;
+    line-height: 1.45;
+    padding: 28px 32px 56px;
+  }
+  .rationale {
+    max-width: 1040px;
+    margin: 0 auto 20px;
+    font-size: 14px;
+    color: #64748B;
+  }
+  .rationale strong { color: #312E81; font-weight: 600; }
+  .browser {
+    max-width: 1040px;
+    margin: 0 auto;
+    background: #FFFFFF;
+    border: 1px solid #E0E7FF;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 20px 48px rgba(49, 46, 129, 0.1);
+  }
+  .browser-chrome {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 14px;
+    background: linear-gradient(180deg, #F8FAFC, #EEF2FF);
+    border-bottom: 1px solid #E0E7FF;
+  }
+  .dots { display: flex; gap: 6px; }
+  .dots i { width: 10px; height: 10px; border-radius: 50%; display: block; }
+  .dots i:nth-child(1) { background: #FCA5A5; }
+  .dots i:nth-child(2) { background: #FDE047; }
+  .dots i:nth-child(3) { background: #86EFAC; }
+  .url {
+    flex: 1; font-size: 12px; color: #64748B;
+    background: #FFFFFF; border: 1px solid #E0E7FF;
+    border-radius: 999px; padding: 6px 12px;
+  }
+  .app-header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 20px; padding: 14px 28px;
+    border-bottom: 1px solid #E0E7FF;
+  }
+  .brand { font-size: 17px; font-weight: 700; color: #312E81; letter-spacing: -0.03em; }
+  .brand span { color: #4338CA; font-weight: 600; }
+  .header-meta { font-size: 13px; color: #64748B; margin-top: 2px; }
+  .pill-nav {
+    display: flex; gap: 4px;
+    background: #EEF2FF; padding: 4px; border-radius: 999px;
+  }
+  .pill {
+    padding: 6px 14px; font-size: 13px; border-radius: 999px; color: #64748B;
+  }
+  .pill.active {
+    background: #FFFFFF; color: #4338CA; font-weight: 600;
+    box-shadow: 0 1px 2px rgba(67, 56, 202, 0.15);
+  }
+  .content { padding: 22px 28px 32px; }
+  .page-head {
+    display: flex; justify-content: space-between; align-items: flex-end;
+    gap: 16px; margin-bottom: 18px;
+  }
+  .page-head h2 {
+    font-size: 26px; font-weight: 700; letter-spacing: -0.03em;
+  }
+  .page-head .sub { font-size: 14px; color: #64748B; margin-top: 4px; }
+  .btn {
+    padding: 10px 18px; border-radius: 10px; font-size: 14px;
+    border: none; font-family: inherit; cursor: default;
+  }
+  .btn-primary { background: #4338CA; color: #FFFFFF; font-weight: 600; }
+
+  /* Day switcher */
+  .day-switch {
+    display: flex; gap: 8px; margin-bottom: 24px;
+  }
+  .day-tab {
+    flex: 0 0 auto;
+    padding: 8px 16px;
+    border-radius: 10px;
+    font-size: 13px; font-weight: 500;
+    color: #64748B;
+    background: #F8FAFC;
+    border: 1px solid transparent;
+  }
+  .day-tab.active {
+    background: #EEF2FF;
+    border-color: #E0E7FF;
+    color: #4338CA;
+    font-weight: 600;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 220px;
+    gap: 28px;
+    align-items: start;
+  }
+
+  /* Focus day — large calm list */
+  .focus-day h3 {
+    font-size: 13px; font-weight: 600; color: #312E81;
+    margin-bottom: 14px; letter-spacing: 0.02em;
+  }
+  .slot {
+    display: grid;
+    grid-template-columns: 100px 1fr 36px;
+    gap: 12px;
+    align-items: start;
+    padding: 16px 0;
+    border-bottom: 1px solid #F1F5F9;
+    position: relative;
+  }
+  .slot:last-child { border-bottom: none; }
+  .meal-cap {
+    font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    color: #94A3B8; padding-top: 6px;
+  }
+  .dish {
+    font-size: 20px; font-weight: 600; color: #1E293B;
+    letter-spacing: -0.02em; line-height: 1.3;
+  }
+  .dish a {
+    color: inherit; text-decoration: underline;
+    text-decoration-color: #E0E7FF; text-underline-offset: 3px;
+  }
+  .more {
+    width: 32px; height: 32px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 8px; color: #64748B; font-size: 18px;
+    align-self: center;
+  }
+  .slot.open .more { background: #EEF2FF; color: #4338CA; }
+  .menu-pop {
+    position: absolute; right: 0; top: 52px; z-index: 2;
+    width: 200px;
+    background: #FFFFFF;
+    border: 1px solid #E0E7FF;
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(49, 46, 129, 0.14);
+    padding: 6px;
+  }
+  .menu-pop button {
+    display: block; width: 100%; text-align: left;
+    padding: 9px 12px; border: none; background: none;
+    font-family: inherit; font-size: 13px; color: #1E293B;
+    border-radius: 8px; cursor: default;
+  }
+  .menu-pop button:hover { background: #EEF2FF; color: #4338CA; }
+  .menu-pop button.danger { color: #854D0E; }
+
+  /* Quieter secondary days */
+  .side h4 {
+    font-size: 12px; font-weight: 600; color: #94A3B8;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    margin-bottom: 12px;
+  }
+  .side-day {
+    margin-bottom: 18px;
+    padding: 12px 14px;
+    background: #F8FAFC;
+    border-radius: 12px;
+    border: 1px solid #E0E7FF;
+    opacity: 0.72;
+  }
+  .side-day .label {
+    font-size: 13px; font-weight: 600; color: #64748B;
+    margin-bottom: 8px;
+  }
+  .side-day ul {
+    list-style: none;
+  }
+  .side-day li {
+    font-size: 12px; color: #64748B;
+    padding: 3px 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .side-day li span {
+    color: #94A3B8; display: inline-block; width: 52px;
+  }
+</style>
+</head>
+<body>
+
+<p class="rationale">
+  <strong>D · Фокус на одном дне.</strong>
+  Активный день занимает основную колонку крупным спокойным списком; остальные дни — тихая боковая сводка.
+  Переключатель дней сверху держит Model C (день × приём), не раздувая экран сеткой.
+  Открытое ⋯ на ужине фокус-дня показывает действия слота; соседние дни только для ориентации.
+</p>
+
+<div class="browser">
+  <div class="browser-chrome">
+    <div class="dots"><i></i><i></i><i></i></div>
+    <div class="url">app.keplo.ru · Меню</div>
+  </div>
+
+  <header class="app-header">
+    <div>
+      <div class="brand">Kep<span>lo</span></div>
+      <div class="header-meta">2 чел. · магазин выбран</div>
+    </div>
+    <nav class="pill-nav" aria-label="Шаги">
+      <span class="pill">Новое меню</span>
+      <span class="pill active">Меню</span>
+      <span class="pill">Список</span>
+    </nav>
+  </header>
+
+  <div class="content">
+    <div class="page-head">
+      <div>
+        <h2>Меню</h2>
+        <p class="sub">Редактируй один день · остальные рядом для сверки</p>
+      </div>
+      <button class="btn btn-primary" type="button">К списку →</button>
+    </div>
+
+    <div class="day-switch" role="tablist" aria-label="День">
+      <span class="day-tab">День 1</span>
+      <span class="day-tab active">День 2</span>
+      <span class="day-tab">День 3</span>
+    </div>
+
+    <div class="layout">
+      <div class="focus-day">
+        <h3>День 2 · слоты</h3>
+
+        <div class="slot">
+          <div class="meal-cap">Завтрак</div>
+          <div class="dish"><a href="#">Гречка с овощами</a></div>
+          <div class="more">⋯</div>
+        </div>
+        <div class="slot">
+          <div class="meal-cap">Обед</div>
+          <div class="dish"><a href="#">Паста с томатным соусом и грибами</a></div>
+          <div class="more">⋯</div>
+        </div>
+        <div class="slot open">
+          <div class="meal-cap">Ужин</div>
+          <div class="dish"><a href="#">Суп из картофеля и моркови</a></div>
+          <div class="more">⋯</div>
+          <div class="menu-pop">
+            <button type="button">Заменить</button>
+            <button type="button">Заменить все</button>
+            <button type="button" class="danger">Никогда</button>
+          </div>
+        </div>
+        <div class="slot">
+          <div class="meal-cap">Перекус</div>
+          <div class="dish"><a href="#">сыр</a></div>
+          <div class="more">⋯</div>
+        </div>
+      </div>
+
+      <aside class="side">
+        <h4>Другие дни</h4>
+        <div class="side-day">
+          <div class="label">День 1</div>
+          <ul>
+            <li><span>Зав.</span> Гречка с овощами</li>
+            <li><span>Обед</span> Рис с овощами и курицей</li>
+            <li><span>Ужин</span> Тушёная рыба с овощами</li>
+            <li><span>Пер.</span> огурец</li>
+          </ul>
+        </div>
+        <div class="side-day">
+          <div class="label">День 3</div>
+          <ul>
+            <li><span>Зав.</span> Гречка с овощами</li>
+            <li><span>Обед</span> Рис с овощами и курицей</li>
+            <li><span>Ужин</span> Тушёная капуста с сосисками</li>
+            <li><span>Пер.</span> хлебцы</li>
+          </ul>
+        </div>
+      </aside>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

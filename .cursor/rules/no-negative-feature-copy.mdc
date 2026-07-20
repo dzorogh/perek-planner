@@ -1,0 +1,31 @@
+---
+description: Do not surface abandoned/rejected scope as UI copy
+alwaysApply: true
+---
+
+# Do not ship abandoned scope as copy
+
+When a feature was explicitly rejected or cut during PRD / UX / story refinement, do **not** mention that abandoned scope in the UI of what remains.
+
+## The failure mode
+
+1. Spec once had feature X (timers, step mode, etc.).
+2. Team later dropped X; a leftover note may still say “MVP without X” or “out of scope: X”.
+3. Agent implements the remaining screen and writes user-facing text like «Без X» — advertising the rejection.
+
+That is wrong. Rejected scope is for planners and implementers, not for the product surface.
+
+## Rules
+
+- Never turn “out of scope / won’t have / deferred / declined” notes into labels, footers, empty states, or help text.
+- Ship only what the current accepted scope does; do not narrate what was cut.
+- If a leftover AC or story line describes absence of a declined feature, ignore it for UI copy — do not “honor” it by telling the user.
+- Constraints that still apply (e.g. Esc closes dialog) may stay if they help the user act now — not if they only document a past product decision.
+
+## Example
+
+Bad (rejected timers/step mode leaked into UI):
+`Esc — закрыть. Без таймеров и пошагового режима.`
+
+Good:
+`Esc — закрыть.`

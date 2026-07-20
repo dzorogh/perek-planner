@@ -1,0 +1,222 @@
+import {
+  mealAllowsCompanion,
+  type MealSlot,
+} from "@/domain/menu/constants";
+import type { SuggestionCandidate } from "@/domain/suggestions/candidates";
+import {
+  normalizePlateAssignments,
+  parsePlateKind,
+  type PlateAssignment,
+} from "@/domain/suggestions/plate-complete";
+import {
+  tasteNotesForPrompt,
+  type TasteNote,
+} from "@/domain/suggestions/taste-notes";
+import { assignWithBatchVariety } from "@/domain/suggestions/variety";
+import {
+  openRouterChatCompletions,
+  type ChatCompletionsFn,
+} from "@/lib/openrouter/client";
+
+export type SlotPrompt = {
+  slotId: string;
+  dayIndex: number;
+  meal: MealSlot;
+};
+
+export type ProposedAssignment = {
+  slotId: string;
+  recipeId: string;
+  /** Optional side / protein; only for lunch, dinner, late_dinner. */
+  companionRecipeId?: string | null;
+  /** AI judgment for lunch/dinner plates; omitted on breakfast. */
+  plateKind?: "complete" | "needs_companion" | null;
+};
+
+const SYSTEM_PROMPT = `You are a home-cooking menu planner for a Russian household.
+Bias: simple home batch food. Batch cooking reuses dishes across days *within this menu*.
+Hard rules when dayCount >= 2 and candidates allow:
+- At least 50% of cookable slots must reuse a recipe that appears on 2+ days (staggered 2-day batches are ideal).
+- No two calendar days may have the identical full set of recipes (compare main recipes; companions may also batch).
+- Within one calendar day, never reuse the same recipe across meals — not as main, not as companion, and not swapped (lunch potatoes+chicken / dinner chicken+potatoes is forbidden). Batching across different days is fine.
+- Prefer patterns like breakfast days 1–2 same / lunch days 2–3 same / dinner days 1–2 same.
+- Prefer candidates with freshlyInvented=true or recentlyUsed=false.
+- You alone judge culinary near-duplicates (no keyword filter in code). Be strict.
+  Reusing the *exact same* recipe id across days for batching is good and preferred.
+  Assigning a *different* recipe that is a near-variant of another dish already chosen in this menu (or listed in currentMenuDishes) is FORBIDDEN.
+  Too close: оладьи≈панкейки; творожная запеканка с ягодами≈творожные запеканки с изюмом; сырники с изюмом≈сырники с ягодами; овсяная каша с яблоком≈овсянка с грушей.
+  Distinct enough: запеканка vs сырники; оладьи vs яичница; каша vs омлет.
+  A topping/mix-in swap on the same form+base is NOT variety — pick a different culinary form instead.
+- When currentMenuDishes is non-empty (slot replace): do not assign a near-variant of those names; prefer freshlyInvented candidates that feel clearly different.
+- Avoid rebuilding previousMenusDishes — consecutive menus must not feel identical.
+- Breakfast / second_breakfast / afternoon_snack: choose cooked morning dishes ONLY (каша, яичница, омлет, сырники, оладьи, творожная запеканка). Never assign roast/fried chicken, soups, plov, cutlets, steaks, pasta mains, or other lunch/dinner plates to breakfast. Never assign snacks / перекусы / no-cook ready-to-eat plates to cookable slots. Never assign sauces, dressings, or bare garnishes as breakfast mains. Never set companionRecipeId or plateKind for these meals.
+
+For lunch, dinner, late_dinner EVERY assignment MUST include plateKind:
+- HARD RULE: every lunch/dinner plate MUST include a real protein (мясо/птица/рыба/яйца/бобовые/грибы as add-on). Never serve two carb/veg dishes together (e.g. морковные котлеты + картофель, капустные котлеты + гречка).
+- plateKind="complete": a full one-pot / self-contained plate that ALREADY contains protein (плов, лазанья, паста with protein, запеканка with protein+veg, рагу with meat+grain/veg). Omit companionRecipeId. Vegetable cutlets / plain potato / plain grain alone are NEVER complete.
+- plateKind="needs_companion": the main alone is NOT a full meal — you MUST also set companionRecipeId.
+  Examples that NEED a companion: котлеты, зразы, отбивные, куриное/рыбное филе or грудка (even with marinade/spices), жареная курица without a side, овощное соте, vegetable cutlets, «голый» стейк.
+  Companion = simple гарнир (крупа/картофель/овощи) if the main already has protein; OR simple protein add-on (курица/рыба/яйца/грибы) if the main is veg/carb-only. Never a second complex main. Never a second non-protein side when the main lacks protein.
+  Prefer pairing a sauce/side with a main that needs it; do not reuse a breakfast main as a lunch/dinner companion.
+- NEVER leave lunch/dinner as a bare simple main without companion. NEVER assign a companion-only plate as recipeId with empty main.
+- companionRecipeId must differ from recipeId and must come from the candidate list.
+
+You MUST only use recipe ids from the provided candidate list.
+Respect operatorTasteNotes always: kind=ban is hard never; kind=wish is soft prefer.
+Respond with a single JSON object:
+{"assignments":[{"slotId":"...","recipeId":"...","plateKind":"complete"|"needs_companion","companionRecipeId":"...?"},...]}.
+You may leave some slots unassigned by omitting them if candidates are scarce.
+Never invent recipe ids.`;
+
+/**
+ * Ask OpenRouter to assign candidates to slots.
+ * Ids must already exist in the (possibly invent-extended) library.
+ */
+export async function proposeAssignmentsViaOpenRouter(
+  slots: SlotPrompt[],
+  candidates: SuggestionCandidate[],
+  chat: ChatCompletionsFn = openRouterChatCompletions,
+  tasteNotes: TasteNote[] = [],
+  freshlyInventedIds: ReadonlySet<string> = new Set(),
+  previousMenusDishes: string[] = [],
+  currentMenuDishes: string[] = [],
+): Promise<ProposedAssignment[]> {
+  const candidatePayload = candidates.map((c) => ({
+    id: c.recipeId,
+    name: c.name,
+    longIdle: c.longIdle,
+    recentlyUsed: c.recentlyUsed,
+    freshlyInvented: freshlyInventedIds.has(c.recipeId),
+    rating: c.rating,
+  }));
+
+  const slotPayload = slots.map((s) => ({
+    slotId: s.slotId,
+    dayIndex: s.dayIndex,
+    meal: s.meal,
+    allowsCompanion: mealAllowsCompanion(s.meal),
+  }));
+
+  const userContent = JSON.stringify({
+    instruction:
+      "Fill meal slots. Prefer freshlyInvented=true, then recentlyUsed=false. Honor operatorTasteNotes. Batch across days (>=50% multi-day reuse of the *exact same* recipe id) without cloning full day signatures. HARD variety: never assign a different recipe that is a culinary near-variant of currentMenuDishes or of another distinct recipe already used in this plan (topping swaps forbidden: творожная запеканка с ягодами ≈ с изюмом; оладьи≈панкейки). When currentMenuDishes is set (slot replace), pick a clearly different form. Never reuse the same recipe twice within one calendar day (main or companion; no lunch/dinner swaps of the same pair). Breakfast-family: cooked dishes only, no plateKind/companion. For lunch/dinner/late_dinner: ALWAYS set plateKind and ALWAYS include protein on the plate (in main or companion). If main is veg/carb-only (морковные котлеты, картофель, овощное соте), companion MUST be protein — never another side. If plateKind=needs_companion set companionRecipeId. If plateKind=complete omit companion (only when main already has protein). Marinated/spiced fillet or cutlets alone are needs_companion — not complete.",
+    slots: slotPayload,
+    candidates: candidatePayload,
+    previousMenusDishes: previousMenusDishes.slice(0, 60),
+    currentMenuDishes: currentMenuDishes.slice(0, 40),
+    operatorTasteNotes: tasteNotesForPrompt(tasteNotes),
+  });
+
+  const content = await chat({
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: userContent },
+    ],
+    responseFormatJson: true,
+    temperature: 0.6,
+  });
+
+  const mealBySlot = new Map(slots.map((s) => [s.slotId, s.meal]));
+  const parsed = parseAssignmentsJson(
+    content,
+    new Set(candidates.map((c) => c.recipeId)),
+    new Set(slots.map((s) => s.slotId)),
+    mealBySlot,
+  );
+  return normalizePlateAssignments(slots, parsed, candidates);
+}
+
+/** Pure parser — rejects unknown recipe/slot ids; strips invalid companions. */
+export function parseAssignmentsJson(
+  content: string,
+  allowedRecipeIds: Set<string>,
+  allowedSlotIds: Set<string>,
+  mealBySlot: ReadonlyMap<string, MealSlot> = new Map(),
+): PlateAssignment[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(extractJsonObject(content));
+  } catch {
+    return [];
+  }
+
+  const root = parsed as { assignments?: unknown };
+  if (!Array.isArray(root.assignments)) {
+    return [];
+  }
+
+  const out: PlateAssignment[] = [];
+  const seenSlots = new Set<string>();
+
+  for (const item of root.assignments) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as {
+      slotId?: unknown;
+      recipeId?: unknown;
+      companionRecipeId?: unknown;
+      plateKind?: unknown;
+    };
+    const slotId = row.slotId;
+    const recipeId = row.recipeId;
+    if (typeof slotId !== "string" || typeof recipeId !== "string") continue;
+    if (!allowedSlotIds.has(slotId) || !allowedRecipeIds.has(recipeId)) continue;
+    if (seenSlots.has(slotId)) continue;
+    seenSlots.add(slotId);
+
+    const meal = mealBySlot.get(slotId);
+    const plateKind =
+      meal && mealAllowsCompanion(meal) ? parsePlateKind(row.plateKind) : null;
+
+    let companionRecipeId: string | null = null;
+    const rawCompanion = row.companionRecipeId;
+    if (
+      meal &&
+      mealAllowsCompanion(meal) &&
+      typeof rawCompanion === "string" &&
+      allowedRecipeIds.has(rawCompanion) &&
+      rawCompanion !== recipeId
+    ) {
+      companionRecipeId = rawCompanion;
+    }
+
+    out.push({
+      slotId,
+      recipeId,
+      companionRecipeId,
+      plateKind,
+    });
+  }
+
+  return out;
+}
+
+function extractJsonObject(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.startsWith("{")) return trimmed;
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    return trimmed.slice(start, end + 1);
+  }
+  return trimmed;
+}
+
+/**
+ * Deterministic batch fill when LLM returns nothing usable but candidates exist.
+ * Companion meals get a second candidate as companion when possible.
+ */
+export function deterministicAssignments(
+  slots: SlotPrompt[],
+  candidates: SuggestionCandidate[],
+): ProposedAssignment[] {
+  const base = assignWithBatchVariety(slots, candidates).map((p) => ({
+    ...p,
+    companionRecipeId: null as string | null,
+    plateKind: mealAllowsCompanion(
+      slots.find((s) => s.slotId === p.slotId)?.meal ?? "breakfast",
+    )
+      ? ("needs_companion" as const)
+      : null,
+  }));
+  return normalizePlateAssignments(slots, base, candidates);
+}

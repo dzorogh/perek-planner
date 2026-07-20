@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Direction B — Soft Workshop · Keplo</title>
+<style>
+  /* ── Palette (documented) ──
+     #EEF2FF  page bg (cool lavender-gray)
+     #FFFFFF  card surface
+     #E0E7FF  soft border
+     #4338CA  accent (indigo — not purple SaaS default)
+     #312E81  accent dark
+     #64748B  secondary text
+     #1E293B  primary text
+     #FEF9C3  stale warning bg
+     #854D0E  stale warning text
+     #F8FAFC  empty slot
+  */
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: #EEF2FF;
+    color: #1E293B;
+    line-height: 1.5;
+    padding: 32px 40px 48px;
+  }
+
+  .rationale {
+    max-width: 1180px;
+    margin: 0 auto 28px;
+    padding: 20px 24px;
+    background: #FFFFFF;
+    border-radius: 16px;
+    font-size: 15px;
+    color: #475569;
+    box-shadow: 0 1px 3px rgba(49, 46, 129, 0.06);
+  }
+
+  .rationale strong {
+    display: block;
+    font-size: 13px;
+    color: #4338CA;
+    margin-bottom: 8px;
+  }
+
+  .browser {
+    max-width: 1180px;
+    margin: 0 auto;
+    background: #FFFFFF;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 24px 60px rgba(49, 46, 129, 0.12);
+  }
+
+  .browser-chrome {
+    background: linear-gradient(180deg, #F8FAFC 0%, #EEF2FF 100%);
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    border-bottom: 1px solid #E0E7FF;
+  }
+
+  .dots { display: flex; gap: 7px; }
+  .dots span {
+    width: 12px; height: 12px; border-radius: 50%;
+  }
+  .dots span:nth-child(1) { background: #FCA5A5; }
+  .dots span:nth-child(2) { background: #FDE047; }
+  .dots span:nth-child(3) { background: #86EFAC; }
+
+  .url-bar {
+    flex: 1;
+    background: #FFFFFF;
+    border-radius: 999px;
+    padding: 8px 16px;
+    font-size: 13px;
+    color: #64748B;
+    border: 1px solid #E0E7FF;
+  }
+
+  .app-header {
+    padding: 18px 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #E0E7FF;
+  }
+
+  .logo-area h1 {
+    font-size: 17px;
+    font-weight: 700;
+    color: #312E81;
+  }
+
+  .logo-area p {
+    font-size: 13px;
+    color: #64748B;
+    margin-top: 2px;
+  }
+
+  .pill-nav {
+    display: flex;
+    gap: 6px;
+    background: #EEF2FF;
+    padding: 4px;
+    border-radius: 999px;
+  }
+
+  .pill {
+    padding: 6px 14px;
+    font-size: 13px;
+    border-radius: 999px;
+    color: #64748B;
+  }
+
+  .pill.active {
+    background: #FFFFFF;
+    color: #4338CA;
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgba(67, 56, 202, 0.15);
+  }
+
+  .stale-banner {
+    margin: 0 28px 0;
+    margin-top: 16px;
+    padding: 10px 16px;
+    background: #FEF9C3;
+    border: 1px solid #FDE047;
+    border-radius: 12px;
+    font-size: 13px;
+    color: #854D0E;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .stale-icon {
+    width: 22px; height: 22px;
+    background: #FDE047;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+
+  .content {
+    padding: 20px 28px 28px;
+  }
+
+  .page-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 20px;
+  }
+
+  .page-title h2 {
+    font-size: 24px;
+    font-weight: 700;
+    color: #1E293B;
+    letter-spacing: -0.02em;
+  }
+
+  .page-title .sub {
+    font-size: 14px;
+    color: #64748B;
+    margin-top: 4px;
+  }
+
+  .btn-row { display: flex; gap: 10px; }
+
+  .btn {
+    padding: 10px 18px;
+    border-radius: 10px;
+    font-size: 14px;
+    border: none;
+    font-family: inherit;
+    cursor: default;
+  }
+
+  .btn-ghost {
+    background: #EEF2FF;
+    color: #4338CA;
+    font-weight: 500;
+  }
+
+  .btn-primary {
+    background: #4338CA;
+    color: #FFFFFF;
+    font-weight: 600;
+  }
+
+  .days {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .day-card {
+    background: #FFFFFF;
+    border: 1px solid #E0E7FF;
+    border-radius: 14px;
+    overflow: hidden;
+  }
+
+  .day-head {
+    padding: 12px 16px;
+    background: #EEF2FF;
+    font-weight: 600;
+    font-size: 15px;
+    color: #312E81;
+    border-bottom: 1px solid #E0E7FF;
+  }
+
+  .day-head small {
+    font-weight: 400;
+    color: #64748B;
+    font-size: 12px;
+    margin-left: 6px;
+  }
+
+  .meal {
+    padding: 12px 16px;
+    border-bottom: 1px solid #F1F5F9;
+  }
+
+  .meal:last-child { border-bottom: none; }
+
+  .meal-type {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #94A3B8;
+    margin-bottom: 6px;
+  }
+
+  .meal-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1E293B;
+    margin-bottom: 8px;
+    line-height: 1.35;
+  }
+
+  .meal-actions {
+    display: flex;
+    gap: 12px;
+  }
+
+  .meal-actions button {
+    font-size: 12px;
+    background: none;
+    border: none;
+    color: #4338CA;
+    font-family: inherit;
+    cursor: default;
+    padding: 0;
+  }
+
+  .meal-actions button.muted { color: #94A3B8; }
+
+  .meal.empty {
+    background: #F8FAFC;
+  }
+
+  .meal.empty .meal-name {
+    color: #94A3B8;
+    font-weight: 500;
+  }
+
+  .snacks-bar {
+    margin-top: 18px;
+    padding: 16px 18px;
+    background: #FFFFFF;
+    border: 1px dashed #C7D2FE;
+    border-radius: 14px;
+  }
+
+  .snacks-bar h3 {
+    font-size: 13px;
+    font-weight: 600;
+    color: #4338CA;
+    margin-bottom: 10px;
+  }
+
+  .chips {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .chip {
+    padding: 6px 12px;
+    background: #EEF2FF;
+    border-radius: 999px;
+    font-size: 13px;
+    color: #312E81;
+  }
+
+  .footer-hint {
+    margin-top: 16px;
+    font-size: 12px;
+    color: #94A3B8;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<div class="rationale">
+  <strong>Direction B — Soft Workshop</strong>
+  Карточки по дням, скругления и «мягкий» холодный индиго (#4338CA) — ощущение домашней мастерской, а не корпоративного SaaS.
+  Средняя плотность: Sergey видит день целиком, правит слоты без табличного напряжения. Явный stale warning — часть характера направления.
+</div>
+
+<div class="browser">
+  <div class="browser-chrome">
+    <div class="dots"><span></span><span></span><span></span></div>
+    <div class="url-bar">app.keplo.ru · Меню · правки после предложений</div>
+  </div>
+
+  <header class="app-header">
+    <div class="logo-area">
+      <h1>Keplo</h1>
+      <p>Магазин · д. Алабино, 92 · 2 человека</p>
+    </div>
+    <nav class="pill-nav">
+      <span class="pill">Дни</span>
+      <span class="pill active">Меню</span>
+      <span class="pill">План порций</span>
+      <span class="pill">Shopping list</span>
+    </nav>
+  </header>
+
+  <div class="stale-banner">
+    <span class="stale-icon">!</span>
+    <span><strong>Stale catalog warning:</strong> синхронизация каталога не удалась — планируем по последнему сохранённому каталогу. In stock today может отличаться.</span>
+  </div>
+
+  <div class="content">
+    <div class="page-title">
+      <div>
+        <h2>Меню на 3 дня</h2>
+        <p class="sub">Предложения готовы — проверь слоты, откажись от лишнего (Refusal), пустые слоты допустимы</p>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-ghost">Добавить Snack</button>
+        <button class="btn btn-primary">К плану порций →</button>
+      </div>
+    </div>
+
+    <div class="days">
+      <div class="day-card">
+        <div class="day-head">Понедельник <small>19 июл</small></div>
+        <div class="meal">
+          <div class="meal-type">Завтрак</div>
+          <div class="meal-name">Омлет с сыром и зеленью</div>
+          <div class="meal-actions">
+            <button>Заменить Recipe</button>
+            <button class="muted">Refusal</button>
+          </div>
+        </div>
+        <div class="meal">
+          <div class="meal-type">Обед</div>
+          <div class="meal-name">Куриный суп с лапшой</div>
+          <div class="meal-actions">
+            <button>Заменить Recipe</button>
+            <button class="muted">Refusal</button>
+          </div>
+        </div>
+        <div class="meal">
+          <div class="meal-type">Ужин</div>
+          <div class="meal-name">Запечённая курица с овощами</div>
+          <div class="meal-actions">
+            <button>Заменить Recipe</button>
+            <button class="muted">Refusal</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="day-card">
+        <div class="day-head">Вторник <small>20 июл</small></div>
+        <div class="meal">
+          <div class="meal-type">Завтрак</div>
+          <div class="meal-name">Творожная запеканка</div>
+          <div class="meal-actions">
+            <button>Заменить Recipe</button>
+            <button class="muted">Refusal</button>
+          </div>
+        </div>
+        <div class="meal empty">
+          <div class="meal-type">Обед · пустой слот</div>
+          <div class="meal-name">Слот пуст — можно оставить так</div>
+          <div class="meal-actions">
+            <button>Выбрать из библиотеки</button>
+          </div>
+        </div>
+        <div class="meal">
+          <div class="meal-type">Ужин</div>
+          <div class="meal-name">Гречка с тушёной говядиной</div>
+          <div class="meal-actions">
+            <button>Заменить Recipe</button>
+            <button class="muted">Refusal</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="day-card">
+        <div class="day-head">Среда <small>21 июл</small></div>
+        <div class="meal">
+          <div class="meal-type">Завтрак</div>
+          <div class="meal-name">Овсянка с ягодами</div>
+          <div class="meal-actions">
+            <button>Заменить Recipe</button>
+            <button class="muted">Refusal</button>
+          </div>
+        </div>
+        <div class="meal">
+          <div class="meal-type">Обед</div>
+          <div class="meal-name">Салат с курицей и авокадо</div>
+          <div class="meal-actions">
+            <button>Заменить Recipe</button>
+            <button class="muted">Refusal</button>
+          </div>
+        </div>
+        <div class="meal">
+          <div class="meal-type">Ужин</div>
+          <div class="meal-name">Лапша wok с овощами</div>
+          <div class="meal-actions">
+            <button>Заменить Recipe</button>
+            <button class="muted">Refusal</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="snacks-bar">
+      <h3>Snacks — без готовки, в том же Order</h3>
+      <div class="chips">
+        <span class="chip">Греческий йогурт</span>
+        <span class="chip">Яблоки</span>
+        <span class="chip">+ Snack</span>
+      </div>
+    </div>
+
+    <p class="footer-hint">1 cook session · Shopping list соберётся на следующем шаге · покупка — на сайте магазина</p>
+  </div>
+</div>
+
+</body>
+</html>

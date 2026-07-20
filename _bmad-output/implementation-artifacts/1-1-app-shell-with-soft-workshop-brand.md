@@ -4,7 +4,7 @@ baseline_commit: NO_VCS
 
 # Story 1.1: App shell with Soft Workshop brand
 
-Status: in-progress
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -29,40 +29,46 @@ So that I have a real workspace to build Menus in, not an empty dashboard.
 
 ## Tasks / Subtasks
 
-- [ ] Bootstrap Next + Supabase scaffold (AC: #1)
-  - [ ] Run `npx create-next-app -e with-supabase` into this repo (or temp dir then merge) — greenfield; no existing `package.json`
-  - [ ] Require **Node.js ≥22**; pin stack versions from Architecture Spine (see Dev Notes)
-  - [ ] Upgrade Tailwind to **4.3.3** (CSS-first `@theme`); remove starter Tailwind 3 / `tailwindcss-animate` if present; use `tw-animate-css` if shadcn needs animate
-  - [ ] Align folders to Structural Seed: `app/`, `src/lib/supabase/`, `src/domain/` (placeholder), `supabase/`; move starter `lib/supabase/*` → `src/lib/supabase/`
-  - [ ] Init shadcn/ui for Tailwind v4 (new-york style, RSC); do not replace with another UI kit
-  - [ ] Wire `.env.example` / `.env.local`: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (anon key still works as value during migration)
-  - [ ] Confirm `npm run dev` starts and Supabase clients construct without crash
+- [x] Bootstrap Next + Supabase scaffold (AC: #1)
+  - [x] Run `npx create-next-app -e with-supabase` into this repo (or temp dir then merge) — greenfield; no existing `package.json`
+  - [x] Require **Node.js ≥22**; pin stack versions from Architecture Spine (see Dev Notes)
+  - [x] Upgrade Tailwind to **4.3.3** (CSS-first `@theme`); remove starter Tailwind 3 / `tailwindcss-animate` if present; use `tw-animate-css` if shadcn needs animate
+  - [x] Align folders to Structural Seed: `app/`, `src/lib/supabase/`, `src/domain/` (placeholder), `supabase/`; move starter `lib/supabase/*` → `src/lib/supabase/`
+  - [x] Init shadcn/ui for Tailwind v4 (new-york style, RSC); do not replace with another UI kit
+  - [x] Wire `.env.example` / `.env.local`: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (anon key still works as value during migration)
+  - [x] Confirm `npm run dev` starts and Supabase clients construct without crash
 
-- [ ] Apply Soft Workshop / Lavender Workshop brand layer (AC: #1)
-  - [ ] Map DESIGN.md frontmatter colors → CSS variables on shadcn/Tailwind (include full UX-DR1 set: foreground, muted, warning-*, empty-slot, slot-label, snacks-border — not only AC shortlist)
-  - [ ] Apply Soft Workshop radii: sm 10 / md 12 / lg 14 / xl 16 / full 9999
-  - [ ] Geist Sans via `next/font`; **light mode only** — no `next-themes` / dark tokens
-  - [ ] All user-visible UI strings in **Russian**; English glossary ids only in code
+- [x] Apply Soft Workshop / Lavender Workshop brand layer (AC: #1)
+  - [x] Map DESIGN.md frontmatter colors → CSS variables on shadcn/Tailwind (include full UX-DR1 set: foreground, muted, warning-*, empty-slot, slot-label, snacks-border — not only AC shortlist)
+  - [x] Apply Soft Workshop radii: sm 10 / md 12 / lg 14 / xl 16 / full 9999
+  - [x] Geist Sans via `next/font`; **light mode only** — no `next-themes` / dark tokens
+  - [x] All user-visible UI strings in **Russian**; English glossary ids only in code
 
-- [ ] Build authenticated app shell + Create Menu landing (AC: #1)
-  - [ ] `AppShell` layout: header (surface + border), content on background, max-width ~1180px, page gutter 28–40px
-  - [ ] Header left: wordmark `perek-planner` (accent, section-title) + muted store-context subtitle placeholder (e.g. «Перекрёсток · д. Алабино, 92»)
-  - [ ] `pill-nav` placeholders: Дни · Меню · План порций · Shopping list (aria-label «Шаги планирования»); «Дни» active on landing
-  - [ ] Primary nav links: Create/planning (home), История, Настройки (Settings content stub — store-picker is Story 1.3)
-  - [ ] Authenticated home = Create Menu / planning landing with page-title + stub workspace content — **not** empty dashboard
-  - [ ] Optional empty `warning-stale` slot under header (visual chrome only; behavior Story 1.5) — if present, copy must follow EXPERIENCE.md, not mock fallback wording
-  - [ ] Omit mock presentation chrome (browser frame, traffic lights, fake URL bar)
+- [x] Build authenticated app shell + Create Menu landing (AC: #1)
+  - [x] `AppShell` layout: header (surface + border), content on background, max-width ~1180px, page gutter 28–40px
+  - [x] Header left: wordmark `Keplo` (accent, section-title) + muted store-context subtitle placeholder (e.g. «Магазин · д. Алабино, 92»)
+  - [x] `pill-nav` placeholders: Дни · Меню · План порций · Shopping list (aria-label «Шаги планирования»); «Дни» active on landing
+  - [x] Primary nav links: Create/planning (home), История, Настройки (Settings content stub — store-picker is Story 1.3)
+  - [x] Authenticated home = Create Menu / planning landing with page-title + stub workspace content — **not** empty dashboard
+  - [x] Optional empty `warning-stale` slot under header (visual chrome only; behavior Story 1.5) — if present, copy must follow EXPERIENCE.md, not mock fallback wording
+  - [x] Omit mock presentation chrome (browser frame, traffic lights, fake URL bar)
 
-- [ ] Auth redirect stub for planning routes (AC: #2)
-  - [ ] Keep `@supabase/ssr` clients + root middleware calling `getUser()`
-  - [ ] Unauthenticated access to planning / History / Settings → redirect toward `/auth/login` (or starter sign-in route)
-  - [ ] Do **not** implement full email/password UX, RLS policies, or hardened session tests — Story 1.2 owns that
-  - [ ] Stub login page in Russian is OK; post-sign-in target must be Create Menu landing when session exists
+- [x] Auth redirect stub for planning routes (AC: #2)
+  - [x] Keep `@supabase/ssr` clients + root middleware calling `getUser()`
+  - [x] Unauthenticated access to planning / History / Settings → redirect toward `/auth/login` (or starter sign-in route)
+  - [x] Do **not** implement full email/password UX, RLS policies, or hardened session tests — Story 1.2 owns that
+  - [x] Stub login page in Russian is OK; post-sign-in target must be Create Menu landing when session exists
 
-- [ ] Smoke verification (AC: #1, #2)
-  - [ ] Manual: tokens visible, RU copy, pill-nav + primary nav render, landing is Create Menu
-  - [ ] Manual: unauthenticated hit on a planning route redirects to sign-in
-  - [ ] Keyboard: tab through header controls; focus rings visible on background
+- [x] Smoke verification (AC: #1, #2)
+  - [x] Manual: tokens visible, RU copy, pill-nav + primary nav render, landing is Create Menu
+  - [x] Manual: unauthenticated hit on a planning route redirects to sign-in
+  - [x] Keyboard: tab through header controls; focus rings visible on background
+
+### Review Findings
+
+- [x] [Review][Patch] Include Geist `cyrillic` subset so Russian UI does not fall back to system fonts [app/layout.tsx:14]
+- [x] [Review][Patch] Replace English email placeholder with Russian workshop copy [src/components/login-form.tsx:90]
+- [x] [Review][Patch] Remove double focus rings (global CSS + component `focus-visible`) [app/globals.css:70]
 
 ## Dev Notes
 
@@ -101,7 +107,7 @@ Sibling stories (do not implement here):
 - **Config:** only public Supabase URL + publishable/anon in browser. No service role or OpenRouter keys in client.
 - **Non-goals in code:** in-app cart edit, stock badges, dark mode, mobile-first layout, Pantry, Recipe library, match-review, cook timers.
 
-[Source: `_bmad-output/planning-artifacts/architecture/architecture-perek-planner-2026-07-19/ARCHITECTURE-SPINE.md` — Stack, Structural Seed, AD-1, AD-5, AD-6, Consistency Conventions]
+[Source: `_bmad-output/planning-artifacts/architecture/architecture-keplo-2026-07-19/ARCHITECTURE-SPINE.md` — Stack, Structural Seed, AD-1, AD-5, AD-6, Consistency Conventions]
 
 ### UX / brand compliance
 
@@ -129,7 +135,7 @@ Apply brand **delta** on shadcn — do not rebuild a parallel design system.
 **Voice:** home-workshop, practical Russian — no marketing hero, streaks, emoji hype. EXPERIENCE.md wins over mockups on copy conflicts.
 
 **Visual refs (intent only):**  
-`_bmad-output/planning-artifacts/ux-designs/ux-perek-planner-2026-07-19/mockups/mock-create-menu.html`, `direction-b-soft-workshop.html` — adapt to React/shadcn; strip `.browser` chrome.
+`_bmad-output/planning-artifacts/ux-designs/ux-keplo-2026-07-19/mockups/mock-create-menu.html`, `direction-b-soft-workshop.html` — adapt to React/shadcn; strip `.browser` chrome.
 
 [Source: `DESIGN.md` frontmatter + Brand/Layout/Components; `EXPERIENCE.md` Foundation, IA, Voice; epics UX-DR1–4]
 
@@ -190,7 +196,7 @@ Do not block 1.1 on Playwright/Vitest setup unless already added by starter.
 
 ### Project context reference
 
-No `project-context.md` in repo yet. Follow Architecture Spine + DESIGN.md + EXPERIENCE.md. Domain glossary English ids: see `_bmad-output/specs/spec-perek-planner/glossary.md` when touching domain names.
+No `project-context.md` in repo yet. Follow Architecture Spine + DESIGN.md + EXPERIENCE.md. Domain glossary English ids: see `_bmad-output/specs/spec-keplo/glossary.md` when touching domain names.
 
 ### Previous story intelligence
 
@@ -210,24 +216,84 @@ N/A — first story in Epic 1; greenfield repo (planning artifacts only under `_
 ### References
 
 - [Source: `_bmad-output/planning-artifacts/epics.md` — Epic 1, Story 1.1, UX-DR1–4, NFR1–3/10, FR25]
-- [Source: `_bmad-output/planning-artifacts/architecture/architecture-perek-planner-2026-07-19/ARCHITECTURE-SPINE.md`]
-- [Source: `_bmad-output/planning-artifacts/ux-designs/ux-perek-planner-2026-07-19/DESIGN.md`]
-- [Source: `_bmad-output/planning-artifacts/ux-designs/ux-perek-planner-2026-07-19/EXPERIENCE.md`]
-- [Source: `_bmad-output/planning-artifacts/prds/prd-perek-planner-2026-07-19/prd.md` — FR-23 auth boundary, FR-18 Settings remain]
-- [Source: `_bmad-output/specs/spec-perek-planner/SPEC.md` — Constraints, Soft Workshop visual contract]
+- [Source: `_bmad-output/planning-artifacts/architecture/architecture-keplo-2026-07-19/ARCHITECTURE-SPINE.md`]
+- [Source: `_bmad-output/planning-artifacts/ux-designs/ux-keplo-2026-07-19/DESIGN.md`]
+- [Source: `_bmad-output/planning-artifacts/ux-designs/ux-keplo-2026-07-19/EXPERIENCE.md`]
+- [Source: `_bmad-output/planning-artifacts/prds/prd-keplo-2026-07-19/prd.md` — FR-23 auth boundary, FR-18 Settings remain]
+- [Source: `_bmad-output/specs/spec-keplo/SPEC.md` — Constraints, Soft Workshop visual contract]
 
 ## Dev Agent Record
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+Cursor Grok 4.5
 
 ### Debug Log References
 
+- Starter ships Next 16 `proxy.ts` (middleware rename) + Tailwind 3; post-scaffold upgrade applied.
+- Auth redirect verified via curl 307 → `/auth/login` with `KEPLO_DEV_BYPASS_AUTH=false`.
+- Focus ring verified: indigo ring on `#EEF2FF` background for header wordmark.
+
 ### Completion Notes List
+
+- Bootstrapped from `create-next-app -e with-supabase` into temp dir, merged into greenfield repo, pinned Spine versions (Next 16.2.10, React 19.2.7, Tailwind 4.3.3, `@supabase/*` pinned).
+- Structural Seed: `app/`, `src/lib/supabase/`, `src/domain/`, `supabase/`; shadcn new-york kept under `src/components/ui`.
+- Soft Workshop tokens + radii in `app/globals.css` (`@theme inline`); light-only (removed `next-themes`); RU UI copy throughout.
+- AppShell + Create Menu landing («Новое меню») with pill-nav and primary nav; empty `warning-stale` slot reserved; no browser chrome.
+- Session gate via `proxy.ts` + `src/lib/supabase/middleware.ts` using `getUser()`; Russian stub login; post-login → `/`.
+- Optional local `KEPLO_DEV_BYPASS_AUTH=true` for shell inspection without a live Supabase project (documented in `.env.example`).
+- Smoke: `npm run build` / `lint` pass; tokens + RU shell confirmed in browser; unauthenticated planning routes redirect; keyboard focus rings visible.
 
 ### File List
 
+- `.env.example`
+- `.gitignore`
+- `README.md`
+- `app/(authenticated)/history/page.tsx`
+- `app/(authenticated)/layout.tsx`
+- `app/(authenticated)/page.tsx`
+- `app/(authenticated)/plan/menu/page.tsx`
+- `app/(authenticated)/plan/portions/page.tsx`
+- `app/(authenticated)/plan/shopping-list/page.tsx`
+- `app/(authenticated)/settings/page.tsx`
+- `app/auth/login/page.tsx`
+- `app/favicon.ico`
+- `app/globals.css`
+- `app/layout.tsx`
+- `components.json`
+- `eslint.config.mjs`
+- `next.config.ts`
+- `package-lock.json`
+- `package.json`
+- `postcss.config.mjs`
+- `proxy.ts`
+- `src/components/layout/app-header.tsx`
+- `src/components/layout/app-shell.tsx`
+- `src/components/layout/pill-nav.tsx`
+- `src/components/layout/primary-nav.tsx`
+- `src/components/login-form.tsx`
+- `src/components/ui/badge.tsx`
+- `src/components/ui/button.tsx`
+- `src/components/ui/card.tsx`
+- `src/components/ui/checkbox.tsx`
+- `src/components/ui/dropdown-menu.tsx`
+- `src/components/ui/input.tsx`
+- `src/components/ui/label.tsx`
+- `src/domain/.gitkeep`
+- `src/lib/supabase/client.ts`
+- `src/lib/supabase/middleware.ts`
+- `src/lib/supabase/server.ts`
+- `src/lib/utils.ts`
+- `supabase/.gitkeep`
+- `tsconfig.json`
+- `_bmad-output/implementation-artifacts/1-1-app-shell-with-soft-workshop-brand.md`
+- `_bmad-output/implementation-artifacts/sprint-status.yaml`
+
+### Change Log
+
+- 2026-07-20: Implemented Story 1.1 — Next+Supabase greenfield shell with Soft Workshop brand, Create Menu landing, and auth redirect stub.
+- 2026-07-20: Code review patches — Geist cyrillic subset, RU email placeholder, single focus-ring path. Status: done.
+
 ---
 
-**Completion note:** Ultimate context engine analysis completed — comprehensive developer guide created. Status: ready-for-dev.
+**Completion note:** Ultimate context engine analysis completed — comprehensive developer guide created. Status: done.

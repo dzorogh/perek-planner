@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Color Themes — Soft Workshop · Keplo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: #F1F5F9;
+    color: #1E293B;
+    line-height: 1.5;
+    padding: 28px 24px 48px;
+  }
+
+  .page-header {
+    max-width: 1400px;
+    margin: 0 auto 24px;
+  }
+
+  .page-header h1 {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 6px;
+  }
+
+  .page-header p {
+    font-size: 14px;
+    color: #64748B;
+    max-width: 720px;
+  }
+
+  .themes-grid {
+    max-width: 1400px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 20px;
+  }
+
+  .theme-card {
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 4px 24px rgba(15, 23, 42, 0.08);
+  }
+
+  .theme-header {
+    padding: 16px 18px 12px;
+  }
+
+  .theme-name {
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin-bottom: 4px;
+  }
+
+  .theme-register {
+    font-size: 12px;
+    opacity: 0.75;
+    line-height: 1.4;
+  }
+
+  .tokens {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    padding: 0 18px 14px;
+  }
+
+  .token {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 10px;
+    padding: 3px 7px 3px 3px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.55);
+    border: 1px solid rgba(0,0,0,0.06);
+  }
+
+  .token-swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 1px solid rgba(0,0,0,0.08);
+    flex-shrink: 0;
+  }
+
+  .token-label {
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .snippet {
+    margin: 0 14px 14px;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid;
+  }
+
+  .snippet-inner {
+    padding: 12px 14px;
+  }
+
+  .snippet-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+    opacity: 0.55;
+  }
+
+  .slot-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .slot-info { flex: 1; min-width: 0; }
+
+  .slot-type {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 3px;
+  }
+
+  .slot-name {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.35;
+    margin-bottom: 8px;
+  }
+
+  .slot-actions {
+    display: flex;
+    gap: 10px;
+  }
+
+  .slot-actions button {
+    font-size: 11px;
+    background: none;
+    border: none;
+    font-family: inherit;
+    padding: 0;
+    cursor: default;
+    font-weight: 500;
+  }
+
+  .slot-actions .muted { opacity: 0.5; }
+
+  .cta-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .cta-text {
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  .cta-text strong {
+    display: block;
+    font-size: 13px;
+    margin-bottom: 2px;
+  }
+
+  .cta-btn {
+    padding: 8px 14px;
+    border-radius: 9px;
+    font-size: 12px;
+    font-weight: 600;
+    border: none;
+    font-family: inherit;
+    white-space: nowrap;
+    cursor: default;
+    flex-shrink: 0;
+  }
+
+  .warning-chip {
+    margin: 0 14px 14px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    font-size: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid;
+  }
+
+  .warning-dot {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  .mode-chip {
+    margin: 0 14px 16px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px dashed;
+    opacity: 0.7;
+  }
+
+  .mode-swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    border: 1px solid rgba(0,0,0,0.1);
+  }
+
+  /* ═══════════════════════════════════════════════════════════
+     Theme 1 — Lavender Workshop (base direction B)
+     Emotional register: спокойный планировочный стол, холодный индиго
+     background:       #EEF2FF
+     surface:          #FFFFFF
+     foreground:       #1E293B
+     muted:            #64748B
+     primary:          #4338CA
+     primary-foreground: #FFFFFF
+     accent:           #312E81
+     border:           #E0E7FF
+     warning-bg:       #FEF9C3
+     warning-fg:       #854D0E
+     warning-border:   #FDE047
+     ═══════════════════════════════════════════════════════════ */
+  .theme-lavender {
+    background: #EEF2FF;
+    color: #1E293B;
+  }
+  .theme-lavender .theme-name { color: #312E81; }
+  .theme-lavender .theme-register { color: #64748B; }
+  .theme-lavender .snippet { background: #FFFFFF; border-color: #E0E7FF; }
+  .theme-lavender .slot-type { color: #94A3B8; }
+  .theme-lavender .slot-name { color: #1E293B; }
+  .theme-lavender .slot-actions button { color: #4338CA; }
+  .theme-lavender .warning-chip {
+    background: #FEF9C3; color: #854D0E; border-color: #FDE047;
+  }
+  .theme-lavender .warning-dot { background: #FDE047; color: #854D0E; }
+  .theme-lavender .mode-chip { color: #64748B; border-color: #C7D2FE; }
+
+  /* ═══════════════════════════════════════════════════════════
+     Theme 2 — Sage Kitchen
+     Emotional register: утренний разбор продуктов, свежий шалфей
+     background:       #F0F5F2
+     surface:          #FFFFFF
+     foreground:       #1A2E24
+     muted:            #5F7268
+     primary:          #2D6A4F
+     primary-foreground: #FFFFFF
+     accent:           #40916C
+     border:           #D8E6DE
+     warning-bg:       #FEF3C7
+     warning-fg:       #92400E
+     warning-border:   #FCD34D
+     ═══════════════════════════════════════════════════════════ */
+  .theme-sage {
+    background: #F0F5F2;
+    color: #1A2E24;
+  }
+  .theme-sage .theme-name { color: #1B4332; }
+  .theme-sage .theme-register { color: #5F7268; }
+  .theme-sage .snippet { background: #FFFFFF; border-color: #D8E6DE; }
+  .theme-sage .slot-type { color: #84A898; }
+  .theme-sage .slot-name { color: #1A2E24; }
+  .theme-sage .slot-actions button { color: #2D6A4F; }
+  .theme-sage .cta-btn { background: #2D6A4F; color: #FFFFFF; }
+  .theme-sage .cta-text { color: #5F7268; }
+  .theme-sage .cta-text strong { color: #1A2E24; }
+  .theme-sage .warning-chip {
+    background: #FEF3C7; color: #92400E; border-color: #FCD34D;
+  }
+  .theme-sage .warning-dot { background: #FCD34D; color: #92400E; }
+  .theme-sage .mode-chip { color: #5F7268; border-color: #A7C4B5; }
+
+  /* ═══════════════════════════════════════════════════════════
+     Theme 3 — Sky Slate
+     Emotional register: собранная утилитарность, не SaaS-фиолет
+     background:       #F1F5F9
+     surface:          #FFFFFF
+     foreground:       #0F172A
+     muted:            #64748B
+     primary:          #0369A1
+     primary-foreground: #FFFFFF
+     accent:           #0C4A6E
+     border:           #CBD5E1
+     warning-bg:       #FFFBEB
+     warning-fg:       #B45309
+     warning-border:   #FCD34D
+     ═══════════════════════════════════════════════════════════ */
+  .theme-sky {
+    background: #F1F5F9;
+    color: #0F172A;
+  }
+  .theme-sky .theme-name { color: #0C4A6E; }
+  .theme-sky .theme-register { color: #64748B; }
+  .theme-sky .snippet { background: #FFFFFF; border-color: #CBD5E1; }
+  .theme-sky .slot-type { color: #94A3B8; }
+  .theme-sky .slot-name { color: #0F172A; }
+  .theme-sky .slot-actions button { color: #0369A1; }
+  .theme-sky .warning-chip {
+    background: #FFFBEB; color: #B45309; border-color: #FCD34D;
+  }
+  .theme-sky .warning-dot { background: #FCD34D; color: #B45309; }
+  .theme-sky .mode-chip { color: #64748B; border-color: #94A3B8; }
+
+  /* ═══════════════════════════════════════════════════════════
+     Theme 4 — Warm Linen (restrained warm kitchen)
+     Emotional register: льняная кухня, приглушённый медный акцент
+     background:       #F7F4F0
+     surface:          #FFFFFF
+     foreground:       #2C2825
+     muted:            #7A7268
+     primary:          #8B5E4A
+     primary-foreground: #FFFFFF
+     accent:           #6B4C3B
+     border:           #E8E2DA
+     warning-bg:       #FEF9C3
+     warning-fg:       #854D0E
+     warning-border:   #FDE047
+     ═══════════════════════════════════════════════════════════ */
+  .theme-linen {
+    background: #F7F4F0;
+    color: #2C2825;
+  }
+  .theme-linen .theme-name { color: #6B4C3B; }
+  .theme-linen .theme-register { color: #7A7268; }
+  .theme-linen .snippet { background: #FFFFFF; border-color: #E8E2DA; }
+  .theme-linen .slot-type { color: #A89F94; }
+  .theme-linen .slot-name { color: #2C2825; }
+  .theme-linen .slot-actions button { color: #8B5E4A; }
+  .theme-linen .cta-btn { background: #8B5E4A; color: #FFFFFF; }
+  .theme-linen .cta-text { color: #7A7268; }
+  .theme-linen .cta-text strong { color: #2C2825; }
+  .theme-linen .warning-chip {
+    background: #FEF9C3; color: #854D0E; border-color: #FDE047;
+  }
+  .theme-linen .warning-dot { background: #FDE047; color: #854D0E; }
+  .theme-linen .mode-chip { color: #7A7268; border-color: #C4B8A8; }
+
+  /* ═══════════════════════════════════════════════════════════
+     Theme 5 — Rose Clay
+     Emotional register: домашняя мягкость, пыльная роза без editorial
+     background:       #F5F0F2
+     surface:          #FFFFFF
+     foreground:       #2A2328
+     muted:            #7A6E75
+     primary:          #B85C7A
+     primary-foreground: #FFFFFF
+     accent:           #8B4560
+     border:           #E8DDE2
+     warning-bg:       #FEF3C7
+     warning-fg:       #92400E
+     warning-border:   #FCD34D
+     ═══════════════════════════════════════════════════════════ */
+  .theme-rose {
+    background: #F5F0F2;
+    color: #2A2328;
+  }
+  .theme-rose .theme-name { color: #8B4560; }
+  .theme-rose .theme-register { color: #7A6E75; }
+  .theme-rose .snippet { background: #FFFFFF; border-color: #E8DDE2; }
+  .theme-rose .slot-type { color: #B09BA3; }
+  .theme-rose .slot-name { color: #2A2328; }
+  .theme-rose .slot-actions button { color: #B85C7A; }
+  .theme-rose .warning-chip {
+    background: #FEF3C7; color: #92400E; border-color: #FCD34D;
+  }
+  .theme-rose .warning-dot { background: #FCD34D; color: #92400E; }
+  .theme-rose .mode-chip { color: #7A6E75; border-color: #C9B5BD; }
+</style>
+</head>
+<body>
+
+<header class="page-header">
+  <h1>Soft Workshop — Color Themes</h1>
+  <p>5 вариаций внутри направления B: мягкие карточки, средняя плотность, дружелюбный тон. Различаются эмоциональным регистром и семейством акцента — не близнецы-пастели.</p>
+</header>
+
+<div class="themes-grid">
+
+  <!-- Theme 1: Lavender Workshop -->
+  <article class="theme-card theme-lavender">
+    <div class="theme-header">
+      <div class="theme-name">Lavender Workshop</div>
+      <div class="theme-register">Спокойный планировочный стол — холодный индиго, база direction B</div>
+    </div>
+    <div class="tokens">
+      <span class="token"><span class="token-swatch" style="background:#EEF2FF"></span><span class="token-label">bg</span></span>
+      <span class="token"><span class="token-swatch" style="background:#FFFFFF"></span><span class="token-label">surface</span></span>
+      <span class="token"><span class="token-swatch" style="background:#1E293B"></span><span class="token-label">fg</span></span>
+      <span class="token"><span class="token-swatch" style="background:#64748B"></span><span class="token-label">muted</span></span>
+      <span class="token"><span class="token-swatch" style="background:#4338CA"></span><span class="token-label">primary</span></span>
+      <span class="token"><span class="token-swatch" style="background:#FFFFFF;border:1px solid #E0E7FF"></span><span class="token-label">primary-fg</span></span>
+      <span class="token"><span class="token-swatch" style="background:#312E81"></span><span class="token-label">accent</span></span>
+      <span class="token"><span class="token-swatch" style="background:#E0E7FF"></span><span class="token-label">border</span></span>
+      <span class="token"><span class="token-swatch" style="background:#FEF9C3"></span><span class="token-label">warning</span></span>
+    </div>
+    <div class="snippet">
+      <div class="snippet-inner">
+        <div class="snippet-label">Меню · слот</div>
+        <div class="slot-row">
+          <div class="slot-info">
+            <div class="slot-type">Обед · вторник</div>
+            <div class="slot-name">Куриный суп с лапшой</div>
+            <div class="slot-actions">
+              <button>Заменить Recipe</button>
+              <button class="muted">Refusal</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="warning-chip">
+      <span class="warning-dot">!</span>
+      Stale catalog — планируем по последнему сохранённому каталогу
+    </div>
+    <div class="mode-chip">
+      <span class="mode-swatch" style="background:#1E1B4B"></span>
+      dark chip · #1E1B4B
+    </div>
+  </article>
+
+  <!-- Theme 2: Sage Kitchen -->
+  <article class="theme-card theme-sage">
+    <div class="theme-header">
+      <div class="theme-name">Sage Kitchen</div>
+      <div class="theme-register">Утренний разбор продуктов — свежий шалфей, зелёная ясность</div>
+    </div>
+    <div class="tokens">
+      <span class="token"><span class="token-swatch" style="background:#F0F5F2"></span><span class="token-label">bg</span></span>
+      <span class="token"><span class="token-swatch" style="background:#FFFFFF"></span><span class="token-label">surface</span></span>
+      <span class="token"><span class="token-swatch" style="background:#1A2E24"></span><span class="token-label">fg</span></span>
+      <span class="token"><span class="token-swatch" style="background:#5F7268"></span><span class="token-label">muted</span></span>
+      <span class="token"><span class="token-swatch" style="background:#2D6A4F"></span><span class="token-label">primary</span></span>
+      <span class="token"><span class="token-swatch" style="background:#FFFFFF;border:1px solid #D8E6DE"></span><span class="token-label">primary-fg</span></span>
+      <span class="token"><span class="token-swatch" style="background:#40916C"></span><span class="token-label">accent</span></span>
+      <span class="token"><span class="token-swatch" style="background:#D8E6DE"></span><span class="token-label">border</span></span>
+      <span class="token"><span class="token-swatch" style="background:#FEF3C7"></span><span class="token-label">warning</span></span>
+    </div>
+    <div class="snippet">
+      <div class="snippet-inner">
+        <div class="snippet-label">Shopping list · CTA</div>
+        <div class="cta-row">
+          <div class="cta-text">
+            <strong>47 позиций · 1 cook session</strong>
+            Список готов — покупка на сайте магазина
+          </div>
+          <button class="cta-btn">Открыть Order →</button>
+        </div>
+      </div>
+    </div>
+    <div class="warning-chip">
+      <span class="warning-dot">!</span>
+      Stale catalog — In stock today может отличаться
+    </div>
+    <div class="mode-chip">
+      <span class="mode-swatch" style="background:#1B4332"></span>
+      dark chip · #1B4332
+    </div>
+  </article>
+
+  <!-- Theme 3: Sky Slate -->
+  <article class="theme-card theme-sky">
+    <div class="theme-header">
+      <div class="theme-name">Sky Slate</div>
+      <div class="theme-register">Собранная утилитарность — голубой slate без SaaS-фиолета</div>
+    </div>
+    <div class="tokens">
+      <span class="token"><span class="token-swatch" style="background:#F1F5F9"></span><span class="token-label">bg</span></span>
+      <span class="token"><span class="token-swatch" style="background:#FFFFFF"></span><span class="token-label">surface</span></span>
+      <span class="token"><span class="token-swatch" style="background:#0F172A"></span><span class="token-label">fg</span></span>
+      <span class="token"><span class="token-swatch" style="background:#64748B"></span><span class="token-label">muted</span></span>
+      <span class="token"><span class="token-swatch" style="background:#0369A1"></span><span class="token-label">primary</span></span>
+      <span class="token"><span class="token-swatch" style="background:#FFFFFF;border:1px solid #CBD5E1"></span><span class="token-label">primary-fg</span></span>
+      <span class="token"><span class="token-swatch" style="background:#0C4A6E"></span><span class="token-label">accent</span></span>
+      <span class="token"><span class="token-swatch" style="background:#CBD5E1"></span><span class="token-label">border</span></span>
+      <span class="token"><span class="token-swatch" style="background:#FFFBEB"></span><span class="token-label">warning</span></span>
+    </div>
+    <div class="snippet">
+      <div class="snippet-inner">
+        <div class="snippet-label">Меню · пустой слот</div>
+        <div class="slot-row">
+          <div class="slot-info">
+            <div class="slot-type">Обед · среда · пустой слот</div>
+            <div class="slot-name">Слот пуст — можно оставить так</div>
+            <div class="slot-actions">
+              <button>Выбрать из библиотеки</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="warning-chip">
+      <span class="warning-dot">!</span>
+      Stale catalog — синхронизация не удалась
+    </div>
+    <div class="mode-chip">
+      <span class="mode-swatch" style="background:#0C4A6E"></span>
+      dark chip · #0C4A6E
+    </div>
+  </article>
+
+  <!-- Theme 4: Warm Linen -->
+  <article class="theme-card theme-linen">
+    <div class="theme-header">
+      <div class="theme-name">Warm Linen</div>
+      <div class="theme-register">Льняная кухня — тёплый нейтрал, приглушённый медный акцент</div>
+    </div>
+    <div class="tokens">
+      <span class="token"><span class="token-swatch" style="background:#F7F4F0"></span><span class="token-label">bg</span></span>
+      <span class="token"><span class="token-swatch" style="background:#FFFFFF"></span><span class="token-label">surface</span></span>
+      <span class="token"><span class="token-swatch" style="background:#2C2825"></span><span class="token-label">fg</span></span>
+      <span class="token"><span class="token-swatch" style="background:#7A7268"></span><span class="token-label">muted</span></span>
+      <span class="token"><span class="token-swatch" style="background:#8B5E4A"></span><span class="token-label">primary</span></span>
+      <span class="token"><span class="token-swatch" style="background:#FFFFFF;border:1px solid #E8E2DA"></span><span class="token-label">primary-fg</span></span>
+      <span class="token"><span class="token-swatch" style="background:#6B4C3B"></span><span class="token-label">accent</span></span>
+      <span class="token"><span class="token-swatch" style="background:#E8E2DA"></span><span class="token-label">border</span></span>
+      <span class="token"><span class="token-swatch" style="background:#FEF9C3"></span><span class="token-label">warning</span></span>
+    </div>
+    <div class="snippet">
+      <div class="snippet-inner">
+        <div class="snippet-label">Shopping list · CTA</div>
+        <div class="cta-row">
+          <div class="cta-text">
+            <strong>32 позиции · 3 дня</strong>
+            Перейти к заказу на сайте магазина
+          </div>
+          <button class="cta-btn">К покупке →</button>
+        </div>
+      </div>
+    </div>
+    <div class="warning-chip">
+      <span class="warning-dot">!</span>
+      Stale catalog — планируем по сохранённому каталогу
+    </div>
+    <div class="mode-chip">
+      <span class="mode-swatch" style="background:#3D2E26"></span>
+      dark chip · #3D2E26
+    </div>
+  </article>
+
+  <!-- Theme 5: Rose Clay -->
+  <article class="theme-card theme-rose">
+    <div class="theme-header">
+      <div class="theme-name">Rose Clay</div>
+      <div class="theme-register">Домашняя мягкость — пыльная роза, без editorial-клише</div>
+    </div>
+    <div class="tokens">
+      <span class="token"><span class="token-swatch" style="background:#F5F0F2"></span><span class="token-label">bg</span></span>
+      <span class="token"><span class="token-swatch" style="background:#FFFFFF"></span><span class="token-label">surface</span></span>
+      <span class="token"><span class="token-swatch" style="background:#2A2328"></span><span class="token-label">fg</span></span>
+      <span class="token"><span class="token-swatch" style="background:#7A6E75"></span><span class="token-label">muted</span></span>
+      <span class="token"><span class="token-swatch" style="background:#B85C7A"></span><span class="token-label">primary</span></span>
+      <span class="token"><span class="token-swatch" style="background:#FFFFFF;border:1px solid #E8DDE2"></span><span class="token-label">primary-fg</span></span>
+      <span class="token"><span class="token-swatch" style="background:#8B4560"></span><span class="token-label">accent</span></span>
+      <span class="token"><span class="token-swatch" style="background:#E8DDE2"></span><span class="token-label">border</span></span>
+      <span class="token"><span class="token-swatch" style="background:#FEF3C7"></span><span class="token-label">warning</span></span>
+    </div>
+    <div class="snippet">
+      <div class="snippet-inner">
+        <div class="snippet-label">Меню · слот</div>
+        <div class="slot-row">
+          <div class="slot-info">
+            <div class="slot-type">Ужин · понедельник</div>
+            <div class="slot-name">Запечённая курица с овощами</div>
+            <div class="slot-actions">
+              <button>Заменить Recipe</button>
+              <button class="muted">Refusal</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="warning-chip">
+      <span class="warning-dot">!</span>
+      Stale catalog — In stock today может отличаться
+    </div>
+    <div class="mode-chip">
+      <span class="mode-swatch" style="background:#4A2A38"></span>
+      dark chip · #4A2A38
+    </div>
+  </article>
+
+</div>
+
+</body>
+</html>

@@ -6,7 +6,7 @@ applied: 2026-07-20
 scope: Moderate
 handoff: PO/DEV docs applied; next bmad-sprint-planning
 date: 2026-07-20
-project: perek-planner
+project: keplo
 trigger: implementation-readiness-report-2026-07-20 (NEEDS WORK)
 mode: incremental
 decisions:
@@ -16,7 +16,7 @@ decisions:
   ad10: clarify v1 no reuse UI
 ---
 
-# Sprint Change Proposal — perek-planner
+# Sprint Change Proposal — keplo
 
 ## 1. Issue Summary
 
@@ -82,7 +82,7 @@ None on running systems. Prevents implementing a reuse UI or a split incomplete 
 
 ## 4. Detailed Change Proposals
 
-### 4.1 PRD — `prds/prd-perek-planner-2026-07-19/prd.md`
+### 4.1 PRD — `prds/prd-keplo-2026-07-19/prd.md`
 
 **Approved [a]**
 

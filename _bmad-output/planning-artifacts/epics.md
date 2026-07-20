@@ -1,20 +1,20 @@
 ---
 stepsCompleted: ['step-01-validate-prerequisites', 'step-02-design-epics', 'step-03-create-stories', 'step-04-final-validation']
 inputDocuments:
-  - planning-artifacts/prds/prd-perek-planner-2026-07-19/prd.md
-  - planning-artifacts/prds/prd-perek-planner-2026-07-19/addendum.md
-  - planning-artifacts/architecture/architecture-perek-planner-2026-07-19/ARCHITECTURE-SPINE.md
-  - planning-artifacts/ux-designs/ux-perek-planner-2026-07-19/DESIGN.md
-  - planning-artifacts/ux-designs/ux-perek-planner-2026-07-19/EXPERIENCE.md
-  - specs/spec-perek-planner/SPEC.md
-  - specs/spec-perek-planner/glossary.md
+  - planning-artifacts/prds/prd-keplo-2026-07-19/prd.md
+  - planning-artifacts/prds/prd-keplo-2026-07-19/addendum.md
+  - planning-artifacts/architecture/architecture-keplo-2026-07-19/ARCHITECTURE-SPINE.md
+  - planning-artifacts/ux-designs/ux-keplo-2026-07-19/DESIGN.md
+  - planning-artifacts/ux-designs/ux-keplo-2026-07-19/EXPERIENCE.md
+  - specs/spec-keplo/SPEC.md
+  - specs/spec-keplo/glossary.md
 ---
 
-# perek-planner - Epic Breakdown
+# keplo - Epic Breakdown
 
 ## Overview
 
-This document provides the complete epic and story breakdown for perek-planner, decomposing the requirements from the PRD, UX Design if it exists, and Architecture requirements into implementable stories.
+This document provides the complete epic and story breakdown for keplo, decomposing the requirements from the PRD, UX Design if it exists, and Architecture requirements into implementable stories.
 
 ## Requirements Inventory
 
@@ -33,12 +33,12 @@ FR10: Recipe usable only when every Critical ingredient has system-selected Chec
 FR11: Pantry/staples gate eligibility by catalog presence and appear on Shopping list by default (no per-item opt-in prompt).
 FR12: Recipe fridge-keep must be ≥ Menu length; shortest selected fridge-keep caps Menu length.
 FR13: When choosing among suitable Products, prefer cheaper analogs at medium aggressiveness without collapsing below basic quality heuristic.
-FR14: Operator can select a concrete Perekrestok store in Settings (default д. Алабино, 92); not prompted before every Menu; v1 chain Perekrestok only.
+FR14: Operator can select a concrete store in Settings (default д. Алабино, 92); not prompted before every Menu; v1 chain single grocery chain only.
 FR15: At planning time, do not suggest/assign Recipe if any Critical ingredient lacks an in-stock Checked-match variant; no stock-badge UI.
 FR16: On catalog sync failure or stale catalog, show explicit stale warning and block Menu planning until a fresh sync succeeds.
 FR17: Build one combined Shopping list from Menu CheckedMatch Products plus default staples.
 FR18: Shopping list is always copyable; copy alone is enough to buy outside the app.
-FR19: Optional Perekrestok store link when available; never the only purchase path; transport format TBD.
+FR19: Optional store link when available; never the only purchase path; transport format TBD.
 FR20: Show price/nutrition only when catalog provides them; never fabricate.
 FR21: Sign-in with login+password; unauthenticated users cannot access Menus or personal history.
 FR22: Operator can open Recipe text from Menu, History, or Shopping list anytime; no cook-along/timers.
@@ -63,7 +63,7 @@ NFR10: Soft Workshop / Lavender Workshop brand layer on shadcn; Geist Sans locke
 
 - Starter: `create-next-app -e with-supabase`, then upgrade Tailwind to 4.x, align folder layout to Structural Seed, retarget deploy to Dokploy, add `sync/`.
 - Runtime topology (AD-1): Next + Python catalog-sync on Dokploy; Supabase Cloud for Auth/Postgres/RLS; Dokploy Schedule Jobs for sync; Node.js ≥22.
-- Catalog write ownership (AD-2): only Python sync worker writes catalog/availability/`catalog_sync_runs` (service role); Next reads catalog; unofficial `perekrestok-api` behind store-adapter (Perekrestok v1).
+- Catalog write ownership (AD-2): only Python sync worker writes catalog/availability/`catalog_sync_runs` (service role); Next reads catalog; unofficial `store-catalog-api` behind store-adapter (the store v1).
 - Matching & eligibility (AD-3, AD-7, AD-10): Next server matching module; Menu-scoped normalized `CheckedMatch` table; eligibility gates suggest and assign/replace; reuse/clone must re-run matching (not copy matches) if/when implemented later.
 - AI (AD-4): OpenRouter from Next server only; model id runtime config; Refusal/dislike hard-suppress inside suggestion module.
 - Auth (AD-5): `@supabase/ssr` cookie sessions; protect planning routes with `getUser()`.
@@ -71,7 +71,7 @@ NFR10: Soft Workshop / Lavender Workshop brand layer on shadcn; Geist Sans locke
 - Store context (AD-9): Settings `selected_store_id`; Menu snapshots `store_id` at creation; changing Settings does not rewrite past Menus.
 - Catalog stale signal (AD-8): FR-16 warning reads latest `catalog_sync_runs` for active store.
 - Shopping list handoff (AD-11): `buildShoppingList(menuId)` materializes snapshot from CheckedMatch + default staples; no in-app list edit; regenerate replaces snapshot.
-- Stack versions per Architecture Spine table (Next 16.2.10, React 19.2.7, Tailwind 4.3.3, Supabase JS 2.110.7, perekrestok-api 0.2.2, Python ≥3.10, etc.).
+- Stack versions per Architecture Spine table (Next 16.2.10, React 19.2.7, Tailwind 4.3.3, Supabase JS 2.110.7, store-catalog-api 0.2.2, Python ≥3.10, etc.).
 - Structural seed: `app/`, `src/domain/`, `src/lib/supabase/`, `sync/`, `supabase/`.
 - Non-goals in code: no in-app cart edit, stock badges, fallback-after-planning flow, cook-along timers, match-review UI, ready packs, UJ-2 reuse surface in v1 UI (PRD FR-9 deferred post-MVP; aligned 2026-07-20).
 
@@ -80,12 +80,12 @@ NFR10: Soft Workshop / Lavender Workshop brand layer on shadcn; Geist Sans locke
 UX-DR1: Implement Lavender Workshop color tokens from DESIGN.md frontmatter (background, surface, foreground, muted, primary, accent, border, warning-*, empty-slot, slot-label, snacks-border) on shadcn/Tailwind; inherit unlisted shadcn tokens.
 UX-DR2: Implement Soft Workshop radii (sm 10 / md 12 / lg 14 / xl 16 / full) and spacing roles (page-gutter, content-padding, card-padding, slot-padding-y, grid-gap, section-gap).
 UX-DR3: Implement typography roles: page-title, section-title, day-head, slot-label, slot-name, body-sm, caption on Geist Sans; Russian UI copy in workshop voice per EXPERIENCE Voice table.
-UX-DR4: App shell with pill-nav flow steps (Дни · Меню · План порций · Shopping list) and primary nav to Create/planning, History, Settings.
+UX-DR4: App chrome W1 — global header (L3 mark + Keplo · CTA «Создать меню» · История · Настройки · Выйти) separate from wizard bar (`Новое меню · Меню · Список`); wizard hidden on History/Settings. (Supersedes earlier «Дни · Меню · План порций · Shopping list» in one header group.)
 UX-DR5: `day-length-picker` on Create Menu — 1–4 days; primary CTA triggers generation; store not re-prompted here.
 UX-DR6: Model C `slot-card` / `day-card` grid — day × breakfast/lunch/dinner; empty slot state; actions: AI resuggest, Refusal, clear; Recipe name opens recipe-text-panel. No manual History-pick control in v1.
 UX-DR7: `snacks-bar` + `snack-chip` aggregate below day grid for no-cook Snacks.
 UX-DR8: `portion-plan-grid` — day × meal servings; default 2 people × 3 meals; editable before Shopping list.
-UX-DR9: `shopping-list-cta` — always-available copy; optional secondary store link; staples on list by default with calm copy that user filters at Perekrestok; external handoff labeled outside app.
+UX-DR9: `shopping-list-cta` — always-available copy; optional secondary store link; staples on list by default with calm copy that user filters in the store; external handoff labeled outside app.
 UX-DR10: `warning-stale` banner on Create Menu, slot edit, Portion plan when catalog non-fresh; Menu planning actions blocked until fresh sync.
 UX-DR11: `store-picker` in Settings — concrete store list; default д. Алабино, 92; set once.
 UX-DR12: `history-rating-row` — like/dislike + reason; editable after submit; empty History routes to Create Menu.
@@ -159,7 +159,7 @@ FR25: Epic 1 — Post sign-in lands on Create Menu / planning
 ## Epic List
 
 ### Epic 1: Sign in, workspace & store catalog
-Operator can sign in, land on the Soft Workshop planning shell, select a Perekrestok store once in Settings, and plan against a fresh synced catalog — with an explicit stale warning that blocks Menu planning when sync is stale or failed.
+Operator can sign in, land on the Soft Workshop planning shell, select a store store once in Settings, and plan against a fresh synced catalog — with an explicit stale warning that blocks Menu planning when sync is stale or failed.
 **FRs covered:** FR14, FR16, FR21, FR25
 
 ### Epic 2: Plan a buyable Menu
@@ -174,9 +174,13 @@ Operator sets servings on the Portion plan and leaves with one combined, always-
 Operator reviews past Menus/Recipes in History, rates Recipes/Snacks (editable after submit), and opens Recipe text anytime from Menu, History, or Shopping list.
 **FRs covered:** FR9, FR22, FR24
 
+### Epic 5: App chrome alignment (post-MVP UX)
+Operator gets W1 header/wizard chrome from finalized UX spines — brand mark + Keplo, Create Menu CTA, plan steps separated from global nav — without false active states on History/Settings.
+**FRs covered:** UX-DR4 (revised 2026-07-20)
+
 ## Epic 1: Sign in, workspace & store catalog
 
-Operator can sign in, land on the Soft Workshop planning shell, select a Perekrestok store once in Settings, and plan against a fresh synced catalog — with an explicit stale warning that blocks Menu planning when sync is stale or failed.
+Operator can sign in, land on the Soft Workshop planning shell, select a store store once in Settings, and plan against a fresh synced catalog — with an explicit stale warning that blocks Menu planning when sync is stale or failed.
 
 ### Story 1.1: App shell with Soft Workshop brand
 
@@ -221,7 +225,7 @@ So that my Menus and personal history are available only to me.
 ### Story 1.3: Store picker in Settings
 
 As a operator (Sergey),
-I want to select a concrete Perekrestok store once in Settings (default д. Алабино, 92),
+I want to select a concrete store once in Settings (default д. Алабино, 92),
 So that catalog and stock are for my store without being asked before every Menu.
 
 **Acceptance Criteria:**
@@ -232,7 +236,7 @@ So that catalog and stock are for my store without being asked before every Menu
 
 **Given** a new operator with no prior preference
 **When** Settings / store context is initialized
-**Then** the default selected store is Perekrestok д. Алабино, 92 (FR14, AD-9)
+**Then** the default selected store is д. Алабино, 92 (FR14, AD-9)
 
 **Given** `UserSettings.selected_store_id` is saved
 **When** the operator starts a new Menu later
@@ -242,7 +246,7 @@ So that catalog and stock are for my store without being asked before every Menu
 **When** migrations are added
 **Then** schema follows `supabase/migrations` as SoT; catalog remains readable by authenticated users per AD-5/AD-6
 
-### Story 1.4: Perekrestok catalog sync worker
+### Story 1.4: the store catalog sync worker
 
 As a operator (Sergey),
 I want my selected store’s Products and availability synced into the database on a schedule,
@@ -251,9 +255,9 @@ So that planning can use a real assortment for that store.
 **Acceptance Criteria:**
 
 **Given** the Architecture Structural Seed
-**When** a Python sync worker is added under `sync/` with a store-adapter wrapping `perekrestok-api`
+**When** a Python sync worker is added under `sync/` with a store-adapter wrapping `store-catalog-api`
 **Then** only the sync worker writes catalog/availability and `catalog_sync_runs` via service role (AD-2)
-**And** Next never fetches Perekrestok site APIs for catalog writes (AD-2, AD-6)
+**And** Next never fetches the store site APIs for catalog writes (AD-2, AD-6)
 
 **Given** a configured store (e.g. default д. Алабино, 92)
 **When** a sync run completes successfully
@@ -473,7 +477,7 @@ So that I can go buy without rebuilding the cart by hand.
 
 **Given** the Shopping list surface
 **When** the operator views it
-**Then** Product names are shown (not match jargon); calm copy notes staples can be filtered at Perekrestok (UX-DR9)
+**Then** Product names are shown (not match jargon); calm copy notes staples can be filtered at the store (UX-DR9)
 **And** regenerating after slot/match changes replaces the snapshot (AD-11)
 
 ### Story 3.3: Copy Shopping list
@@ -493,7 +497,7 @@ So that I can buy even when no store link exists.
 **When** confirmation is shown
 **Then** Russian copy is calm (e.g. «Список скопирован.») and the list remains visible (UX-DR14)
 
-### Story 3.4: Optional Perekrestok store link
+### Story 3.4: Optional store link
 
 As a operator (Sergey),
 I want to open a store link when one works,
@@ -501,7 +505,7 @@ So that handoff is faster — while copy remains the reliable path.
 
 **Acceptance Criteria:**
 
-**Given** a working Perekrestok link can be produced
+**Given** a working the store link can be produced
 **When** the operator uses the secondary store-link control
 **Then** it opens outside the app (new tab) and is labeled as external (FR19, UX-DR9, UX-DR15)
 
@@ -586,3 +590,37 @@ So that shopping and cooking are easier — without a cook-along mode.
 **Given** cooking aid scope for v1
 **When** Recipe text is available
 **Then** there are no step timers or guided cook-along flows (FR22, UX-DR16)
+
+## Epic 5: App chrome alignment (post-MVP UX)
+
+Bring authenticated shell chrome in line with finalized W1 UX (2026-07-20): split global header from wizard steps, L3 + Keplo brand, rename step 0 to «Новое меню», hide wizard off-plan.
+
+### Story 5.1: W1 header and wizard chrome
+
+As a operator (Sergey),
+I want the app header and plan stepper to match the W1 UX chrome,
+So that Create Menu, History, and plan steps do not fight for the same active state and the brand is clear.
+
+**Acceptance Criteria:**
+
+**Given** an authenticated operator on any planning surface (`/`, `/plan/menu`, `/plan/shopping-list`)
+**When** the shell renders
+**Then** global header shows L3 brand-mark + wordmark **Keplo** (no subtitle under brand), CTA «Создать меню», links «История» / «Настройки», and «Выйти»
+**And** a wizard bar under the header shows pills `Новое меню · Меню · Список` with correct active step
+**And** «Создать меню» is a primary-styled CTA in the global header — not a plain text twin of the wizard step (UX-DR4, DESIGN W1)
+
+**Given** the operator is on History or Settings
+**When** the shell renders
+**Then** the wizard bar is **absent**
+**And** no plan step (including «Новое меню») appears active
+**And** the matching global link is marked current (UX-DR4, EXPERIENCE Off-plan surface)
+
+**Given** UJ-1 slot-edit gate
+**When** `slot_edit_passed` is false or `menuId` is missing
+**Then** «Список» remains blocked as today (title / aria-disabled)
+**And** this story does not change gate semantics — only chrome placement/labels (FR23)
+
+**Given** visual contract
+**When** comparing to `mockups/mock-header-nav-w1-2026-07-20.html`
+**Then** layout matches W1 (two rows; Soft Workshop / Lavender tokens; pill active styles unchanged in spirit)
+**And** older mocks that put pills inside the global header are ignored for chrome

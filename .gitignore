@@ -12,6 +12,10 @@
 
 # testing
 /coverage
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
 
 # next.js
 /.next/
@@ -23,6 +27,12 @@
 # misc
 .DS_Store
 *.pem
+
+# Python sync worker local venv (Story 1.4)
+.venv-sync/
+__pycache__/
+*.py[cod]
+*$py.class
 
 # debug
 npm-debug.log*

@@ -1,0 +1,85 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+import { passesFridgeKeep } from "@/domain/matching/eligibility";
+import {
+  isLongIdle,
+  loadLastAssignedAt,
+  loadRecentMenuRecipeIds,
+} from "@/domain/suggestions/history";
+import {
+  rankCandidates,
+  type RankableCandidate,
+} from "@/domain/suggestions/rank";
+import {
+  isHardSuppressed,
+  loadSuppressSets,
+} from "@/domain/suggestions/suppress";
+
+export type SuggestionCandidate = RankableCandidate;
+
+/**
+ * Build library candidates for a Menu: suppress → fridge-keep → rank.
+ * No store/product buyability gate.
+ * Marks recipes from recent menus as recentlyUsed for cross-menu variety.
+ */
+export async function buildCandidates(
+  supabase: SupabaseClient,
+  userId: string,
+  menuId: string,
+  now: Date = new Date(),
+): Promise<
+  | { ok: true; candidates: SuggestionCandidate[] }
+  | { ok: false; reason: "query" }
+> {
+  const { data: menu, error: menuError } = await supabase
+    .from("menus")
+    .select("day_count")
+    .eq("id", menuId)
+    .maybeSingle();
+
+  if (menuError || !menu) {
+    return { ok: false, reason: "query" };
+  }
+
+  const { data: recipes, error } = await supabase
+    .from("recipes")
+    .select("id, name, fridge_keep_days")
+    .order("name", { ascending: true });
+
+  if (error || !recipes) {
+    return { ok: false, reason: "query" };
+  }
+
+  const [suppress, lastAssigned, recentIds] = await Promise.all([
+    loadSuppressSets(supabase, userId),
+    loadLastAssignedAt(supabase, userId),
+    loadRecentMenuRecipeIds(supabase, userId, { excludeMenuId: menuId }),
+  ]);
+
+  if (!suppress || !lastAssigned || !recentIds) {
+    return { ok: false, reason: "query" };
+  }
+
+  const eligible: SuggestionCandidate[] = [];
+
+  for (const recipe of recipes) {
+    if (isHardSuppressed(recipe.id, suppress)) {
+      continue;
+    }
+    if (!passesFridgeKeep(recipe.fridge_keep_days, menu.day_count)) {
+      continue;
+    }
+
+    const rating = suppress.ratings.get(recipe.id) ?? "none";
+    eligible.push({
+      recipeId: recipe.id,
+      name: recipe.name,
+      fridgeKeepDays: recipe.fridge_keep_days,
+      longIdle: isLongIdle(lastAssigned.get(recipe.id), now),
+      recentlyUsed: recentIds.has(recipe.id),
+      rating,
+    });
+  }
+
+  return { ok: true, candidates: rankCandidates(eligible) };
+}

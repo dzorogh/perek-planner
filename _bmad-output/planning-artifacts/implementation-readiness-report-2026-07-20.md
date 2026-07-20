@@ -4,30 +4,30 @@ readinessStatus: NEEDS WORK
 assessor: bmad-check-implementation-readiness
 assessmentDate: 2026-07-20
 documentsIncluded:
-  - prds/prd-perek-planner-2026-07-19/prd.md
-  - architecture/architecture-perek-planner-2026-07-19/ARCHITECTURE-SPINE.md
+  - prds/prd-keplo-2026-07-19/prd.md
+  - architecture/architecture-keplo-2026-07-19/ARCHITECTURE-SPINE.md
   - epics.md
-  - ux-designs/ux-perek-planner-2026-07-19/EXPERIENCE.md
-  - ux-designs/ux-perek-planner-2026-07-19/DESIGN.md
-  - ux-designs/ux-perek-planner-2026-07-19/wireframes/flow-uj1-2026-07-19.excalidraw
+  - ux-designs/ux-keplo-2026-07-19/EXPERIENCE.md
+  - ux-designs/ux-keplo-2026-07-19/DESIGN.md
+  - ux-designs/ux-keplo-2026-07-19/wireframes/flow-uj1-2026-07-19.excalidraw
 ---
 
 # Implementation Readiness Assessment Report
 
 **Date:** 2026-07-20
-**Project:** perek-planner
+**Project:** keplo
 
 ## Document Inventory
 
 Assessment set confirmed by user (2026-07-20).
 
 ### PRD
-- Whole: `prds/prd-perek-planner-2026-07-19/prd.md` (~19 KB, 2026-07-20)
+- Whole: `prds/prd-keplo-2026-07-19/prd.md` (~19 KB, 2026-07-20)
 - Supporting (excluded from primary set): addendum.md, extract-brief.md, reconcile-brief.md, research-landscape.md, review-rubric.md
 - Sharded: none
 
 ### Architecture
-- Whole: `architecture/architecture-perek-planner-2026-07-19/ARCHITECTURE-SPINE.md` (~13 KB, 2026-07-19)
+- Whole: `architecture/architecture-keplo-2026-07-19/ARCHITECTURE-SPINE.md` (~13 KB, 2026-07-19)
 - Supporting (excluded): reviews/*
 - Sharded: none
 
@@ -36,9 +36,9 @@ Assessment set confirmed by user (2026-07-20).
 - Sharded: none
 
 ### UX Design
-- Primary: `ux-designs/ux-perek-planner-2026-07-19/EXPERIENCE.md` (~17 KB, 2026-07-20)
-- Primary: `ux-designs/ux-perek-planner-2026-07-19/DESIGN.md` (~15 KB, 2026-07-19)
-- Wireframe: `ux-designs/ux-perek-planner-2026-07-19/wireframes/flow-uj1-2026-07-19.excalidraw`
+- Primary: `ux-designs/ux-keplo-2026-07-19/EXPERIENCE.md` (~17 KB, 2026-07-20)
+- Primary: `ux-designs/ux-keplo-2026-07-19/DESIGN.md` (~15 KB, 2026-07-19)
+- Wireframe: `ux-designs/ux-keplo-2026-07-19/wireframes/flow-uj1-2026-07-19.excalidraw`
 - Supporting (excluded): reconcile-*.md, .working/*
 - Sharded: none
 
@@ -49,7 +49,7 @@ Assessment set confirmed by user (2026-07-20).
 
 ## PRD Analysis
 
-Source: `prds/prd-perek-planner-2026-07-19/prd.md` (status: final)
+Source: `prds/prd-keplo-2026-07-19/prd.md` (status: final)
 
 ### Functional Requirements
 
@@ -110,7 +110,7 @@ FR-12: Gate new AI Recipes — Newly AI-proposed Recipes are not suggested until
 - Recipes without system Checked matches do not appear as suggestions or drive the Shopping list.
 - Assumption: Match quality is system-owned; Sergey corrects outcomes by Refusal/Rating and by editing the store cart, not by a match-review UI in v1.
 
-FR-13: Pantry on list by default — Pantry items affect Recipe eligibility; in v1 they appear on the Shopping list by default so Sergey can filter them at Perekrestok order time (no per-item in-app opt-in prompt).
+FR-13: Pantry on list by default — Pantry items affect Recipe eligibility; in v1 they appear on the Shopping list by default so Sergey can filter them at store order time (no per-item in-app opt-in prompt).
 - A Recipe can be ineligible if a required Pantry item Product is missing from the catalog.
 - Pantry items appear on the Shopping list by default without an in-app opt-in prompt.
 
@@ -123,9 +123,9 @@ FR-15: Prefer cheaper analogs (medium) — When choosing among suitable Products
 - Cheapest SKU not chosen if it fails basic quality heuristic; ties or tiny gaps need not force a switch.
 - Assumption: “Basic quality” is a simple heuristic or manual preference, not a guaranteed quality score.
 
-FR-16: Select store — Sergey can select a specific Perekrestok store whose catalog drives Products and today’s stock.
+FR-16: Select store — Sergey can select a specific store whose catalog drives Products and today’s stock.
 - A concrete store (not only a free-text address) is selected for planning.
-- v1 chain is Perekrestok only.
+- v1 chain is single grocery chain only.
 - Assumption: Thin store-adapter boundary for future chains.
 
 FR-17: Only suggest Recipes buyable today — At planning time, do not suggest a Recipe if any Critical ingredient lacks at least one Checked-match Product variant (including analogs) that is in stock today.
@@ -148,7 +148,7 @@ FR-20: Copy Shopping list — Sergey can always copy the Shopping list.
 - Copy works even when no store link is available.
 - Copy is sufficient to complete purchase outside the app.
 
-FR-21: Optional store link — When a working Perekrestok link can be produced, Sergey can open it; it must not be the only purchase path.
+FR-21: Optional store link — When a working the store link can be produced, Sergey can open it; it must not be the only purchase path.
 - Missing or broken link does not block planning or copy (FR-20).
 - Assumption: Link format may be deep link, share URL, or equivalent — exact transport deferred.
 
@@ -204,7 +204,7 @@ NFR-I6 (Extensibility constraint): Thin store-adapter boundary so another chain 
 
 **Assumptions index:** Thin store-adapter; system-owned match quality; store link transport TBD; basic quality heuristic for analogs; pantry on list by default.
 
-**Constraints:** Single operator; Perekrestok only in v1 UI; default store context д. Алабино, 92; default plan feeds two people; purchase outside the app.
+**Constraints:** Single operator; single grocery chain only in v1 UI; default store context д. Алабино, 92; default plan feeds two people; purchase outside the app.
 
 ### PRD Completeness Assessment
 
@@ -311,9 +311,9 @@ FR25: Epic 1 — Post sign-in lands on Create Menu (UX-derived)
 ### UX Document Status
 
 **Found** — primary set confirmed in Step 1:
-- `ux-designs/ux-perek-planner-2026-07-19/EXPERIENCE.md` (status: final) — Experience Spine, IA, flows, components, a11y floor
-- `ux-designs/ux-perek-planner-2026-07-19/DESIGN.md` (status: final) — Soft Workshop / Lavender Workshop brand layer
-- `ux-designs/ux-perek-planner-2026-07-19/wireframes/flow-uj1-2026-07-19.excalidraw` — UJ-1 primary journey
+- `ux-designs/ux-keplo-2026-07-19/EXPERIENCE.md` (status: final) — Experience Spine, IA, flows, components, a11y floor
+- `ux-designs/ux-keplo-2026-07-19/DESIGN.md` (status: final) — Soft Workshop / Lavender Workshop brand layer
+- `ux-designs/ux-keplo-2026-07-19/wireframes/flow-uj1-2026-07-19.excalidraw` — UJ-1 primary journey
 
 ### UX ↔ PRD Alignment
 
