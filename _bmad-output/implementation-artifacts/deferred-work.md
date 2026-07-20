@@ -57,3 +57,13 @@ All previously open items were closed in the deferred-work sweep. Strikethrough 
 - source_spec: `_bmad-output/implementation-artifacts/spec-fix-protein-protein-plate-pairing.md`
   summary: Verifier still duplicates plate/meal-fit helpers instead of importing TS domain.
   evidence: Pre-existing pattern; green verify:logic can drift from production if only one copy is edited.
+
+## From spec-menu-meal-mix-and-day-distribution
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-menu-meal-mix-and-day-distribution.md`
+  summary: Resuggest/LLM-assign fallback still skips `ensureHeavyAnimalOnLunchDinner` (create-flow only).
+  evidence: Review found `resuggest-slot.ts` uses bare `deterministicAssignments` without the new meat/L/D guarantee.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-menu-meal-mix-and-day-distribution.md`
+  summary: `looksLikeHeavyAnimalProteinDish` still misses some one-pots named in invent prompt (голубцы, пельмени, манты).
+  evidence: Pre-existing heuristic gap; invent can invent them but quota check may not count them as meat.

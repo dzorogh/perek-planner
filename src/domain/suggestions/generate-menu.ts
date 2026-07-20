@@ -25,11 +25,15 @@ import {
   type SlotPrompt,
 } from "@/domain/suggestions/openrouter-generate";
 import { generateSnacksForMenu } from "@/domain/suggestions/generate-snacks";
-import { looksLikeNoCookSnack } from "@/domain/suggestions/meal-fit";
+import {
+  looksLikeHeavyAnimalProteinDish,
+  looksLikeNoCookSnack,
+  mealsIncludeLunchOrDinner,
+} from "@/domain/suggestions/meal-fit";
 import { normalizePlateAssignments } from "@/domain/suggestions/plate-complete";
 import { preferInventedCandidates } from "@/domain/suggestions/rank";
 import { loadSuppressSets } from "@/domain/suggestions/suppress";
-import { enforceDayVariety } from "@/domain/suggestions/variety";
+import { enforceDayVariety, ensureHeavyAnimalOnLunchDinner } from "@/domain/suggestions/variety";
 import {
   getOpenRouterApiKey,
   OpenRouterError,
@@ -243,6 +247,17 @@ async function fillCookableSlots(
       );
     }
 
+    if (
+      mealsIncludeLunchOrDinner(options.meals) &&
+      !assignPool.some(
+        (c) =>
+          c.plateRole !== "companion" &&
+          looksLikeHeavyAnimalProteinDish(c.name),
+      )
+    ) {
+      throw new SuggestionError("parse", SUGGESTION_FAIL_RU.parse);
+    }
+
     const { data: slotRows, error: slotsError } = await supabase
       .from("menu_slots")
       .select("id, day_index, meal")
@@ -262,6 +277,7 @@ async function fillCookableSlots(
     // Create-flow: deterministic batch assign (LLM assign kept for resuggest only).
     let proposals = deterministicAssignments(slots, assignPool);
     proposals = enforceDayVariety(slots, proposals, assignPool);
+    proposals = ensureHeavyAnimalOnLunchDinner(slots, proposals, assignPool);
     proposals = normalizePlateAssignments(slots, proposals, assignPool);
 
     if (proposals.length === 0) {

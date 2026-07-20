@@ -274,6 +274,14 @@ function isBreakfastMeal(meal) {
   return meal === "breakfast" || meal === "second_breakfast";
 }
 
+function isLunchDinnerMeal(meal) {
+  return meal === "lunch" || meal === "dinner" || meal === "late_dinner";
+}
+
+function mealsIncludeLunchOrDinner(meals) {
+  return meals.some(isLunchDinnerMeal);
+}
+
 function looksLikeHeavyAnimalProteinDish(name) {
   const n = normalizeDishName(name);
   if (!n) return false;
@@ -1135,6 +1143,9 @@ function isSuitableAsBreakfastMain(name) {
 
 function mainsForMeal(meal, named) {
   const mains = named.filter((c) => !looksLikeCompanionOnly(c.name));
+  if (isLunchDinnerMeal(meal)) {
+    return mains.filter((c) => !looksLikeBreakfastDish(c.name));
+  }
   const base = mains.length > 0 ? mains : [...named];
   if (!isBreakfastMeal(meal)) return base;
   const morning = base.filter((c) => looksLikeBreakfastDish(c.name));
@@ -1254,6 +1265,7 @@ function assignWithBatchVariety(slots, candidates) {
   mealOrder.forEach((meal, mealIndex) => {
     const mealSlots = byMeal.get(meal);
     const pool = mainsForMeal(meal, named);
+    if (pool.length === 0) return;
     const { primary, secondary } = pickForMeal(pool);
     for (let i = 0; i < mealSlots.length; i++) {
       const slot = mealSlots[i];
@@ -1382,6 +1394,68 @@ function enforceDayVariety(slots, proposals, candidates) {
     enforceBatchRatio(slots, bySlot, byMeal, candidateIds, candidates) ??
     toProposals(slots, bySlot)
   );
+}
+
+function ensureHeavyAnimalOnLunchDinner(slots, proposals, candidates) {
+  const ldSlots = slots.filter((s) => isLunchDinnerMeal(s.meal));
+  if (ldSlots.length === 0) return proposals;
+
+  const nameById = new Map(candidates.map((c) => [c.recipeId, c.name]));
+  const heavyPool = candidates.filter(
+    (c) =>
+      c.plateRole !== "companion" &&
+      looksLikeHeavyAnimalProteinDish(c.name),
+  );
+  if (heavyPool.length === 0) return proposals;
+
+  const alreadyPlaced = proposals.some((p) => {
+    const slot = slots.find((s) => s.slotId === p.slotId);
+    if (!slot || !isLunchDinnerMeal(slot.meal)) return false;
+    return looksLikeHeavyAnimalProteinDish(nameById.get(p.recipeId) ?? "");
+  });
+  if (alreadyPlaced) return proposals;
+
+  const bySlot = new Map(proposals.map((p) => [p.slotId, p.recipeId]));
+
+  for (const heavy of heavyPool) {
+    for (const slot of ldSlots) {
+      const prev = bySlot.get(slot.slotId);
+      bySlot.set(slot.slotId, heavy.recipeId);
+      const trial = toProposals(slots, bySlot);
+      if (
+        !hasSameDayMainReuse(slots, trial) &&
+        !hasDuplicateDayMenus(slots, trial)
+      ) {
+        return proposals.map((p) =>
+          p.slotId === slot.slotId
+            ? {
+                ...p,
+                recipeId: heavy.recipeId,
+                companionRecipeId: null,
+                plateKind: "complete",
+              }
+            : p,
+        );
+      }
+      if (prev == null) bySlot.delete(slot.slotId);
+      else bySlot.set(slot.slotId, prev);
+    }
+  }
+
+  const fallbackSlot = ldSlots[0];
+  const fallbackHeavy = heavyPool[0].recipeId;
+  const forced = {
+    slotId: fallbackSlot.slotId,
+    recipeId: fallbackHeavy,
+    companionRecipeId: null,
+    plateKind: "complete",
+  };
+  if (proposals.some((p) => p.slotId === fallbackSlot.slotId)) {
+    return proposals.map((p) =>
+      p.slotId === fallbackSlot.slotId ? { ...p, ...forced } : p,
+    );
+  }
+  return [...proposals, forced];
 }
 
 function deterministicAssignments(slots, candidates) {
@@ -1708,6 +1782,77 @@ check(
     "enforceDayVariety breaks same-day main reuse",
     !hasSameDayMainReuse(slots9, fixedSameDay) &&
       !hasDuplicateDayMenus(slots9, fixedSameDay),
+  );
+}
+
+// Meal-mix: breakfast forms blocked from L/D mains; meat main placed on L/D.
+{
+  const mixCands = [
+    { recipeId: "syrniki", name: "Творожные сырники" },
+    { recipeId: "meatballs", name: "Куриные фрикадельки в сливочном соусе" },
+  ];
+  const lunchPool = mainsForMeal("lunch", mixCands);
+  check(
+    "mainsForMeal lunch excludes сырники when фрикадельки present",
+    lunchPool.length === 1 && lunchPool[0].recipeId === "meatballs",
+  );
+  check(
+    "potato-meat bake eligible for L/D",
+    !looksLikeBreakfastDish("Запеканка из картофеля с фаршем") &&
+      looksLikeHeavyAnimalProteinDish("Запеканка из картофеля с фаршем"),
+  );
+  check(
+    "cottage-cheese buckwheat bake is breakfast-only",
+    looksLikeBreakfastDish("Гречневая запеканка с творогом"),
+  );
+
+  const ldSlots = [
+    { slotId: "b1", dayIndex: 1, meal: "breakfast" },
+    { slotId: "l1", dayIndex: 1, meal: "lunch" },
+    { slotId: "d1", dayIndex: 1, meal: "dinner" },
+    { slotId: "l2", dayIndex: 2, meal: "lunch" },
+    { slotId: "d2", dayIndex: 2, meal: "dinner" },
+  ];
+  const ldCands = [
+    { recipeId: "syrniki", name: "Творожные сырники" },
+    { recipeId: "meatballs", name: "Куриные фрикадельки в сливочном соусе" },
+    { recipeId: "rice", name: "Тушеный рис с овощами" },
+  ];
+  let ldAssign = assignWithBatchVariety(ldSlots, ldCands);
+  ldAssign = enforceDayVariety(ldSlots, ldAssign, ldCands);
+  ldAssign = ensureHeavyAnimalOnLunchDinner(ldSlots, ldAssign, ldCands);
+  const ldMainNames = ldAssign
+    .filter((a) => {
+      const slot = ldSlots.find((s) => s.slotId === a.slotId);
+      return slot && isLunchDinnerMeal(slot.meal);
+    })
+    .map((a) => ldCands.find((c) => c.recipeId === a.recipeId)?.name ?? "");
+  check(
+    "L/D mains never breakfast form when meat main in pool",
+    ldMainNames.every((name) => !looksLikeBreakfastDish(name)),
+  );
+  check(
+    "heavy animal main placed on at least one L/D slot",
+    ldAssign.some((a) => {
+      const slot = ldSlots.find((s) => s.slotId === a.slotId);
+      if (!slot || !isLunchDinnerMeal(slot.meal)) return false;
+      const name = ldCands.find((c) => c.recipeId === a.recipeId)?.name ?? "";
+      return looksLikeHeavyAnimalProteinDish(name);
+    }),
+  );
+
+  const batchSlots = [
+    { slotId: "d1", dayIndex: 1, meal: "dinner" },
+    { slotId: "d2", dayIndex: 2, meal: "dinner" },
+  ];
+  const batchCands = [
+    { recipeId: "chicken", name: "Запечённая курица с лимоном" },
+  ];
+  const batchAssign = assignWithBatchVariety(batchSlots, batchCands);
+  check(
+    "batch reuse: same dinner main across days allowed",
+    batchAssign.length === 2 &&
+      batchAssign[0].recipeId === batchAssign[1].recipeId,
   );
 }
 

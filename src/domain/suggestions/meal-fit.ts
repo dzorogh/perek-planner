@@ -6,6 +6,17 @@ export function isBreakfastMeal(meal: MealSlot): boolean {
   return meal === "breakfast" || meal === "second_breakfast";
 }
 
+/** Lunch, dinner, or late dinner — mains must not be morning food. */
+export function isLunchDinnerMeal(meal: MealSlot): boolean {
+  return meal === "lunch" || meal === "dinner" || meal === "late_dinner";
+}
+
+export function mealsIncludeLunchOrDinner(
+  meals: readonly MealSlot[] | null | undefined,
+): boolean {
+  return (meals ?? []).some(isLunchDinnerMeal);
+}
+
 /**
  * Detect no-cook snack labels that belong in `menu_snacks`, not cookable slots.
  * Cooked breakfast (каша, сырники, яичница) must not be rejected.
@@ -160,13 +171,18 @@ export function isSuitableAsBreakfastMain(name: string): boolean {
 
 /**
  * Pick mains for a meal: breakfast gets morning food first, then non-dinner
- * leftovers; lunch/dinner use any non-companion main.
+ * leftovers; lunch/dinner exclude morning-form dishes (empty over breakfast fallback).
+ * Other non-breakfast meals (e.g. afternoon_snack) keep the full main pool.
  */
 export function mainsForMeal<T extends { name: string }>(
   meal: MealSlot,
   named: readonly T[],
 ): T[] {
   const mains = named.filter((c) => !looksLikeCompanionOnly(c.name));
+  if (isLunchDinnerMeal(meal)) {
+    return mains.filter((c) => !looksLikeBreakfastDish(c.name));
+  }
+
   const base = mains.length > 0 ? mains : [...named];
   if (!isBreakfastMeal(meal)) return base;
 

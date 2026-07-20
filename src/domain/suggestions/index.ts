@@ -43,6 +43,7 @@ export {
 } from "@/domain/suggestions/dish-similarity";
 export {
   isBreakfastMeal,
+  isLunchDinnerMeal,
   isSuitableAsBreakfastMain,
   looksLikeBreakfastDish,
   looksLikeCompanionOnly,
@@ -51,11 +52,13 @@ export {
   looksLikeNoCookSnack,
   looksLikeProteinDish,
   mainsForMeal,
+  mealsIncludeLunchOrDinner,
   stripHardcodedPairing,
 } from "@/domain/suggestions/meal-fit";
 export {
   batchSlotRatio,
   enforceDayVariety,
+  ensureHeavyAnimalOnLunchDinner,
   hasDuplicateDayMenus,
   hasSameDayMainReuse,
   isMenuUniformAcrossDays,

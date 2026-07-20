@@ -9,8 +9,11 @@ import {
 } from "@/domain/suggestions/dish-similarity";
 import {
   isBreakfastMeal,
+  looksLikeBreakfastDish,
+  looksLikeHeavyAnimalProteinDish,
   looksLikeLunchDinnerOnlyMain,
   looksLikeNoCookSnack,
+  mealsIncludeLunchOrDinner,
   stripHardcodedPairing,
 } from "@/domain/suggestions/meal-fit";
 import {
@@ -102,8 +105,10 @@ Rules:
   A topping/mix-in swap on the same form+base is NOT a new dish. Change the culinary form (or clearly different base) instead.
 - When currentMenuDishes is non-empty (slot replace): invent a clearly different form for that meal — do not echo what is already on the menu.
 - Include breakfast-suitable and lunch/dinner recipes as needed by meals. When breakfast is in meals, at least ~1/3 of mains must be true morning food.
+- When lunch and/or dinner are in meals: at least ONE plate_role=main MUST be a meat/fish/heavy-animal dish (котлеты, фрикадельки, запечённая курица/рыба, плов, голубцы, картофельная запеканка с фаршем, etc.). Egg/dairy/mushroom-only mains do NOT satisfy this quota.
+- Lunch/dinner mains MUST prefer meat/fish/poultry — real home dinners, not morning food. NEVER mark сырники, творожные оладьи/запеканки, каши, омлеты, or other morning forms as suitable for lunch/dinner. Potato/meat dinner bakes (запеканка с фаршем) ARE valid lunch/dinner mains.
 - Breakfast = cooked morning food ONLY (каша, яичница, омлет, сырники, оладьи, творожная запеканка, тосты с яйцом, etc.) with real cooking steps. NEVER invent roast/fried chicken, soups/broths, plov, cutlets, steaks, pasta mains, or other lunch/dinner plates as breakfast — those belong to lunch/dinner only. suitable_meals for a roast chicken must NOT include "breakfast".
-- plate_role=main: a dish that can be the primary item of a meal. Prefer lunch/dinner mains that already include protein (мясо/птица/рыба/яйца/бобовые). Complete one-pots (плов, лазанья, голубцы, пельмени, манты, паста with protein) MUST be plate_role=main — they are full meals and must NOT also be invented as a companion/гарнир for themselves. Vegetable cutlets (морковные/капустные/…) are allowed as mains but are NOT complete meals — the assign step will pair a protein companion. Breakfast mains must be standalone morning food (каша, яичница, сырники, оладьи, творожная запеканка) — never a sauce, dressing, bare garnish, or dinner main.
+- plate_role=main: a dish that can be the primary item of a meal. Prefer lunch/dinner mains with meat/fish/poultry (мясо/птица/рыба). Complete one-pots (плов, лазанья, голубцы, пельмени, манты, паста with protein) MUST be plate_role=main — they are full meals and must NOT also be invented as a companion/гарнир for themselves. Vegetable cutlets (морковные/капустные/…) are allowed as mains but are NOT complete meals — the assign step will pair a protein companion. Breakfast mains must be standalone morning food (каша, яичница, сырники, оладьи, творожная запеканка) — never a sauce, dressing, bare garnish, or dinner main.
 - plate_role=companion: a SIMPLE side (гарнир: крупа, картофель, овощи) OR a simple protein add-on (курица/рыба/яйца/грибы) OR a simple sauce — not a second complex main and NEVER a one-pot like плов. At least 30–40% of the batch should be companions when lunch/dinner meals are requested; include several protein add-ons so veg mains can be paired. Sauces/подливы/заправки are ALWAYS companion, never breakfast mains.
 - Name companions by the dish itself («Грибной соус», «Картофельное пюре»). NEVER hardcode a pairing in the name («к пасте», «к мясу», «под курицу») — the app pairs companions with mains later.
 - NEVER invent snacks / перекусы / no-cook ready-to-eat plates. Snacks are generated in a separate pipeline and must not appear as recipes. Do not use the word «перекус» in a recipe name.
@@ -196,12 +201,13 @@ export async function inventAndPersistRecipes(
 
   let drafts: InventRecipeDraft[];
   try {
-    const chunkResults = await Promise.all(
-      inventChunkSizes(count).map((chunkCount) =>
-        proposeInventedRecipes(chunkCount, chat, tasteNotes, inventContext),
-      ),
+    drafts = await proposeInventDraftsWithMealMix(
+      count,
+      chat,
+      tasteNotes,
+      inventContext,
+      exactAvoidNames,
     );
-    drafts = chunkResults.flat();
   } catch (err) {
     if (err instanceof OpenRouterError) {
       return { ok: false, reason: "openrouter" };
@@ -209,25 +215,14 @@ export async function inventAndPersistRecipes(
     throw err;
   }
 
-  // Drop snack-like labels (belong in menu_snacks). Exact-name dedupe only otherwise.
-  // When inventing for breakfast only, reject lunch/dinner mains (roast chicken, soup…).
-  const contextMeal = options.contextMeal;
-  drafts = selectExactUniqueDrafts(
-    drafts.filter((d) => {
-      if (looksLikeNoCookSnack(d.name)) return false;
-      if (
-        contextMeal &&
-        isBreakfastMeal(contextMeal) &&
-        looksLikeLunchDinnerOnlyMain(d.name)
-      ) {
-        return false;
-      }
-      return true;
-    }),
+  const meals = options.meals ?? [];
+  drafts = finalizeInventDraftsForPersist(
+    drafts,
     exactAvoidNames,
     count,
+    meals,
+    options.contextMeal,
   );
-
   if (drafts.length === 0) {
     return { ok: false, reason: "parse" };
   }
@@ -286,6 +281,166 @@ export function selectExactUniqueDrafts(
   return kept;
 }
 
+/** Count plate_role=main drafts that signal meat/fish. */
+export function countHeavyAnimalMainsInDrafts(
+  drafts: readonly InventRecipeDraft[],
+): number {
+  return drafts.filter(
+    (d) =>
+      d.plateRole === "main" && looksLikeHeavyAnimalProteinDish(d.name),
+  ).length;
+}
+
+/** Snack/breakfast filters + meal-mix select; empty when L/D meat quota fails. */
+function finalizeInventDraftsForPersist(
+  drafts: InventRecipeDraft[],
+  exactAvoidNames: string[],
+  count: number,
+  meals: readonly MealSlot[],
+  contextMeal: MealSlot | undefined,
+): InventRecipeDraft[] {
+  const filtered = drafts.filter((d) => {
+    if (looksLikeNoCookSnack(d.name)) return false;
+    if (
+      contextMeal &&
+      isBreakfastMeal(contextMeal) &&
+      looksLikeLunchDinnerOnlyMain(d.name)
+    ) {
+      return false;
+    }
+    return true;
+  });
+  const kept = selectInventDraftsForMeals(
+    filtered,
+    exactAvoidNames,
+    count,
+    meals,
+  );
+  if (
+    mealsIncludeLunchOrDinner(meals) &&
+    countHeavyAnimalMainsInDrafts(kept) === 0
+  ) {
+    return [];
+  }
+  return kept;
+}
+
+/**
+ * When lunch/dinner are requested, keep heavy-animal and L/D-eligible mains
+ * before breakfast-only forms so morning dishes do not crowd out dinners.
+ */
+export function selectInventDraftsForMeals(
+  drafts: InventRecipeDraft[],
+  exactAvoid: string[],
+  limit: number,
+  meals: readonly MealSlot[],
+): InventRecipeDraft[] {
+  const unique = selectExactUniqueDrafts(drafts, exactAvoid, drafts.length);
+  if (!mealsIncludeLunchOrDinner(meals)) {
+    return unique.slice(0, limit);
+  }
+
+  const hasBreakfast = meals.some(isBreakfastMeal);
+  const kept: InventRecipeDraft[] = [];
+  const used = new Set<string>();
+
+  const tryAdd = (draft: InventRecipeDraft): boolean => {
+    if (kept.length >= limit) return false;
+    const norm = normalizeDishName(draft.name);
+    if (!norm || used.has(norm)) return false;
+    used.add(norm);
+    kept.push(draft);
+    return true;
+  };
+
+  const mains = unique.filter((d) => d.plateRole === "main");
+  const companions = unique.filter((d) => d.plateRole === "companion");
+  const heavyAnimal = mains.filter((d) =>
+    looksLikeHeavyAnimalProteinDish(d.name),
+  );
+  const ldEligible = mains.filter(
+    (d) =>
+      !looksLikeHeavyAnimalProteinDish(d.name) &&
+      !looksLikeBreakfastDish(d.name),
+  );
+  const breakfastMains = mains.filter((d) => looksLikeBreakfastDish(d.name));
+
+  for (const draft of heavyAnimal) tryAdd(draft);
+  for (const draft of ldEligible) tryAdd(draft);
+  if (hasBreakfast) {
+    for (const draft of breakfastMains) tryAdd(draft);
+  }
+  for (const draft of companions) tryAdd(draft);
+  // Fill remainder without reintroducing breakfast mains when breakfast is off.
+  for (const draft of unique) {
+    if (
+      !hasBreakfast &&
+      draft.plateRole === "main" &&
+      looksLikeBreakfastDish(draft.name)
+    ) {
+      continue;
+    }
+    tryAdd(draft);
+  }
+
+  return kept;
+}
+
+async function proposeInventDraftsWithMealMix(
+  count: number,
+  chat: ChatCompletionsFn,
+  tasteNotes: TasteNote[],
+  context: {
+    meals?: readonly MealSlot[];
+    contextMeal?: MealSlot;
+    avoidNames?: string[];
+    previousMenusDishes?: string[];
+    currentMenuDishes?: string[];
+    menuDayCount?: number;
+    peoplePerMeal?: number;
+  },
+  exactAvoidNames: string[] = [],
+): Promise<InventRecipeDraft[]> {
+  const meals = context.meals ?? [];
+  let drafts = await fetchInventDraftChunks(count, chat, tasteNotes, context);
+
+  const keptHeavy = () =>
+    countHeavyAnimalMainsInDrafts(
+      selectInventDraftsForMeals(drafts, exactAvoidNames, count, meals),
+    );
+
+  if (mealsIncludeLunchOrDinner(meals) && keptHeavy() === 0) {
+    const retry = await fetchInventDraftChunks(count, chat, tasteNotes, {
+      ...context,
+      avoidNames: [
+        ...(context.avoidNames ?? []),
+        ...drafts.map((d) => d.name),
+      ],
+    });
+    drafts = [...drafts, ...retry];
+  }
+
+  if (mealsIncludeLunchOrDinner(meals) && keptHeavy() === 0) {
+    return [];
+  }
+
+  return drafts;
+}
+
+async function fetchInventDraftChunks(
+  count: number,
+  chat: ChatCompletionsFn,
+  tasteNotes: TasteNote[],
+  context: Parameters<typeof proposeInventedRecipes>[3],
+): Promise<InventRecipeDraft[]> {
+  const chunkResults = await Promise.all(
+    inventChunkSizes(count).map((chunkCount) =>
+      proposeInventedRecipes(chunkCount, chat, tasteNotes, context),
+    ),
+  );
+  return chunkResults.flat();
+}
+
 export async function proposeInventedRecipes(
   count: number,
   chat: ChatCompletionsFn,
@@ -326,7 +481,7 @@ export async function proposeInventedRecipes(
     ),
     avoidNames: uniqueExactNames(context.avoidNames ?? []).slice(0, 50),
     instruction:
-      "Invent inventCount NEW cooked recipes via AI (extras so we can keep targetKeep). Mix plate_role=main and plate_role=companion (companions ≈30–40% when lunch/dinner are in meals). HARD: you own near-duplicate judgment — never invent the same culinary form+base as anything in previousMenusDishes, currentMenuDishes, or avoidNames (topping swaps count as duplicates: творожная запеканка с ягодами ≈ с изюмом; оладьи≈панкейки). If currentMenuDishes is set, invent a clearly different form for contextMeal. Keep the batch internally diverse. Cover cooked breakfast and lunch/dinner as needed by meals — when breakfast is requested, invent real morning food (яичница/сырники/оладьи/омлет/запеканка; каша only if operatorTasteNotes allow). Never roast chicken/soup/plov/cutlets for breakfast. Breakfast mains = morning food only; sauces/sides are companion. Name companions without «к пасте»/«к мясу». Never invent перекусы/no-cook snacks — those are separate. If contextMeal is set, bias toward that meal. Honor operatorTasteNotes: constraint PRIMARY (generalize — «не люблю каши» forbids all каши); exampleDish secondary. Keep body_text short (3–5 steps main, 2–4 companion). HARD: every buyable food in name or body_text (including serving like сметана/зелень) MUST be in critical_ingredients — shopping list ignores the text. When menuDayCount/peoplePerMeal are set, keep ingredient amounts per 1 adult serving; fridge_keep_days >= menuDayCount.",
+      "Invent inventCount NEW cooked recipes via AI (extras so we can keep targetKeep). Mix plate_role=main and plate_role=companion (companions ≈30–40% when lunch/dinner are in meals). HARD: you own near-duplicate judgment — never invent the same culinary form+base as anything in previousMenusDishes, currentMenuDishes, or avoidNames (topping swaps count as duplicates: творожная запеканка с ягодами ≈ с изюмом; оладьи≈панкейки). If currentMenuDishes is set, invent a clearly different form for contextMeal. Keep the batch internally diverse. Cover cooked breakfast and lunch/dinner as needed by meals — when breakfast is requested, invent real morning food (яичница/сырники/оладьи/омлет/запеканка; каша only if operatorTasteNotes allow). Never roast chicken/soup/plov/cutlets for breakfast. Breakfast mains = morning food only; sauces/sides are companion. When lunch/dinner are in meals: include at least ONE meat/fish main (фрикадельки, запечённая курица/рыба, плов, картофельная запеканка с фаршем, etc.) — egg/dairy/mushroom-only mains do NOT count. NEVER mark morning forms (сырники, творожные запеканки, каши) as suitable for lunch/dinner. Name companions without «к пасте»/«к мясу». Never invent перекусы/no-cook snacks — those are separate. If contextMeal is set, bias toward that meal. Honor operatorTasteNotes: constraint PRIMARY (generalize — «не люблю каши» forbids all каши); exampleDish secondary. Keep body_text short (3–5 steps main, 2–4 companion). HARD: every buyable food in name or body_text (including serving like сметана/зелень) MUST be in critical_ingredients — shopping list ignores the text. When menuDayCount/peoplePerMeal are set, keep ingredient amounts per 1 adult serving; fridge_keep_days >= menuDayCount.",
     operatorTasteNotes: tasteNotesForPrompt(tasteNotes),
   });
 

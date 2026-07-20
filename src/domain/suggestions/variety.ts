@@ -3,8 +3,10 @@ import type { SuggestionCandidate } from "@/domain/suggestions/candidates";
 import { pickUnusedCandidate } from "@/domain/suggestions/dish-similarity";
 import {
   isBreakfastMeal,
+  isLunchDinnerMeal,
   isSuitableAsBreakfastMain,
   looksLikeBreakfastDish,
+  looksLikeHeavyAnimalProteinDish,
   mainsForMeal,
 } from "@/domain/suggestions/meal-fit";
 import type {
@@ -161,7 +163,9 @@ function assignMealBatch(
   ) => { primary: string; secondary: string },
   out: ProposedAssignment[],
 ): void {
-  const { primary, secondary } = pickForMeal(mainsForMeal(meal, named));
+  const pool = mainsForMeal(meal, named);
+  if (pool.length === 0) return;
+  const { primary, secondary } = pickForMeal(pool);
   for (let index = 0; index < mealSlots.length; index += 1) {
     const slot = mealSlots[index]!;
     out.push({
@@ -249,6 +253,77 @@ export function enforceDayVariety(
       : ("complete" as const);
     return { ...p, companionRecipeId, plateKind };
   });
+}
+
+/**
+ * When meals include lunch/dinner and the pool has a heavy-animal main,
+ * ensure at least one L/D slot uses it (variety may leave meat unused).
+ */
+export function ensureHeavyAnimalOnLunchDinner(
+  slots: SlotPrompt[],
+  proposals: ProposedAssignment[],
+  candidates: SuggestionCandidate[],
+): ProposedAssignment[] {
+  const ldSlots = slots.filter((s) => isLunchDinnerMeal(s.meal));
+  if (ldSlots.length === 0) return proposals;
+
+  const nameById = new Map(candidates.map((c) => [c.recipeId, c.name]));
+  const heavyPool = candidates.filter(
+    (c) =>
+      c.plateRole !== "companion" &&
+      looksLikeHeavyAnimalProteinDish(c.name),
+  );
+  if (heavyPool.length === 0) return proposals;
+
+  const alreadyPlaced = proposals.some((p) => {
+    const slot = slots.find((s) => s.slotId === p.slotId);
+    if (!slot || !isLunchDinnerMeal(slot.meal)) return false;
+    return looksLikeHeavyAnimalProteinDish(nameById.get(p.recipeId) ?? "");
+  });
+  if (alreadyPlaced) return proposals;
+
+  const bySlot = new Map(proposals.map((p) => [p.slotId, p.recipeId]));
+
+  for (const heavy of heavyPool) {
+    for (const slot of ldSlots) {
+      const prev = bySlot.get(slot.slotId);
+      bySlot.set(slot.slotId, heavy.recipeId);
+      const trial = toProposals(slots, bySlot);
+      if (
+        !hasSameDayMainReuse(slots, trial) &&
+        !hasDuplicateDayMenus(slots, trial)
+      ) {
+        return proposals.map((p) =>
+          p.slotId === slot.slotId
+            ? {
+                ...p,
+                recipeId: heavy.recipeId,
+                companionRecipeId: null,
+                plateKind: "complete" as const,
+              }
+            : p,
+        );
+      }
+      if (prev == null) bySlot.delete(slot.slotId);
+      else bySlot.set(slot.slotId, prev);
+    }
+  }
+
+  // Last resort: place on first L/D slot even if day signature shifts.
+  const fallbackSlot = ldSlots[0]!;
+  const fallbackHeavy = heavyPool[0]!.recipeId;
+  const forced = {
+    slotId: fallbackSlot.slotId,
+    recipeId: fallbackHeavy,
+    companionRecipeId: null as string | null,
+    plateKind: "complete" as const,
+  };
+  if (proposals.some((p) => p.slotId === fallbackSlot.slotId)) {
+    return proposals.map((p) =>
+      p.slotId === fallbackSlot.slotId ? { ...p, ...forced } : p,
+    );
+  }
+  return [...proposals, forced];
 }
 
 function breakDuplicateDays(
