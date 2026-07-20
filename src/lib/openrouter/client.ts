@@ -1,5 +1,7 @@
 import "server-only";
 
+import { recordAiDebugEntry } from "@/lib/openrouter/debug-log";
+
 /**
  * OpenRouter Chat Completions client (server-only).
  * Never import from Client Components. Never use NEXT_PUBLIC_* keys.
@@ -88,6 +90,12 @@ export async function openRouterChatCompletions(
   if (referer) headers["HTTP-Referer"] = referer;
   if (title) headers["X-OpenRouter-Title"] = title;
 
+  const started = Date.now();
+  const debugMessages = request.messages.map((m) => ({
+    role: m.role,
+    content: m.content,
+  }));
+
   let response: Response;
   try {
     response = await fetch(OPENROUTER_CHAT_URL, {
@@ -97,20 +105,34 @@ export async function openRouterChatCompletions(
       signal: AbortSignal.timeout(OPENROUTER_TIMEOUT_MS),
     });
   } catch (err) {
-    if (err instanceof Error && err.name === "TimeoutError") {
-      throw new OpenRouterError("OpenRouter request timed out");
-    }
-    if (err instanceof Error && err.name === "AbortError") {
-      throw new OpenRouterError("OpenRouter request aborted");
-    }
-    throw new OpenRouterError("Failed to reach OpenRouter");
+    const message =
+      err instanceof Error && err.name === "TimeoutError"
+        ? "OpenRouter request timed out"
+        : err instanceof Error && err.name === "AbortError"
+          ? "OpenRouter request aborted"
+          : "Failed to reach OpenRouter";
+    recordAiDebugEntry({
+      model,
+      durationMs: Date.now() - started,
+      ok: false,
+      error: message,
+      requestMessages: debugMessages,
+      response: null,
+    });
+    throw new OpenRouterError(message);
   }
 
   if (!response.ok) {
-    throw new OpenRouterError(
-      `OpenRouter HTTP ${response.status}`,
-      response.status,
-    );
+    const message = `OpenRouter HTTP ${response.status}`;
+    recordAiDebugEntry({
+      model,
+      durationMs: Date.now() - started,
+      ok: false,
+      error: message,
+      requestMessages: debugMessages,
+      response: null,
+    });
+    throw new OpenRouterError(message, response.status);
   }
 
   let json: {
@@ -123,13 +145,37 @@ export async function openRouterChatCompletions(
   try {
     json = (await response.json()) as typeof json;
   } catch {
+    recordAiDebugEntry({
+      model,
+      durationMs: Date.now() - started,
+      ok: false,
+      error: "OpenRouter returned invalid JSON",
+      requestMessages: debugMessages,
+      response: null,
+    });
     throw new OpenRouterError("OpenRouter returned invalid JSON");
   }
 
   const content = extractAssistantText(json.choices?.[0]?.message?.content);
   if (!content) {
+    recordAiDebugEntry({
+      model,
+      durationMs: Date.now() - started,
+      ok: false,
+      error: "OpenRouter returned empty content",
+      requestMessages: debugMessages,
+      response: null,
+    });
     throw new OpenRouterError("OpenRouter returned empty content");
   }
+
+  recordAiDebugEntry({
+    model,
+    durationMs: Date.now() - started,
+    ok: true,
+    requestMessages: debugMessages,
+    response: content,
+  });
   return content;
 }
 

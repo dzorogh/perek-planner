@@ -79,6 +79,25 @@ console.log(
   `(${taste?.length ?? 0})`,
 );
 
+function anonInsertPayload(table) {
+  if (table === "taste_preferences") {
+    return { kind: "ban", body: "anon-should-fail" };
+  }
+  if (table === "snack_ratings") {
+    return { label: "anon-should-fail", rating: "like" };
+  }
+  if (table === "recipe_ratings") {
+    return {
+      recipe_id: "00000000-0000-0000-0000-000000000000",
+      rating: "like",
+    };
+  }
+  return {
+    recipe_id: "00000000-0000-0000-0000-000000000000",
+    comment: "anon-should-fail",
+  };
+}
+
 // Anon INSERT deny on refusals / ratings / taste_preferences
 for (const table of [
   "recipe_refusals",
@@ -88,19 +107,7 @@ for (const table of [
 ]) {
   const { error } = await anon.from(table).insert({
     user_id: "00000000-0000-0000-0000-000000000000",
-    ...(table === "taste_preferences"
-      ? { kind: "ban", body: "anon-should-fail" }
-      : table === "snack_ratings"
-        ? { label: "anon-should-fail", rating: "like" }
-        : table === "recipe_ratings"
-          ? {
-              recipe_id: "00000000-0000-0000-0000-000000000000",
-              rating: "like",
-            }
-          : {
-              recipe_id: "00000000-0000-0000-0000-000000000000",
-              comment: "anon-should-fail",
-            }),
+    ...anonInsertPayload(table),
   });
   if (!error || !isPermissionDenied(error)) {
     console.error(

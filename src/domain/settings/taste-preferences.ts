@@ -51,6 +51,46 @@ export function formatTasteBanBody(
 }
 
 /**
+ * Split stored body (`Dish: reason` from feedback, or free text from Settings)
+ * into example dish + operator constraint. Comment/constraint is primary for AI.
+ */
+export function parseTastePreferenceBody(body: string): {
+  subject: string | null;
+  comment: string;
+} {
+  const trimmed = normalizeTastePreferenceBody(body);
+  if (!trimmed) {
+    return { subject: null, comment: "" };
+  }
+
+  const sep = trimmed.indexOf(": ");
+  if (sep <= 0) {
+    return { subject: null, comment: trimmed };
+  }
+
+  const subject = trimmed.slice(0, sep).trim();
+  const comment = trimmed.slice(sep + 2).trim();
+  // Feedback format is "Dish name: reason". Skip free-text like "Важно: без лука".
+  const looksLikeDishName =
+    subject.length >= 8 ||
+    subject.includes(" ") ||
+    subject.includes("-");
+  if (
+    !subject ||
+    !comment ||
+    !looksLikeDishName ||
+    subject.length > 80 ||
+    subject.includes(".") ||
+    subject.includes("!") ||
+    subject.includes("?")
+  ) {
+    return { subject: null, comment: trimmed };
+  }
+
+  return { subject, comment };
+}
+
+/**
  * Persist a refusal/dislike comment into Settings bans (idempotent by body).
  * Best-effort: returns false on failure; caller should not fail the primary action.
  */

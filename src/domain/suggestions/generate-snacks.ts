@@ -48,7 +48,7 @@ Rules:
 - name: Russian, 1–4 words, sentence case (first letter capital), ready-to-eat / no cooking only (dairy, fruit, nuts, crackers, vegetables, bars, etc.).
 - Invent varied everyday options — do not copy a fixed catalog; invent fresh labels each time.
 - Never repeat items from avoid. Never invent cooked dishes (no soups, no hot meals).
-- Honor likedSnacks (prefer that style) and operatorTasteNotes (ban = hard never; wish = soft prefer).
+- Honor likedSnacks (prefer that style) and operatorTasteNotes: constraint is PRIMARY (generalize the rule); exampleDish is secondary only; ban = hard never; wish = soft prefer.
 - Consecutive menus must feel different: avoid recentlyUsed snacks and near-duplicates of them.
 - price_rub_per_serving: integer RUBLES for 1 adult portion (supermarket). Typical: fruit 30–80, dairy 40–100, nuts/cheese 80–180. NEVER above 250. NEVER send kopecks.
 - nutrition_per_serving: kcal (integer) and protein_g / fat_g / carbs_g for 1 adult portion. Realistic snack estimates.
@@ -115,7 +115,7 @@ async function proposeSnacksViaOpenRouter(
           recentlyUsed: [...prefs.recent],
           operatorTasteNotes: tasteNotesForPrompt(tasteNotes),
           instruction:
-            "Invent that many distinct no-cook snacks with price and nutrition when confident. Respect avoid and operatorTasteNotes. Lean toward the style of likedSnacks when present, but invent new labels — do not only repeat liked ones. Do not reuse recentlyUsed. Capitalize the first letter of each name.",
+            "Invent that many distinct no-cook snacks with price and nutrition when confident. Respect avoid and operatorTasteNotes (constraint PRIMARY, exampleDish secondary). Lean toward the style of likedSnacks when present, but invent new labels — do not only repeat liked ones. Do not reuse recentlyUsed. Capitalize the first letter of each name.",
         }),
       },
     ],
@@ -214,27 +214,23 @@ function parseSnackItem(item: unknown): SnackDraft | null {
 }
 
 function parseOptionalNonNegInt(raw: unknown): number | null {
-  const n =
-    typeof raw === "number"
-      ? raw
-      : typeof raw === "string"
-        ? Number(raw)
-        : NaN;
+  const n = coerceNumber(raw);
   if (!Number.isFinite(n) || n < 0) return null;
   if (n === 0) return null;
   return Math.trunc(n);
 }
 
 function parseOptionalNonNegNumber(raw: unknown): number | null {
-  const n =
-    typeof raw === "number"
-      ? raw
-      : typeof raw === "string"
-        ? Number(raw)
-        : NaN;
+  const n = coerceNumber(raw);
   if (!Number.isFinite(n) || n < 0) return null;
   if (n === 0) return null;
   return n;
+}
+
+function coerceNumber(raw: unknown): number {
+  if (typeof raw === "number") return raw;
+  if (typeof raw === "string") return Number(raw);
+  return NaN;
 }
 
 function extractJsonObject(text: string): string {
@@ -278,14 +274,9 @@ export async function generateSnacksForMenu(
   }
   const chat = options.chat ?? openRouterChatCompletions;
 
-  let drafts: SnackDraft[] = [];
+  let drafts: SnackDraft[];
   try {
-    drafts = await proposeSnacksViaOpenRouter(
-      dayCount,
-      prefs,
-      chat,
-      tasteNotes,
-    );
+    drafts = await generateSnackDrafts(dayCount, prefs, chat, tasteNotes);
   } catch (err) {
     if (err instanceof OpenRouterError) {
       return {
@@ -295,6 +286,44 @@ export async function generateSnacksForMenu(
     }
     throw err;
   }
+  if (drafts.length < dayCount) {
+    return {
+      ok: false,
+      error: "Не удалось придумать достаточно перекусов с учётом предпочтений.",
+    };
+  }
+
+  const selectedDrafts = drafts.slice(0, dayCount);
+  await supabase.from("menu_snacks").delete().eq("menu_id", menuId);
+
+  const { error: insertError } = await supabase.from("menu_snacks").insert(
+    selectedDrafts.map((draft, i) => ({
+      menu_id: menuId,
+      day_index: i + 1,
+      ...snackRowPayload(draft),
+    })),
+  );
+
+  if (insertError) {
+    return { ok: false, error: "Не удалось сохранить перекусы." };
+  }
+
+  return { ok: true, labels: selectedDrafts.map((d) => d.label) };
+}
+
+async function generateSnackDrafts(
+  dayCount: number,
+  prefs: SnackPreferences,
+  chat: ChatCompletionsFn,
+  tasteNotes: TasteNote[],
+): Promise<SnackDraft[]> {
+  let drafts: SnackDraft[] = [];
+  drafts = await proposeSnacksViaOpenRouter(
+    dayCount,
+    prefs,
+    chat,
+    tasteNotes,
+  );
 
   // One retry if the model returned too few after filtering avoid/dislike.
   if (drafts.length < dayCount) {
@@ -315,30 +344,7 @@ export async function generateSnacksForMenu(
     }
   }
 
-  if (drafts.length < dayCount) {
-    return {
-      ok: false,
-      error: "Не удалось придумать достаточно перекусов с учётом предпочтений.",
-    };
-  }
-
-  drafts = drafts.slice(0, dayCount);
-
-  await supabase.from("menu_snacks").delete().eq("menu_id", menuId);
-
-  const { error: insertError } = await supabase.from("menu_snacks").insert(
-    drafts.map((draft, i) => ({
-      menu_id: menuId,
-      day_index: i + 1,
-      ...snackRowPayload(draft),
-    })),
-  );
-
-  if (insertError) {
-    return { ok: false, error: "Не удалось сохранить перекусы." };
-  }
-
-  return { ok: true, labels: drafts.map((d) => d.label) };
+  return drafts;
 }
 
 /**

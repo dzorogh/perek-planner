@@ -271,25 +271,61 @@ function isBreakfastMeal(meal) {
   return meal === "breakfast" || meal === "second_breakfast";
 }
 
-function resolvePlateKind(proposal) {
-  if (proposal.plateKind === "complete") return "complete";
+function looksLikeProteinDish(name) {
+  const n = normalizeDishName(name);
+  if (!n) return false;
+  if (
+    /(^|\s)(морковн|капустн|картофельн|овощн|свекольн|кабачков|тыквенн|баклажанн|рисов)[а-я]*\s+котлет/.test(
+      n,
+    ) ||
+    /(^|\s)котлет[а-я]*\s+из\s+(морков|капуст|картофел|овощ|свекл|кабачк|тыкв|баклажан|риса)/.test(
+      n,
+    )
+  ) {
+    return false;
+  }
+  if (
+    /(^|\s)(мяс|говяд|свинин|барани|телятин|куриц|курин|индейк|утин|утка|гусин|грудк|окороч|филе|фарш|стейк|шашлык|гуляш|бефстроган|люля|тефтел|фрикадель|зразы|отбивн|шницел|бифштекс|колбас|сосиск|ветчин|бекон|печень|печенк|язык)/.test(
+      n,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /(^|\s)(рыб|лосос|форел|треск|минтай|хек|скумбр|сельд|тунец|креветк|кальмар|миди)/.test(
+      n,
+    )
+  ) {
+    return true;
+  }
+  if (/(^|\s)(яйц|яичниц|омлет)/.test(n)) return true;
+  if (/(^|\s)(творог|сырник)/.test(n)) return true;
+  if (/(^|\s)(фасол|чечевиц|нут|горохов)/.test(n)) return true;
+  if (/(^|\s)гриб/.test(n)) return true;
+  if (/(^|\s)котлет/.test(n)) return true;
+  if (/(^|\s)(плов|лазань|гуляш)/.test(n)) return true;
+  return false;
+}
+
+function resolvePlateKind(proposal, mainHasProtein) {
+  if (proposal.plateKind === "complete" && mainHasProtein) return "complete";
   if (proposal.plateKind === "needs_companion") return "needs_companion";
   if (proposal.companionRecipeId) return "needs_companion";
+  if (!mainHasProtein) return "needs_companion";
   return "complete";
 }
 
-function normalizePlateAssignments(slots, proposals, candidates) {
+function createPlateAssignmentState(slots, proposals) {
   const mealBySlot = new Map(slots.map((s) => [s.slotId, s.meal]));
   const dayBySlot = new Map(slots.map((s) => [s.slotId, s.dayIndex]));
-  const used = new Set();
-  for (const p of proposals) {
-    if (p.companionRecipeId) used.add(p.companionRecipeId);
-  }
-  const breakfastMains = new Set();
-  for (const p of proposals) {
-    const meal = mealBySlot.get(p.slotId);
-    if (meal && isBreakfastMeal(meal)) breakfastMains.add(p.recipeId);
-  }
+  const used = new Set(
+    proposals.flatMap((p) => (p.companionRecipeId ? [p.companionRecipeId] : [])),
+  );
+  const breakfastMains = new Set(
+    proposals
+      .filter((p) => isBreakfastMeal(mealBySlot.get(p.slotId)))
+      .map((p) => p.recipeId),
+  );
   const usedOnDay = new Map();
   for (const p of proposals) {
     const day = dayBySlot.get(p.slotId);
@@ -298,7 +334,11 @@ function normalizePlateAssignments(slots, proposals, candidates) {
     set.add(p.recipeId);
     usedOnDay.set(day, set);
   }
-  const ordered = [...proposals].sort((a, b) => {
+  return { mealBySlot, dayBySlot, used, breakfastMains, usedOnDay };
+}
+
+function orderedPlateProposals(proposals, mealBySlot, dayBySlot) {
+  return [...proposals].sort((a, b) => {
     const dayA = dayBySlot.get(a.slotId) ?? 0;
     const dayB = dayBySlot.get(b.slotId) ?? 0;
     if (dayA !== dayB) return dayA - dayB;
@@ -307,9 +347,35 @@ function normalizePlateAssignments(slots, proposals, candidates) {
       mealOrderIndex(mealBySlot.get(b.slotId))
     );
   });
+}
+
+function directCompanion(proposal, candidates, avoidAsCompanion) {
+  const companion = proposal.companionRecipeId;
+  if (!companion || companion === proposal.recipeId) return null;
+  if (avoidAsCompanion.has(companion)) return null;
+  return candidates.some((c) => c.recipeId === companion) ? companion : null;
+}
+
+function recordCompanion(companion, day, used, usedOnDay) {
+  if (!companion) return;
+  used.add(companion);
+  if (day == null) return;
+  const set = usedOnDay.get(day) ?? new Set();
+  set.add(companion);
+  usedOnDay.set(day, set);
+}
+
+function normalizePlateAssignments(slots, proposals, candidates) {
+  const { mealBySlot, dayBySlot, used, breakfastMains, usedOnDay } =
+    createPlateAssignmentState(slots, proposals);
+  const nameById = new Map(candidates.map((c) => [c.recipeId, c.name]));
+  const ordered = orderedPlateProposals(proposals, mealBySlot, dayBySlot);
   const outBySlot = new Map();
   for (const proposal of ordered) {
     const meal = mealBySlot.get(proposal.slotId);
+    const mainHasProtein = looksLikeProteinDish(
+      nameById.get(proposal.recipeId) ?? "",
+    );
     if (!meal || !mealAllowsCompanion(meal)) {
       outBySlot.set(proposal.slotId, {
         slotId: proposal.slotId,
@@ -318,7 +384,7 @@ function normalizePlateAssignments(slots, proposals, candidates) {
       });
       continue;
     }
-    const kind = resolvePlateKind(proposal);
+    const kind = resolvePlateKind(proposal, mainHasProtein);
     if (kind === "complete") {
       outBySlot.set(proposal.slotId, {
         slotId: proposal.slotId,
@@ -330,29 +396,24 @@ function normalizePlateAssignments(slots, proposals, candidates) {
     const day = dayBySlot.get(proposal.slotId);
     const dayUsed = day != null ? (usedOnDay.get(day) ?? new Set()) : new Set();
     const avoidAsCompanion = new Set([...breakfastMains, ...dayUsed]);
-    let companion =
-      proposal.companionRecipeId &&
-      proposal.companionRecipeId !== proposal.recipeId &&
-      !avoidAsCompanion.has(proposal.companionRecipeId) &&
-      candidates.some((c) => c.recipeId === proposal.companionRecipeId)
-        ? proposal.companionRecipeId
-        : null;
+    let companion = directCompanion(proposal, candidates, avoidAsCompanion);
+    if (
+      companion &&
+      !mainHasProtein &&
+      !looksLikeProteinDish(nameById.get(companion) ?? "")
+    ) {
+      companion = null;
+    }
     if (!companion) {
       companion = pickCompanionCandidate(
         candidates,
         proposal.recipeId,
         used,
         avoidAsCompanion,
+        { requireProtein: !mainHasProtein },
       );
     }
-    if (companion) {
-      used.add(companion);
-      if (day != null) {
-        const set = usedOnDay.get(day) ?? new Set();
-        set.add(companion);
-        usedOnDay.set(day, set);
-      }
-    }
+    recordCompanion(companion, day, used, usedOnDay);
     outBySlot.set(proposal.slotId, {
       slotId: proposal.slotId,
       recipeId: proposal.recipeId,
@@ -437,6 +498,65 @@ check(
     ],
     plateCands,
   ).find((a) => a.slotId === "d3")?.companionRecipeId === "side-a",
+);
+
+check(
+  "protein: vegetable cutlets are not protein",
+  !looksLikeProteinDish("Морковные котлеты с горошком"),
+);
+check(
+  "protein: chicken is protein",
+  looksLikeProteinDish("Запечённая куриная грудка с лимоном"),
+);
+check(
+  "protein: potatoes are not protein",
+  !looksLikeProteinDish("Картофель с укропом"),
+);
+check(
+  "protein: potato pancakes are not protein",
+  !looksLikeProteinDish("Картофельные оладьи с укропом"),
+);
+
+const proteinPlate = normalizePlateAssignments(
+  [{ slotId: "d1", dayIndex: 1, meal: "dinner" }],
+  [
+    {
+      slotId: "d1",
+      recipeId: "pancakes",
+      companionRecipeId: "carrot-salad",
+      plateKind: "needs_companion",
+    },
+  ],
+  [
+    { recipeId: "pancakes", name: "Картофельные оладьи с укропом" },
+    { recipeId: "carrot-salad", name: "Морковный салат с чесноком" },
+    { recipeId: "chicken", name: "Куриная грудка" },
+  ],
+);
+check(
+  "normalize replaces veg+veg dinner with protein companion",
+  proteinPlate.find((a) => a.slotId === "d1")?.companionRecipeId === "chicken",
+);
+
+const proteinLessComplete = normalizePlateAssignments(
+  [{ slotId: "d2", dayIndex: 1, meal: "dinner" }],
+  [
+    {
+      slotId: "d2",
+      recipeId: "pancakes",
+      companionRecipeId: null,
+      plateKind: "complete",
+    },
+  ],
+  [
+    { recipeId: "pancakes", name: "Картофельные оладьи с укропом" },
+    { recipeId: "chicken", name: "Куриная грудка", plateRole: "companion" },
+  ],
+);
+check(
+  "normalize rejects protein-less plateKind=complete",
+  proteinLessComplete.find((a) => a.slotId === "d2")?.companionRecipeId ===
+    "chicken",
 );
 
 function groupSlotsByMeal(slots) {
@@ -596,6 +716,20 @@ function dayStillDuplicated(slots, bySlot, dayIndex) {
   return false;
 }
 
+function tryRaiseBatchRatioForMeal(slots, bySlot, mealSlots) {
+  if (mealSlots.length < 2) return false;
+  for (let i = 0; i < mealSlots.length - 1; i++) {
+    const left = mealSlots[i];
+    const right = mealSlots[i + 1];
+    const leftId = bySlot.get(left.slotId);
+    const rightId = bySlot.get(right.slotId);
+    if (!leftId || !rightId || leftId === rightId) continue;
+    if (trySetRecipe(slots, bySlot, right.slotId, leftId)) return true;
+    if (trySetRecipe(slots, bySlot, left.slotId, rightId)) return true;
+  }
+  return false;
+}
+
 function raiseBatchRatio(slots, bySlot, byMeal) {
   for (let guard = 0; guard < 24; guard++) {
     if (batchSlotRatio(slots, toProposals(slots, bySlot)) >= MIN_BATCH_SLOT_RATIO) {
@@ -603,22 +737,7 @@ function raiseBatchRatio(slots, bySlot, byMeal) {
     }
     let progressed = false;
     for (const mealSlots of byMeal.values()) {
-      if (mealSlots.length < 2) continue;
-      for (let i = 0; i < mealSlots.length - 1; i++) {
-        const left = mealSlots[i];
-        const right = mealSlots[i + 1];
-        const leftId = bySlot.get(left.slotId);
-        const rightId = bySlot.get(right.slotId);
-        if (!leftId || !rightId || leftId === rightId) continue;
-        if (trySetRecipe(slots, bySlot, right.slotId, leftId)) {
-          progressed = true;
-          break;
-        }
-        if (trySetRecipe(slots, bySlot, left.slotId, rightId)) {
-          progressed = true;
-          break;
-        }
-      }
+      progressed = tryRaiseBatchRatioForMeal(slots, bySlot, mealSlots);
       if (progressed) break;
     }
     if (!progressed) return;
@@ -642,26 +761,26 @@ function namesEqual(a, b) {
 }
 
 /** Cookable slots ≠ menu_snacks: reject snack-like recipe labels. */
+function hasNoCookSnackKeyword(name) {
+  const dairyOrFruit =
+    /(^|\s)(йогурт|кефир|ряженк|простокваш|творожок|фрукты|ягод[ыа]|банан|яблок|груш|апельсин|мандарин)/;
+  const nutsOrSweets =
+    /(^|\s)(орех|миндаль|кешью|арахис|фисташк|сухофрукт|изюм|курага|чернослив|батончик|чипсы|крекер|галет|печенье|вафли|зефир|шоколадк|конфет)/;
+  return dairyOrFruit.test(name) || nutsOrSweets.test(name);
+}
+
+function looksLikeCookedDish(name) {
+  return /(каш|сырник|оладь|блин|омлет|яичниц|запеканк|суп|плов|котлет|паст|рис|гречк|картоф)/.test(
+    name,
+  );
+}
+
 function looksLikeNoCookSnack(name) {
   const n = normalizeDishName(name);
   if (!n) return false;
   if (n.includes("перекус")) return true;
-  if (/(^|\s)(снек|snack)(ы|а|ов)?(\s|$)/.test(n)) return true;
-  if (
-    /(^|\s)(йогурт|кефир|ряженк|простокваш|творожок|фрукты|ягод(ы|а)|банан|яблок|груш|апельсин|мандарин|орех|миндаль|кешью|арахис|фисташк|сухофрукт|изюм|курага|чернослив|батончик|чипсы|крекер|галет|печенье|вафли|зефир|шоколадк|конфет)/.test(
-      n,
-    )
-  ) {
-    if (
-      /(каш|сырник|оладь|блин|омлет|яичниц|запеканк|суп|плов|котлет|паст|рис|гречк|картоф)/.test(
-        n,
-      )
-    ) {
-      return false;
-    }
-    return true;
-  }
-  return false;
+  if (/(^|\s)(снек|snack)([ыа]|ов)?(\s|$)/.test(n)) return true;
+  return hasNoCookSnackKeyword(n) && !looksLikeCookedDish(n);
 }
 
 function looksLikeBreakfastDish(name) {
@@ -720,9 +839,8 @@ function looksLikeLunchDinnerOnlyMain(name) {
     return true;
   }
   if (
-    /(^|\s)(курица|куриц|цыпл)\w*.*(запеч|жар|тушен|лимон|трав|чеснок)/.test(
-      n,
-    )
+    /(^|\s)(курица|куриц|цыпл)\w*/.test(n) &&
+    /(запеч|жар|тушен|лимон|трав|чеснок)/.test(n)
   ) {
     return true;
   }
@@ -781,12 +899,21 @@ function mainsForMeal(meal, named) {
 }
 
 function stripHardcodedPairing(name) {
-  const cleaned = name
-    .replace(
-      /\s+к\s+(пасте|макаронам|мясу|рыбе|курице|грудке|стейку|котлетам|гарниру)\s*$/iu,
-      "",
-    )
-    .trim();
+  const trimmed = name.trim();
+  const pairingStart = trimmed.lastIndexOf(" к ");
+  const pairing = trimmed.slice(pairingStart + 3);
+  const isHardcodedPairing = [
+    "пасте",
+    "макаронам",
+    "мясу",
+    "рыбе",
+    "курице",
+    "грудке",
+    "стейку",
+    "котлетам",
+    "гарниру",
+  ].includes(pairing);
+  const cleaned = isHardcodedPairing ? trimmed.slice(0, pairingStart) : trimmed;
   return cleaned.length > 0 ? cleaned : name.trim();
 }
 
@@ -803,6 +930,7 @@ function pickCompanionCandidate(
   mainRecipeId,
   alreadyUsed = new Set(),
   avoidIds = new Set(),
+  options = {},
 ) {
   const others = candidates.filter(
     (c) => c.recipeId !== mainRecipeId && !avoidIds.has(c.recipeId),
@@ -812,10 +940,38 @@ function pickCompanionCandidate(
       ? others
       : candidates.filter((c) => c.recipeId !== mainRecipeId);
   if (pool.length === 0) return null;
+  const prefer = (list) => {
+    if (list.length === 0) return null;
+    const unused = list.find((c) => !alreadyUsed.has(c.recipeId));
+    return unused ?? list[0] ?? null;
+  };
+  if (options.requireProtein) {
+    const proteins = pool.filter((c) => looksLikeProteinDish(c.name));
+    const proteinCompanions = proteins.filter(
+      (c) => c.plateRole === "companion",
+    );
+    const preferList =
+      proteinCompanions.length > 0 ? proteinCompanions : proteins;
+    return (prefer(preferList) ?? prefer(pool))?.recipeId ?? null;
+  }
   const companions = pool.filter((c) => c.plateRole === "companion");
-  const prefer = companions.length > 0 ? companions : pool;
-  const unused = prefer.find((c) => !alreadyUsed.has(c.recipeId));
-  return (unused ?? prefer[0])?.recipeId ?? null;
+  const preferList = companions.length > 0 ? companions : pool;
+  return prefer(preferList)?.recipeId ?? null;
+}
+
+function recipeIdForMealSlot(
+  primary,
+  secondary,
+  candidateCount,
+  mealSlots,
+  mealIndex,
+  slotIndex,
+) {
+  if (candidateCount < 2 || mealSlots.length < 2) return primary;
+  if (mealIndex % 2 === 0) {
+    return slotIndex === mealSlots.length - 1 ? secondary : primary;
+  }
+  return slotIndex === 0 ? primary : secondary;
 }
 
 function assignWithBatchVariety(slots, candidates) {
@@ -848,14 +1004,14 @@ function assignWithBatchVariety(slots, candidates) {
     const { primary, secondary } = pickForMeal(pool);
     for (let i = 0; i < mealSlots.length; i++) {
       const slot = mealSlots[i];
-      let recipeId = primary;
-      if (candidates.length >= 2 && mealSlots.length >= 2) {
-        if (mealIndex % 2 === 0) {
-          recipeId = i === mealSlots.length - 1 ? secondary : primary;
-        } else {
-          recipeId = i === 0 ? primary : secondary;
-        }
-      }
+      const recipeId = recipeIdForMealSlot(
+        primary,
+        secondary,
+        candidates.length,
+        mealSlots,
+        mealIndex,
+        i,
+      );
       out.push({ slotId: slot.slotId, recipeId });
     }
   });
@@ -896,40 +1052,70 @@ function sameDayReuseSlotId(slots, bySlot, dayIndex) {
   return null;
 }
 
+function usedRecipeIdsOnConflictDay(slots, bySlot, conflict) {
+  const dayUsed = new Set();
+  for (const slot of slots) {
+    if (slot.dayIndex !== conflict.dayIndex || slot.slotId === conflict.slotId) {
+      continue;
+    }
+    const id = bySlot.get(slot.slotId);
+    if (id) dayUsed.add(id);
+  }
+  return dayUsed;
+}
+
+function replaceConflictRecipe(slots, bySlot, conflict, candidateIds, dayUsed) {
+  const current = bySlot.get(conflict.slotId);
+  if (!current) return false;
+  const alternates = candidateIds.filter((id) => id !== current && !dayUsed.has(id));
+  const fallback = candidateIds.filter((id) => id !== current);
+  const tryIds = alternates.length > 0 ? alternates : fallback;
+  for (const alternate of tryIds) {
+    bySlot.set(conflict.slotId, alternate);
+    if (
+      !findDuplicateDayPair(slots, bySlot) &&
+      !dayHasSameDayMainReuse(slots, bySlot, conflict.dayIndex)
+    ) {
+      return true;
+    }
+    bySlot.set(conflict.slotId, current);
+  }
+  return false;
+}
+
 function breakSameDayMainReuse(slots, bySlot, candidateIds) {
   if (candidateIds.length < 2) return;
   for (let guard = 0; guard < 24; guard++) {
     const conflict = findSameDayMainConflict(slots, bySlot);
     if (!conflict) return;
-    const dayUsed = new Set();
-    for (const slot of slots) {
-      if (slot.dayIndex !== conflict.dayIndex) continue;
-      if (slot.slotId === conflict.slotId) continue;
-      const id = bySlot.get(slot.slotId);
-      if (id) dayUsed.add(id);
-    }
-    const current = bySlot.get(conflict.slotId);
-    if (!current) return;
-    const alternates = candidateIds.filter(
-      (id) => id !== current && !dayUsed.has(id),
-    );
-    const fallback = candidateIds.filter((id) => id !== current);
-    const tryIds = alternates.length > 0 ? alternates : fallback;
-    let changed = false;
-    for (const alternate of tryIds) {
-      bySlot.set(conflict.slotId, alternate);
-      if (
-        findDuplicateDayPair(slots, bySlot) ||
-        dayHasSameDayMainReuse(slots, bySlot, conflict.dayIndex)
-      ) {
-        bySlot.set(conflict.slotId, current);
-        continue;
-      }
-      changed = true;
-      break;
-    }
-    if (!changed) return;
+    const dayUsed = usedRecipeIdsOnConflictDay(slots, bySlot, conflict);
+    if (!replaceConflictRecipe(slots, bySlot, conflict, candidateIds, dayUsed)) return;
   }
+}
+
+function diversifyDuplicateDays(slots, bySlot, byMeal, candidateIds) {
+  if (candidateIds.length < 2) return;
+  for (let guard = 0; guard < 12; guard++) {
+    const pair = findDuplicateDayPair(slots, bySlot);
+    if (!pair) return;
+    if (!diversifyDay(slots, bySlot, byMeal, pair[1], candidateIds)) return;
+  }
+}
+
+function validBatchFallback(slots, candidates) {
+  const fallback = assignWithBatchVariety(slots, candidates);
+  if (batchSlotRatio(slots, fallback) < MIN_BATCH_SLOT_RATIO) return null;
+  if (hasDuplicateDayMenus(slots, fallback)) return null;
+  return hasSameDayMainReuse(slots, fallback) ? null : fallback;
+}
+
+function enforceBatchRatio(slots, bySlot, byMeal, candidateIds, candidates) {
+  if (sortedDayIndexes(slots).length < 2 || candidates.length === 0) return null;
+  raiseBatchRatio(slots, bySlot, byMeal);
+  breakSameDayMainReuse(slots, bySlot, candidateIds);
+  const current = toProposals(slots, bySlot);
+  if (batchSlotRatio(slots, current) >= MIN_BATCH_SLOT_RATIO) return null;
+  return validBatchFallback(slots, candidates);
 }
 
 function enforceDayVariety(slots, proposals, candidates) {
@@ -937,31 +1123,12 @@ function enforceDayVariety(slots, proposals, candidates) {
   const bySlot = new Map(proposals.map((p) => [p.slotId, p.recipeId]));
   const byMeal = groupSlotsByMeal(slots);
   const candidateIds = candidates.map((c) => c.recipeId);
-  if (candidateIds.length >= 2) {
-    for (let guard = 0; guard < 12; guard++) {
-      const pair = findDuplicateDayPair(slots, bySlot);
-      if (!pair) break;
-      const changed = diversifyDay(slots, bySlot, byMeal, pair[1], candidateIds);
-      if (!changed) break;
-    }
-  }
+  diversifyDuplicateDays(slots, bySlot, byMeal, candidateIds);
   breakSameDayMainReuse(slots, bySlot, candidateIds);
-  if (sortedDayIndexes(slots).length >= 2 && candidates.length >= 1) {
-    raiseBatchRatio(slots, bySlot, byMeal);
-    breakSameDayMainReuse(slots, bySlot, candidateIds);
-    const current = toProposals(slots, bySlot);
-    if (batchSlotRatio(slots, current) < MIN_BATCH_SLOT_RATIO) {
-      const fallback = assignWithBatchVariety(slots, candidates);
-      if (
-        batchSlotRatio(slots, fallback) >= MIN_BATCH_SLOT_RATIO &&
-        !hasDuplicateDayMenus(slots, fallback) &&
-        !hasSameDayMainReuse(slots, fallback)
-      ) {
-        return fallback;
-      }
-    }
-  }
-  return toProposals(slots, bySlot);
+  return (
+    enforceBatchRatio(slots, bySlot, byMeal, candidateIds, candidates) ??
+    toProposals(slots, bySlot)
+  );
 }
 
 function deterministicAssignments(slots, candidates) {
@@ -1029,9 +1196,12 @@ check(
 
 const uniformClone = slots9.map((s) => ({
   slotId: s.slotId,
-  recipeId:
-    s.meal === "breakfast" ? "rec-a" : s.meal === "lunch" ? "rec-b" : "rec-c",
+  recipeId: recipeIdForUniformClone(s.meal),
 }));
+function recipeIdForUniformClone(meal) {
+  if (meal === "breakfast") return "rec-a";
+  return meal === "lunch" ? "rec-b" : "rec-c";
+}
 check("detects uniform day clone", isMenuUniformAcrossDays(slots9, uniformClone));
 const enforced = enforceDayVariety(slots9, uniformClone, cands3);
 check(
@@ -1264,16 +1434,14 @@ check(
 }
 
 {
+  function recipeIdForSameMain(slot) {
+    if (slot.meal === "breakfast") return "rec-a";
+    if (slot.meal === "lunch") return "rec-b";
+    return slot.dayIndex === 1 ? "rec-b" : "rec-c";
+  }
   const sameMain = slots9.map((s) => ({
     slotId: s.slotId,
-    recipeId:
-      s.meal === "breakfast"
-        ? "rec-a"
-        : s.meal === "lunch"
-          ? "rec-b"
-          : s.dayIndex === 1
-            ? "rec-b"
-            : "rec-c",
+    recipeId: recipeIdForSameMain(s),
   }));
   check(
     "detects same-day lunch/dinner main reuse",

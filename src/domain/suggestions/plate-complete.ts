@@ -4,7 +4,10 @@ import {
   type MealSlot,
 } from "@/domain/menu/constants";
 import type { SuggestionCandidate } from "@/domain/suggestions/candidates";
-import { isBreakfastMeal } from "@/domain/suggestions/meal-fit";
+import {
+  isBreakfastMeal,
+  looksLikeProteinDish,
+} from "@/domain/suggestions/meal-fit";
 import type {
   ProposedAssignment,
   SlotPrompt,
@@ -16,12 +19,19 @@ export type PlateAssignment = ProposedAssignment & {
   plateKind?: PlateKind | null;
 };
 
+export type PickCompanionOptions = {
+  /** When true, prefer (and require when possible) a protein add-on. */
+  requireProtein?: boolean;
+};
+
 /**
- * Apply AI plateKind to lunch/dinner/late_dinner:
- * - complete → no companion (trust the model; strip accidental companion ids)
- * - needs_companion → keep AI companion when valid; fill only if missing
- * - no plateKind and no companion → leave alone (do not invent a side)
- * Structural only: same-day / breakfast-main reuse for companions.
+ * Apply AI plateKind to lunch/dinner/late_dinner, with a protein safety net:
+ * - complete → no companion, but only if the main itself looks like protein
+ * - needs_companion → keep AI companion when valid; fill if missing
+ * - veg/carb main + veg/carb side is invalid — replace with a protein companion
+ * - no plateKind and protein main → leave alone (do not invent a side)
+ * - no plateKind and protein-less main → force a protein companion
+ * Structural only otherwise: same-day / breakfast-main reuse for companions.
  * Breakfast-family: companion always cleared.
  */
 export function normalizePlateAssignments(
@@ -31,6 +41,7 @@ export function normalizePlateAssignments(
 ): ProposedAssignment[] {
   const mealBySlot = new Map(slots.map((s) => [s.slotId, s.meal]));
   const dayBySlot = new Map(slots.map((s) => [s.slotId, s.dayIndex]));
+  const nameById = new Map(candidates.map((c) => [c.recipeId, c.name]));
 
   const usedCompanionIds = new Set<string>();
   for (const p of proposals) {
@@ -64,68 +75,18 @@ export function normalizePlateAssignments(
   });
 
   const outBySlot = new Map<string, ProposedAssignment>();
-
   for (const proposal of ordered) {
-    const meal = mealBySlot.get(proposal.slotId);
-    if (!meal || !mealAllowsCompanion(meal)) {
-      outBySlot.set(proposal.slotId, {
-        slotId: proposal.slotId,
-        recipeId: proposal.recipeId,
-        companionRecipeId: null,
-      });
-      continue;
-    }
-
-    const kind = resolvePlateKind(proposal);
-
-    if (kind === "complete") {
-      outBySlot.set(proposal.slotId, {
-        slotId: proposal.slotId,
-        recipeId: proposal.recipeId,
-        companionRecipeId: null,
-      });
-      continue;
-    }
-
-    const day = dayBySlot.get(proposal.slotId);
-    const dayUsed =
-      day != null ? (usedOnDay.get(day) ?? new Set<string>()) : new Set<string>();
-    const avoidAsCompanion = new Set<string>([
-      ...breakfastMains,
-      ...dayUsed,
-    ]);
-
-    let companion =
-      proposal.companionRecipeId &&
-        proposal.companionRecipeId !== proposal.recipeId &&
-        !avoidAsCompanion.has(proposal.companionRecipeId) &&
-        candidates.some((c) => c.recipeId === proposal.companionRecipeId)
-        ? proposal.companionRecipeId
-        : null;
-
-    if (!companion) {
-      companion = pickCompanionCandidate(
-        candidates,
-        proposal.recipeId,
-        usedCompanionIds,
-        avoidAsCompanion,
-      );
-    }
-
-    if (companion) {
-      usedCompanionIds.add(companion);
-      if (day != null) {
-        const set = usedOnDay.get(day) ?? new Set<string>();
-        set.add(companion);
-        usedOnDay.set(day, set);
-      }
-    }
-
-    outBySlot.set(proposal.slotId, {
-      slotId: proposal.slotId,
-      recipeId: proposal.recipeId,
-      companionRecipeId: companion,
-    });
+    const normalized = normalizePlateAssignment(
+      proposal,
+      mealBySlot,
+      dayBySlot,
+      candidates,
+      nameById,
+      usedCompanionIds,
+      breakfastMains,
+      usedOnDay,
+    );
+    outBySlot.set(proposal.slotId, normalized);
   }
 
   // Preserve caller order.
@@ -139,32 +100,122 @@ export function normalizePlateAssignments(
   );
 }
 
+function normalizePlateAssignment(
+  proposal: PlateAssignment,
+  mealBySlot: ReadonlyMap<string, MealSlot>,
+  dayBySlot: ReadonlyMap<string, number>,
+  candidates: SuggestionCandidate[],
+  nameById: ReadonlyMap<string, string>,
+  usedCompanionIds: Set<string>,
+  breakfastMains: ReadonlySet<string>,
+  usedOnDay: Map<number, Set<string>>,
+): ProposedAssignment {
+  const meal = mealBySlot.get(proposal.slotId);
+  const mainHasProtein = looksLikeProteinDish(
+    nameById.get(proposal.recipeId) ?? "",
+  );
+  if (
+    !meal ||
+    !mealAllowsCompanion(meal) ||
+    resolvePlateKind(proposal, mainHasProtein) === "complete"
+  ) {
+    return {
+      slotId: proposal.slotId,
+      recipeId: proposal.recipeId,
+      companionRecipeId: null,
+    };
+  }
+
+  const day = dayBySlot.get(proposal.slotId);
+  const dayUsed = day == null ? new Set<string>() : (usedOnDay.get(day) ?? new Set<string>());
+  const avoidAsCompanion = new Set([...breakfastMains, ...dayUsed]);
+  let companion = validRequestedCompanion(proposal, avoidAsCompanion, candidates);
+
+  // Veg/carb main + veg/carb side (оладьи + морковный салат) is invalid.
+  if (
+    companion &&
+    !mainHasProtein &&
+    !looksLikeProteinDish(nameById.get(companion) ?? "")
+  ) {
+    companion = null;
+  }
+
+  if (!companion) {
+    companion = pickCompanionCandidate(
+      candidates,
+      proposal.recipeId,
+      usedCompanionIds,
+      avoidAsCompanion,
+      { requireProtein: !mainHasProtein },
+    );
+  }
+
+  recordCompanion(companion, day, usedCompanionIds, usedOnDay);
+  return {
+    slotId: proposal.slotId,
+    recipeId: proposal.recipeId,
+    companionRecipeId: companion,
+  };
+}
+
+function validRequestedCompanion(
+  proposal: PlateAssignment,
+  avoidIds: ReadonlySet<string>,
+  candidates: SuggestionCandidate[],
+): string | null {
+  const id = proposal.companionRecipeId;
+  if (!id || id === proposal.recipeId || avoidIds.has(id)) return null;
+  return candidates.some((candidate) => candidate.recipeId === id) ? id : null;
+}
+
+function recordCompanion(
+  companion: string | null,
+  day: number | undefined,
+  usedCompanionIds: Set<string>,
+  usedOnDay: Map<number, Set<string>>,
+): void {
+  if (!companion) return;
+  usedCompanionIds.add(companion);
+  if (day == null) return;
+  const set = usedOnDay.get(day) ?? new Set<string>();
+  set.add(companion);
+  usedOnDay.set(day, set);
+}
+
 function mealOrderIndex(meal: MealSlot | undefined): number {
   if (!meal) return 99;
   const idx = MEAL_SLOTS.indexOf(meal);
   return idx >= 0 ? idx : 99;
 }
 
-/** Culinary judgment is the model's — code only applies the declared plateKind. */
-function resolvePlateKind(proposal: PlateAssignment): PlateKind {
-  if (proposal.plateKind === "complete") return "complete";
+/**
+ * Culinary plateKind is the model's, except protein-less "complete" is never a meal.
+ */
+function resolvePlateKind(
+  proposal: PlateAssignment,
+  mainHasProtein: boolean,
+): PlateKind {
+  if (proposal.plateKind === "complete" && mainHasProtein) return "complete";
   if (proposal.plateKind === "needs_companion") return "needs_companion";
   // Explicit companion without plateKind → honor the pairing.
   if (proposal.companionRecipeId) return "needs_companion";
-  // No AI signal → do not invent a side dish.
+  // Protein-less main with no AI signal → invent a protein companion.
+  if (!mainHasProtein) return "needs_companion";
+  // Protein main, no AI signal → do not invent a side dish.
   return "complete";
 }
 
 /**
  * Structural fallback when the model asked for a companion but omitted the id.
  * Prefer unused candidates; never the main; avoid same-day / breakfast mains.
- * No name-keyword culinary filters — pairing judgment stays with the AI.
+ * When requireProtein, prefer a protein add-on over another carb/veg side.
  */
 export function pickCompanionCandidate(
   candidates: SuggestionCandidate[],
   mainRecipeId: string,
   alreadyUsed: ReadonlySet<string> = new Set(),
   avoidIds: ReadonlySet<string> = new Set(),
+  options: PickCompanionOptions = {},
 ): string | null {
   const others = candidates.filter(
     (c) => c.recipeId !== mainRecipeId && !avoidIds.has(c.recipeId),
@@ -175,11 +226,23 @@ export function pickCompanionCandidate(
       : candidates.filter((c) => c.recipeId !== mainRecipeId);
   if (pool.length === 0) return null;
 
-  const companions = pool.filter((c) => c.plateRole === "companion");
-  const prefer = companions.length > 0 ? companions : pool;
+  const prefer = (list: SuggestionCandidate[]) => {
+    if (list.length === 0) return null;
+    const unused = list.find((c) => !alreadyUsed.has(c.recipeId));
+    return unused ?? list[0] ?? null;
+  };
 
-  const unused = prefer.find((c) => !alreadyUsed.has(c.recipeId));
-  return (unused ?? prefer[0])?.recipeId ?? null;
+  if (options.requireProtein) {
+    const proteins = pool.filter((c) => looksLikeProteinDish(c.name));
+    const proteinCompanions = proteins.filter((c) => c.plateRole === "companion");
+    const preferList =
+      proteinCompanions.length > 0 ? proteinCompanions : proteins;
+    return (prefer(preferList) ?? prefer(pool))?.recipeId ?? null;
+  }
+
+  const companions = pool.filter((c) => c.plateRole === "companion");
+  const preferList = companions.length > 0 ? companions : pool;
+  return prefer(preferList)?.recipeId ?? null;
 }
 
 export function parsePlateKind(raw: unknown): PlateKind | null {

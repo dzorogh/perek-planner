@@ -109,23 +109,23 @@ export async function loadHistory(
     string,
     { rating: RatingValue | null; reason: string | null }
   >();
-  for (const row of ratingsRes.data ?? []) {
+  (ratingsRes.data ?? []).forEach((row) => {
     recipeRating.set(row.recipe_id, {
       rating: asRating(row.rating),
       reason: asReason(row.reason),
     });
-  }
+  });
 
   const snackRating = new Map<
     string,
     { rating: RatingValue | null; reason: string | null }
   >();
-  for (const row of snackRatingsRes.data ?? []) {
+  (snackRatingsRes.data ?? []).forEach((row) => {
     snackRating.set(row.label.toLocaleLowerCase("ru"), {
       rating: asRating(row.rating),
       reason: asReason(row.reason),
     });
-  }
+  });
 
   const recipesByMenu = new Map<string, HistoryRecipeRow[]>();
   const seenRecipe = new Map<string, Set<string>>();
@@ -164,8 +164,8 @@ export async function loadHistory(
     return Array.isArray(recipes) ? (recipes[0] ?? null) : recipes;
   }
 
-  for (const row of slotsRes.data ?? []) {
-    if (!row.menu_id) continue;
+  (slotsRes.data ?? []).forEach((row) => {
+    if (!row.menu_id) return;
 
     const main = unwrapHist(row.recipes as HistRecipe | HistRecipe[] | null);
     const companion = unwrapHist(
@@ -197,8 +197,8 @@ export async function loadHistory(
       seenRecipe.set(row.menu_id, seen);
     }
 
-    for (const recipe of [main, companion]) {
-      if (!recipe?.id) continue;
+    [main, companion].forEach((recipe) => {
+      if (!recipe?.id) return;
       if (!meta.has(recipe.id)) {
         meta.set(recipe.id, {
           name: recipe.name,
@@ -206,15 +206,14 @@ export async function loadHistory(
           ingredients: mapIngredientRows(recipe.critical_ingredients),
         });
       }
-      if (seen.has(recipe.id)) continue;
-      seen.add(recipe.id);
-    }
-  }
+      if (!seen.has(recipe.id)) seen.add(recipe.id);
+    });
+  });
 
-  for (const [menuId, meta] of recipeMetaByMenu) {
+  recipeMetaByMenu.forEach((meta, menuId) => {
     const scaleSlots = scaleSlotsByMenu.get(menuId) ?? [];
     const list: HistoryRecipeRow[] = [];
-    for (const [recipeId, info] of meta) {
+    meta.forEach((info, recipeId) => {
       const batch = recipeBatchScale(scaleSlots, recipeId);
       const r = recipeRating.get(recipeId);
       list.push({
@@ -228,23 +227,23 @@ export async function loadHistory(
         rating: r?.rating ?? null,
         reason: r?.reason ?? null,
       });
-    }
+    });
     recipesByMenu.set(menuId, list);
-  }
+  });
 
   const snacksByMenu = new Map<string, HistorySnackRow[]>();
   const seenSnack = new Map<string, Set<string>>();
 
-  for (const row of snacksRes.data ?? []) {
+  (snacksRes.data ?? []).forEach((row) => {
     const label = typeof row.label === "string" ? row.label.trim() : "";
-    if (!label || !row.menu_id) continue;
+    if (!label || !row.menu_id) return;
     const key = label.toLocaleLowerCase("ru");
     let seen = seenSnack.get(row.menu_id);
     if (!seen) {
       seen = new Set();
       seenSnack.set(row.menu_id, seen);
     }
-    if (seen.has(key)) continue;
+    if (seen.has(key)) return;
     seen.add(key);
     const r = snackRating.get(key);
     const list = snacksByMenu.get(row.menu_id) ?? [];
@@ -254,7 +253,7 @@ export async function loadHistory(
       reason: r?.reason ?? null,
     });
     snacksByMenu.set(row.menu_id, list);
-  }
+  });
 
   return {
     menus: menus.map((m) => ({

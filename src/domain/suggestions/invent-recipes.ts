@@ -81,6 +81,12 @@ export type InventRecipesResult =
 /** Parallel invent chunk size — keeps each OpenRouter response short. */
 export const INVENT_CHUNK_SIZE = 4;
 
+function coerceNumber(raw: unknown): number {
+  if (typeof raw === "number") return raw;
+  if (typeof raw === "string") return Number(raw);
+  return NaN;
+}
+
 const INVENT_SYSTEM = `You invent NEW simple Russian home-cooking recipes for a household meal planner.
 Every recipe is created from scratch via AI.
 You alone judge culinary near-duplicates — there is no keyword filter in code. Be strict.
@@ -112,7 +118,10 @@ Rules:
 - nutrition_per_serving: kcal (integer) and protein_g / fat_g / carbs_g (numbers) for 1 adult serving. Realistic Russian home-cooking estimates.
 - OMIT price_rub_per_serving and/or any nutrition field when uncertain — do NOT send zeros as fillers.
 - Within this batch, each recipe must feel clearly different from the others.
-- Respect operatorTasteNotes: kind=ban is a hard never; kind=wish is a soft prefer.
+- Respect operatorTasteNotes:
+  - constraint is PRIMARY (the operator's rule). Generalize it: «не люблю каши» / «Не предлагай каши» forbids ALL porridges/каши — never invent buckwheat porridge, oatmeal, wheat porridge, or other каши.
+  - exampleDish is secondary context only (a dish that triggered the note). Never treat a ban as limited to that exact name.
+  - kind=ban is a hard never for the constraint meaning; kind=wish is soft prefer.
 - Do not invent recipe ids.`;
 
 /** Split invent count into parallel chunk sizes (max INVENT_CHUNK_SIZE each). */
@@ -167,25 +176,12 @@ export async function inventAndPersistRecipes(
   }
 
   const userId = options.userId ?? menu.user_id;
-  let tasteNotes: TasteNote[] = [];
-  if (userId) {
-    const loaded = await loadTasteNotes(supabase, userId);
-    if (!loaded) {
-      return { ok: false, reason: "query" };
-    }
-    tasteNotes = loaded;
-  }
+  const tasteNotes = await loadInventTasteNotes(supabase, userId);
+  if (!tasteNotes) return { ok: false, reason: "query" };
   const avoidNames = options.avoidNames ?? [];
   const exactAvoidNames = options.exactAvoidNames ?? [];
-  const peopleFromMenu =
-    typeof menu.default_servings_per_meal === "number" &&
-      menu.default_servings_per_meal >= 1
-      ? Math.trunc(menu.default_servings_per_meal)
-      : null;
-  const peoplePerMeal =
-    options.peoplePerMeal != null && options.peoplePerMeal >= 1
-      ? Math.trunc(options.peoplePerMeal)
-      : (peopleFromMenu ?? 2);
+  const peopleFromMenu = positiveInteger(menu.default_servings_per_meal);
+  const peoplePerMeal = positiveInteger(options.peoplePerMeal) ?? peopleFromMenu ?? 2;
 
   const chat = options.chat ?? openRouterChatCompletions;
   const inventContext = {
@@ -257,6 +253,19 @@ export async function inventAndPersistRecipes(
   return { ok: true, inventedIds, eligibleIds };
 }
 
+async function loadInventTasteNotes(
+  supabase: SupabaseClient,
+  userId: string | null | undefined,
+): Promise<TasteNote[] | null> {
+  if (!userId) return [];
+  return loadTasteNotes(supabase, userId);
+}
+
+function positiveInteger(value: unknown): number | null {
+  if (typeof value !== "number" || value < 1) return null;
+  return Math.trunc(value);
+}
+
 /** Keep drafts with unique exact names vs exactAvoid and vs each other. */
 export function selectExactUniqueDrafts(
   drafts: InventRecipeDraft[],
@@ -317,7 +326,7 @@ export async function proposeInventedRecipes(
     ),
     avoidNames: uniqueExactNames(context.avoidNames ?? []).slice(0, 50),
     instruction:
-      "Invent inventCount NEW cooked recipes via AI (extras so we can keep targetKeep). Mix plate_role=main and plate_role=companion (companions ≈30–40% when lunch/dinner are in meals). HARD: you own near-duplicate judgment — never invent the same culinary form+base as anything in previousMenusDishes, currentMenuDishes, or avoidNames (topping swaps count as duplicates: творожная запеканка с ягодами ≈ с изюмом; оладьи≈панкейки). If currentMenuDishes is set, invent a clearly different form for contextMeal. Keep the batch internally diverse. Cover cooked breakfast and lunch/dinner as needed by meals — when breakfast is requested, invent real morning food (каша/яичница/сырники/оладьи), never roast chicken/soup/plov/cutlets for breakfast. Breakfast mains = morning food only; sauces/sides are companion. Name companions without «к пасте»/«к мясу». Never invent перекусы/no-cook snacks — those are separate. If contextMeal is set, bias toward that meal. Honor operatorTasteNotes. Keep body_text short (3–5 steps main, 2–4 companion). HARD: every buyable food in name or body_text (including serving like сметана/зелень) MUST be in critical_ingredients — shopping list ignores the text. When menuDayCount/peoplePerMeal are set, keep ingredient amounts per 1 adult serving; fridge_keep_days >= menuDayCount.",
+      "Invent inventCount NEW cooked recipes via AI (extras so we can keep targetKeep). Mix plate_role=main and plate_role=companion (companions ≈30–40% when lunch/dinner are in meals). HARD: you own near-duplicate judgment — never invent the same culinary form+base as anything in previousMenusDishes, currentMenuDishes, or avoidNames (topping swaps count as duplicates: творожная запеканка с ягодами ≈ с изюмом; оладьи≈панкейки). If currentMenuDishes is set, invent a clearly different form for contextMeal. Keep the batch internally diverse. Cover cooked breakfast and lunch/dinner as needed by meals — when breakfast is requested, invent real morning food (яичница/сырники/оладьи/омлет/запеканка; каша only if operatorTasteNotes allow). Never roast chicken/soup/plov/cutlets for breakfast. Breakfast mains = morning food only; sauces/sides are companion. Name companions without «к пасте»/«к мясу». Never invent перекусы/no-cook snacks — those are separate. If contextMeal is set, bias toward that meal. Honor operatorTasteNotes: constraint PRIMARY (generalize — «не люблю каши» forbids all каши); exampleDish secondary. Keep body_text short (3–5 steps main, 2–4 companion). HARD: every buyable food in name or body_text (including serving like сметана/зелень) MUST be in critical_ingredients — shopping list ignores the text. When menuDayCount/peoplePerMeal are set, keep ingredient amounts per 1 adult serving; fridge_keep_days >= menuDayCount.",
     operatorTasteNotes: tasteNotesForPrompt(tasteNotes),
   });
 
@@ -348,32 +357,22 @@ export function parseInventRecipesJson(content: string): InventRecipeDraft[] {
   }
 
   const out: InventRecipeDraft[] = [];
-  for (const item of root.recipes) {
-    if (!item || typeof item !== "object") continue;
+  root.recipes.forEach((item) => {
+    if (!item || typeof item !== "object") return;
     const row = item as Record<string, unknown>;
     const rawName = typeof row.name === "string" ? row.name.trim() : "";
     const name = rawName ? stripHardcodedPairing(rawName) : "";
-    const bodyText =
-      typeof row.body_text === "string"
-        ? row.body_text.trim()
-        : typeof row.bodyText === "string"
-          ? row.bodyText.trim()
-          : "";
+    const bodyText = readString(row.body_text) ?? readString(row.bodyText) ?? "";
     const fridgeRaw = row.fridge_keep_days ?? row.fridgeKeepDays;
-    const fridgeKeepDays =
-      typeof fridgeRaw === "number"
-        ? fridgeRaw
-        : typeof fridgeRaw === "string"
-          ? Number(fridgeRaw)
-          : NaN;
+    const fridgeKeepDays = coerceNumber(fridgeRaw);
     const ingredientsRaw = row.critical_ingredients ?? row.criticalIngredients;
-    if (!name || !bodyText || !Number.isFinite(fridgeKeepDays)) continue;
-    if (fridgeKeepDays < 1 || fridgeKeepDays > 7) continue;
-    if (!Array.isArray(ingredientsRaw)) continue;
+    if (!name || !bodyText || !Number.isFinite(fridgeKeepDays)) return;
+    if (fridgeKeepDays < 1 || fridgeKeepDays > 7) return;
+    if (!Array.isArray(ingredientsRaw)) return;
 
     const ingredients: InventIngredientDraft[] = [];
-    for (const ing of ingredientsRaw) {
-      if (!ing || typeof ing !== "object") continue;
+    ingredientsRaw.forEach((ing) => {
+      if (!ing || typeof ing !== "object") return;
       const ingRow = ing as {
         name?: unknown;
         kind?: unknown;
@@ -385,16 +384,10 @@ export function parseInventRecipesJson(content: string): InventRecipeDraft[] {
       const ingName =
         typeof ingRow.name === "string" ? ingRow.name.trim() : "";
       const kind = ingRow.kind;
-      if (!ingName) continue;
-      if (kind !== "critical" && kind !== "pantry") continue;
+      if (!ingName || (kind !== "critical" && kind !== "pantry")) return;
       const amountRaw =
         ingRow.amount ?? ingRow.amount_per_serving ?? ingRow.amountPerServing;
-      const amountNum =
-        typeof amountRaw === "number"
-          ? amountRaw
-          : typeof amountRaw === "string"
-            ? Number(amountRaw)
-            : NaN;
+      const amountNum = coerceNumber(amountRaw);
       const unitRaw = ingRow.unit;
       const unit =
         unitRaw === "g" ||
@@ -414,12 +407,12 @@ export function parseInventRecipesJson(content: string): InventRecipeDraft[] {
         amountPerServing: amountPerServing != null ? amountPerServing : null,
         unit: amountPerServing != null ? unit : null,
       });
-    }
+    });
 
     const critical = ingredients.filter((i) => i.kind === "critical");
-    if (critical.length === 0) continue;
+    if (critical.length === 0) return;
     if (critical.some((i) => i.amountPerServing == null || i.unit == null)) {
-      continue;
+      return;
     }
 
     const roleRaw = row.plate_role ?? row.plateRole;
@@ -470,18 +463,13 @@ export function parseInventRecipesJson(content: string): InventRecipeDraft[] {
       fatGPerServing,
       carbsGPerServing,
     });
-  }
+  });
 
   return out;
 }
 
 function parseOptionalNonNegInt(raw: unknown): number | null {
-  const n =
-    typeof raw === "number"
-      ? raw
-      : typeof raw === "string"
-        ? Number(raw)
-        : NaN;
+  const n = coerceNumber(raw);
   if (!Number.isFinite(n) || n < 0) return null;
   // Treat exact 0 as "omitted filler" — keep null.
   if (n === 0) return null;
@@ -529,15 +517,14 @@ export function inventPriceToKopecks(
 }
 
 function parseOptionalNonNegNumber(raw: unknown): number | null {
-  const n =
-    typeof raw === "number"
-      ? raw
-      : typeof raw === "string"
-        ? Number(raw)
-        : NaN;
+  const n = coerceNumber(raw);
   if (!Number.isFinite(n) || n < 0) return null;
   if (n === 0) return null;
   return n;
+}
+
+function readString(raw: unknown): string | null {
+  return typeof raw === "string" ? raw.trim() : null;
 }
 
 async function persistInventedRecipe(

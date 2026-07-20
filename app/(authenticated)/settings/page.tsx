@@ -1,4 +1,5 @@
 import { LogoutButton } from "@/components/logout-button";
+import { AiDebugPanel } from "@/components/settings/ai-debug-panel";
 import { TastePreferencesPanel } from "@/components/settings/taste-preferences-panel";
 import { loadTastePreferences } from "@/domain/settings/taste-preferences";
 import { createClient } from "@/lib/supabase/server";
@@ -15,7 +16,7 @@ export default async function SettingsPage() {
       : [];
 
   return (
-    <div className="max-w-xl space-y-6">
+    <div className="max-w-3xl space-y-6">
       <div>
         <h1 className="page-title">Настройки</h1>
         <p className="mt-2 text-sm text-muted-foreground">
@@ -24,6 +25,8 @@ export default async function SettingsPage() {
       </div>
 
       <TastePreferencesPanel items={preferences} />
+
+      <AiDebugPanel />
 
       <div className="rounded-lg border border-border bg-surface px-5 py-5">
         <LogoutButton />

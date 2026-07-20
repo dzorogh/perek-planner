@@ -18,8 +18,9 @@ export async function assertAnonDenied(client, table, migrationHint) {
 
   if (error) {
     if (error.code === "PGRST205") {
+      const hint = migrationHint ? ` ${migrationHint}` : "";
       console.error(
-        `Table public.${table} not found.${migrationHint ? ` ${migrationHint}` : ""}`,
+        `Table public.${table} not found.${hint}`,
       );
       process.exit(2);
     }

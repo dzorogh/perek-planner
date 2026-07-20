@@ -255,20 +255,7 @@ async function fillCookableSlots(
       throw new SuggestionError("query", SUGGESTION_FAIL_RU.query);
     }
 
-    const slots: SlotPrompt[] = [];
-    for (const row of slotRows) {
-      if (!isMealSlot(row.meal)) {
-        throw new SuggestionError("query", SUGGESTION_FAIL_RU.query);
-      }
-      if (row.day_index < 1 || row.day_index > dayCount) {
-        throw new SuggestionError("query", SUGGESTION_FAIL_RU.query);
-      }
-      slots.push({
-        slotId: row.id,
-        dayIndex: row.day_index,
-        meal: row.meal,
-      });
-    }
+    const slots = buildSlotPrompts(slotRows, dayCount);
 
     // Create-flow: deterministic batch assign (LLM assign kept for resuggest only).
     let proposals = deterministicAssignments(slots, assignPool);
@@ -302,6 +289,25 @@ async function fillCookableSlots(
     await cleanupInvented();
     throw err;
   }
+}
+
+function buildSlotPrompts(
+  rows: Array<{ id: string; day_index: number; meal: unknown }>,
+  dayCount: number,
+): SlotPrompt[] {
+  const slots: SlotPrompt[] = [];
+  for (const row of rows) {
+    if (
+      typeof row.meal !== "string" ||
+      !isMealSlot(row.meal) ||
+      row.day_index < 1 ||
+      row.day_index > dayCount
+    ) {
+      throw new SuggestionError("query", SUGGESTION_FAIL_RU.query);
+    }
+    slots.push({ slotId: row.id, dayIndex: row.day_index, meal: row.meal });
+  }
+  return slots;
 }
 
 /** Merge partial proposals with deterministic fill for omitted slots (resuggest / tests). */

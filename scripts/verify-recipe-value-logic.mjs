@@ -162,22 +162,24 @@ assert("format null price", formatPriceRub(null) === null);
 function inventPriceToKopecks(row) {
   const MAX_RUB = 400;
   const LEGACY_MAX = 5000;
-  const parseInt = (raw) => {
-    const n =
-      typeof raw === "number"
-        ? raw
-        : typeof raw === "string"
-          ? Number(raw)
-          : NaN;
+  const parseOptionalInteger = (raw) => {
+    let n = NaN;
+    if (typeof raw === "number") {
+      n = raw;
+    } else if (typeof raw === "string") {
+      n = Number(raw);
+    }
     if (!Number.isFinite(n) || n < 0 || n === 0) return null;
     return Math.trunc(n);
   };
-  const rub = parseInt(row.price_rub_per_serving ?? row.priceRubPerServing);
+  const rub = parseOptionalInteger(
+    row.price_rub_per_serving ?? row.priceRubPerServing,
+  );
   if (rub != null) {
     if (rub > MAX_RUB) return null;
     return rub * 100;
   }
-  const cents = parseInt(
+  const cents = parseOptionalInteger(
     row.price_cents_per_serving ?? row.priceCentsPerServing,
   );
   if (cents == null) return null;

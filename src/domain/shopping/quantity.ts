@@ -42,7 +42,7 @@ export function formatQuantity(
   if (amount == null || unit == null || !isIngredientUnit(unit)) {
     return null;
   }
-  if (!(amount > 0)) return null;
+  if (amount <= 0) return null;
   const rounded = roundQuantity(amount, unit);
   const num =
     Number.isInteger(rounded) || rounded >= 10

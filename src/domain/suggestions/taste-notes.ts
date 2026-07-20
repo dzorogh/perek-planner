@@ -1,10 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { loadTastePreferences } from "@/domain/settings/taste-preferences";
+import {
+  loadTastePreferences,
+  parseTastePreferenceBody,
+} from "@/domain/settings/taste-preferences";
 
 export type TasteNote = {
-  /** Recipe or snack display name when known. */
+  /** Optional dish/snack that triggered the note — secondary context only. */
   subject: string | null;
+  /** Operator rule — primary constraint for AI. */
   comment: string;
   source: "ban" | "wish";
 };
@@ -24,22 +28,28 @@ export async function loadTasteNotes(
     return null;
   }
 
-  return prefs.slice(0, MAX_NOTES).map((pref) => ({
-    subject: null,
-    comment: pref.body,
-    source: pref.kind,
-  }));
+  return prefs.slice(0, MAX_NOTES).map((pref) => {
+    const parsed = parseTastePreferenceBody(pref.body);
+    return {
+      subject: parsed.subject,
+      comment: parsed.comment,
+      source: pref.kind,
+    };
+  });
 }
 
-/** Compact payload for OpenRouter user messages. */
+/**
+ * Compact payload for OpenRouter user messages.
+ * `constraint` is the operator's rule (PRIMARY); `exampleDish` is optional context.
+ */
 export function tasteNotesForPrompt(notes: TasteNote[]): {
-  subject: string | null;
-  comment: string;
+  constraint: string;
+  exampleDish: string | null;
   kind: TasteNote["source"];
 }[] {
   return notes.map((n) => ({
-    subject: n.subject,
-    comment: n.comment,
+    constraint: n.comment,
+    exampleDish: n.subject,
     kind: n.source,
   }));
 }

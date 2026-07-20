@@ -17,8 +17,6 @@ export type ScaledRecipeTotals = {
   carbsG: number | null;
 };
 
-export type MenuTotals = ScaledRecipeTotals;
-
 export const EMPTY_PER_SERVING: RecipePerServingValue = {
   priceCentsPerServing: null,
   caloriesKcalPerServing: null,
@@ -71,7 +69,7 @@ type SlotLike = {
  * Sum menu totals across main + companion placements.
  * Only known values contribute; missing fields stay null if never seen.
  */
-export function sumMenuTotals(slots: readonly SlotLike[]): MenuTotals {
+export function sumMenuTotals(slots: readonly SlotLike[]): ScaledRecipeTotals {
   let priceCents: number | null = null;
   let caloriesKcal: number | null = null;
   let proteinG: number | null = null;
@@ -164,25 +162,21 @@ export function formatCompactValueLine(totals: ScaledRecipeTotals): string | nul
 }
 
 export function parseNonNegInt(raw: unknown): number | null {
-  const n =
-    typeof raw === "number"
-      ? raw
-      : typeof raw === "string"
-        ? Number(raw)
-        : NaN;
+  const n = coerceNumber(raw);
   if (!Number.isFinite(n) || n < 0) return null;
   return Math.trunc(n);
 }
 
 export function parseNonNegNumber(raw: unknown): number | null {
-  const n =
-    typeof raw === "number"
-      ? raw
-      : typeof raw === "string"
-        ? Number(raw)
-        : NaN;
+  const n = coerceNumber(raw);
   if (!Number.isFinite(n) || n < 0) return null;
   return n;
+}
+
+function coerceNumber(raw: unknown): number {
+  if (typeof raw === "number") return raw;
+  if (typeof raw === "string") return Number(raw);
+  return NaN;
 }
 
 export function mapPerServingValue(row: {

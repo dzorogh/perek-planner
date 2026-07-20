@@ -83,9 +83,12 @@ test.describe("Planning happy path (authenticated)", () => {
       page.getByRole("button", { name: "Копировать список" }),
     ).toBeVisible();
 
-    await expect(page.getByText(/\d+\s*(г|мл|шт)/).first()).toBeVisible({
-      timeout: 10_000,
-    });
+    const quantity = page
+      .getByText(/\d{1,6} г/)
+      .or(page.getByText(/\d{1,6} мл/))
+      .or(page.getByText(/\d{1,6} шт/))
+      .first();
+    await expect(quantity).toBeVisible({ timeout: 10_000 });
     await expect(page.getByRole("heading", { name: "Перекусы" })).toBeVisible();
 
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);

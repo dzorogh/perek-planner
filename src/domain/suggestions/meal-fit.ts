@@ -14,13 +14,9 @@ export function looksLikeNoCookSnack(name: string): boolean {
   const n = normalizeDishName(name);
   if (!n) return false;
   if (n.includes("перекус")) return true;
-  if (/(^|\s)(снек|snack)(ы|а|ов)?(\s|$)/.test(n)) return true;
+  if (/(^|\s)(снек|snack)([ыа]|ов)?(\s|$)/.test(n)) return true;
   // Ready-to-eat / no-cook pantry snacks (not cooked breakfast).
-  if (
-    /(^|\s)(йогурт|кефир|ряженк|простокваш|творожок|фрукты|ягод(ы|а)|банан|яблок|груш|апельсин|мандарин|орех|миндаль|кешью|арахис|фисташк|сухофрукт|изюм|курага|чернослив|батончик|протеинов\w*\s+батон|чипсы|крекер|галет|печенье|вафли|зефир|маршмеллоу|шоколадк|конфет)/.test(
-      n,
-    )
-  ) {
+  if (containsSnackWord(n)) {
     // Cooked dishes with these words as toppings stay cookable
     // (e.g. «каша с бананом», «сырники с ягодами»).
     if (looksLikeBreakfastDish(n) || looksLikeLunchDinnerOnlyMain(n)) {
@@ -36,6 +32,19 @@ export function looksLikeNoCookSnack(name: string): boolean {
     return true;
   }
   return false;
+}
+
+const SNACK_WORDS = [
+  "йогурт", "кефир", "ряженк", "простокваш", "творожок", "фрукты", "ягод",
+  "банан", "яблок", "груш", "апельсин", "мандарин", "орех", "миндаль",
+  "кешью", "арахис", "фисташк", "сухофрукт", "изюм", "курага", "чернослив",
+  "батончик", "чипсы", "крекер", "галет", "печенье", "вафли", "зефир",
+  "маршмеллоу", "шоколадк", "конфет",
+] as const;
+
+function containsSnackWord(name: string): boolean {
+  return SNACK_WORDS.some((word) => name.includes(word)) ||
+    /протеинов\w*\s+батон/.test(name);
 }
 
 /**
@@ -108,11 +117,7 @@ export function looksLikeLunchDinnerOnlyMain(name: string): boolean {
   ) {
     return true;
   }
-  if (
-    /(^|\s)(курица|куриц|цыпл)\w*.*(запеч|жар|тушен|лимон|трав|чеснок)/.test(
-      n,
-    )
-  ) {
+  if (hasChickenCookingSignals(n)) {
     return true;
   }
   // Bare protein cuts as the main label (грудка / филе / окорочка).
@@ -135,6 +140,12 @@ export function looksLikeLunchDinnerOnlyMain(name: string): boolean {
     return true;
   }
   return false;
+}
+
+function hasChickenCookingSignals(name: string): boolean {
+  const hasChicken = /(^|\s)(курица|куриц|цыпл)\w*/.test(name);
+  const hasCooking = /(запеч|жар|тушен|лимон|трав|чеснок)/.test(name);
+  return hasChicken && hasCooking;
 }
 
 /**
@@ -203,18 +214,10 @@ export function looksLikeProteinDish(name: string): boolean {
 
   // Animal / seafood / egg / dairy-protein / legumes / mushrooms (simple add-on).
   // Stems are chosen to avoid cookie/bakery false positives (печенье, баранки).
-  if (
-    /(^|\s)(мяс|говяд|свинин|барани|телятин|куриц|курин|индейк|утин|утка|гусин|грудк|окороч|филе|фарш|стейк|шашлык|гуляш|бефстроган|люля|тефтел|фрикадель|зразы|отбивн|шницел|бифштекс|колбас|сосиск|ветчин|бекон|печень|печенк|язык)/.test(
-      n,
-    )
-  ) {
+  if (containsProteinStem(n, MEAT_PROTEIN_STEMS)) {
     return true;
   }
-  if (
-    /(^|\s)(рыб|лосос|форел|треск|минтай|хек|скумбр|сельд|тунец|креветк|кальмар|миди)/.test(
-      n,
-    )
-  ) {
+  if (containsProteinStem(n, FISH_PROTEIN_STEMS)) {
     return true;
   }
   if (/(^|\s)(яйц|яичниц|омлет)/.test(n)) return true;
@@ -226,6 +229,22 @@ export function looksLikeProteinDish(name: string): boolean {
   // Classic one-pots that imply protein in Russian home cooking.
   if (/(^|\s)(плов|лазань|гуляш)/.test(n)) return true;
   return false;
+}
+
+const MEAT_PROTEIN_STEMS = [
+  "мяс", "говяд", "свинин", "барани", "телятин", "куриц", "курин", "индейк",
+  "утин", "утка", "гусин", "грудк", "окороч", "филе", "фарш", "стейк",
+  "шашлык", "гуляш", "бефстроган", "люля", "тефтел", "фрикадель", "зразы",
+  "отбивн", "шницел", "бифштекс", "колбас", "сосиск", "ветчин", "бекон",
+  "печень", "печенк", "язык",
+] as const;
+const FISH_PROTEIN_STEMS = [
+  "рыб", "лосос", "форел", "треск", "минтай", "хек", "скумбр", "сельд",
+  "тунец", "креветк", "кальмар", "миди",
+] as const;
+
+function containsProteinStem(name: string, stems: readonly string[]): boolean {
+  return stems.some((stem) => name.includes(stem));
 }
 
 /** Carrot/cabbage/potato/… cutlets — carb/veg shape, not a protein main. */
@@ -253,11 +272,10 @@ function looksLikeVegetableCutlet(n: string): boolean {
  * «Грибной соус к пасте» → «Грибной соус».
  */
 export function stripHardcodedPairing(name: string): string {
-  const cleaned = name
-    .replace(
-      /\s+к\s+(пасте|макаронам|мясу|рыбе|курице|грудке|стейку|котлетам|гарниру)\s*$/iu,
-      "",
-    )
-    .trim();
+  const pairing = ["пасте", "макаронам", "мясу", "рыбе", "курице", "грудке", "стейку", "котлетам", "гарниру"]
+    .find((item) => name.trimEnd().endsWith(` к ${item}`));
+  const cleaned = pairing
+    ? name.trimEnd().slice(0, -` к ${pairing}`.length).trim()
+    : name.trim();
   return cleaned.length > 0 ? cleaned : name.trim();
 }

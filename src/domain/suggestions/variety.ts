@@ -136,26 +136,54 @@ export function assignWithBatchVariety(
   };
 
   mealOrder.forEach((meal, mealIndex) => {
-    const mealSlots = byMeal.get(meal)!;
-    // Breakfast: morning food first; never roast chicken / soup / plov as main.
-    const pool = mainsForMeal(meal, named);
-    const { primary, secondary } = pickForMeal(pool);
-
-    for (let i = 0; i < mealSlots.length; i++) {
-      const slot = mealSlots[i]!;
-      let recipeId = primary;
-      if (candidates.length >= 2 && mealSlots.length >= 2) {
-        if (mealIndex % 2 === 0) {
-          recipeId = i === mealSlots.length - 1 ? secondary : primary;
-        } else {
-          recipeId = i === 0 ? primary : secondary;
-        }
-      }
-      out.push({ slotId: slot.slotId, recipeId });
-    }
+    assignMealBatch(
+      byMeal.get(meal)!,
+      meal,
+      mealIndex,
+      candidates.length,
+      named,
+      pickForMeal,
+      out,
+    );
   });
 
   return out;
+}
+
+function assignMealBatch(
+  mealSlots: SlotPrompt[],
+  meal: MealSlot,
+  mealIndex: number,
+  candidateCount: number,
+  named: Array<{ recipeId: string; name: string }>,
+  pickForMeal: (
+    pool: { recipeId: string; name: string }[],
+  ) => { primary: string; secondary: string },
+  out: ProposedAssignment[],
+): void {
+  const { primary, secondary } = pickForMeal(mainsForMeal(meal, named));
+  for (let index = 0; index < mealSlots.length; index += 1) {
+    const slot = mealSlots[index]!;
+    out.push({
+      slotId: slot.slotId,
+      recipeId: selectBatchRecipeId(
+        index, mealSlots.length, mealIndex, candidateCount, primary, secondary,
+      ),
+    });
+  }
+}
+
+function selectBatchRecipeId(
+  index: number,
+  slotCount: number,
+  mealIndex: number,
+  candidateCount: number,
+  primary: string,
+  secondary: string,
+): string {
+  if (candidateCount < 2 || slotCount < 2) return primary;
+  if (mealIndex % 2 === 0) return index === slotCount - 1 ? secondary : primary;
+  return index === 0 ? primary : secondary;
 }
 
 /**
@@ -264,46 +292,47 @@ function breakSameDayMainReuse(
   for (let guard = 0; guard < 24; guard++) {
     const conflict = findSameDayMainConflict(slots, bySlot);
     if (!conflict) return;
-
-    const conflictSlot = slots.find((s) => s.slotId === conflict.slotId);
-    const conflictMeal = conflictSlot?.meal;
-
-    const dayUsed = new Set<string>();
-    for (const slot of slots) {
-      if (slot.dayIndex !== conflict.dayIndex) continue;
-      if (slot.slotId === conflict.slotId) continue;
-      const id = bySlot.get(slot.slotId);
-      if (id) dayUsed.add(id);
+    if (!resolveSameDayConflict(slots, bySlot, candidateIds, nameById, conflict)) {
+      return;
     }
-
-    const current = bySlot.get(conflict.slotId);
-    if (!current) return;
-
-    const alternates = candidateIds.filter(
-      (id) => id !== current && !dayUsed.has(id),
-    );
-    const fallback = candidateIds.filter((id) => id !== current);
-    const tryIds = orderIdsForMeal(
-      conflictMeal,
-      alternates.length > 0 ? alternates : fallback,
-      nameById,
-    );
-
-    let changed = false;
-    for (const alternate of tryIds) {
-      bySlot.set(conflict.slotId, alternate);
-      if (
-        findDuplicateDayPairFromMap(slots, bySlot) ||
-        dayHasSameDayMainReuse(slots, bySlot, conflict.dayIndex)
-      ) {
-        bySlot.set(conflict.slotId, current);
-        continue;
-      }
-      changed = true;
-      break;
-    }
-    if (!changed) return;
   }
+}
+
+function resolveSameDayConflict(
+  slots: SlotPrompt[],
+  bySlot: Map<string, string>,
+  candidateIds: string[],
+  nameById: ReadonlyMap<string, string>,
+  conflict: { dayIndex: number; slotId: string },
+): boolean {
+  const current = bySlot.get(conflict.slotId);
+  if (!current) return false;
+  const used = idsUsedOnDay(slots, bySlot, conflict);
+  const alternates = candidateIds.filter((id) => id !== current && !used.has(id));
+  const options = alternates.length > 0
+    ? alternates
+    : candidateIds.filter((id) => id !== current);
+  const meal = slots.find((slot) => slot.slotId === conflict.slotId)?.meal;
+  for (const alternate of orderIdsForMeal(meal, options, nameById)) {
+    bySlot.set(conflict.slotId, alternate);
+    if (!findDuplicateDayPairFromMap(slots, bySlot) &&
+      !dayHasSameDayMainReuse(slots, bySlot, conflict.dayIndex)) return true;
+    bySlot.set(conflict.slotId, current);
+  }
+  return false;
+}
+
+function idsUsedOnDay(
+  slots: SlotPrompt[],
+  bySlot: Map<string, string>,
+  conflict: { dayIndex: number; slotId: string },
+): Set<string> {
+  return new Set(
+    slots
+      .filter((slot) => slot.dayIndex === conflict.dayIndex && slot.slotId !== conflict.slotId)
+      .map((slot) => bySlot.get(slot.slotId))
+      .filter((id): id is string => Boolean(id)),
+  );
 }
 
 /** Prefer breakfast-fit recipe ids when swapping a breakfast slot. */
@@ -380,34 +409,36 @@ function raiseBatchRatio(
   for (let guard = 0; guard < 24; guard++) {
     const current = toProposals(slots, bySlot);
     if (batchSlotRatio(slots, current) >= MIN_BATCH_SLOT_RATIO) return;
-
-    let progressed = false;
-    for (const mealSlots of byMeal.values()) {
-      if (mealSlots.length < 2) continue;
-
-      for (let i = 0; i < mealSlots.length - 1; i++) {
-        const left = mealSlots[i]!;
-        const right = mealSlots[i + 1]!;
-        const leftId = bySlot.get(left.slotId);
-        const rightId = bySlot.get(right.slotId);
-        if (!leftId || !rightId || leftId === rightId) continue;
-
-        // Prefer copying the left recipe forward (early batch).
-        if (trySetRecipe(slots, bySlot, right.slotId, leftId)) {
-          progressed = true;
-          break;
-        }
-        // Else copy right recipe backward (late batch).
-        if (trySetRecipe(slots, bySlot, left.slotId, rightId)) {
-          progressed = true;
-          break;
-        }
-      }
-      if (progressed) break;
-    }
-
-    if (!progressed) return;
+    if (!extendOneBatch(slots, bySlot, byMeal)) return;
   }
+}
+
+function extendOneBatch(
+  slots: SlotPrompt[],
+  bySlot: Map<string, string>,
+  byMeal: Map<MealSlot, SlotPrompt[]>,
+): boolean {
+  for (const mealSlots of byMeal.values()) {
+    if (tryExtendMealBatch(slots, bySlot, mealSlots)) return true;
+  }
+  return false;
+}
+
+function tryExtendMealBatch(
+  slots: SlotPrompt[],
+  bySlot: Map<string, string>,
+  mealSlots: SlotPrompt[],
+): boolean {
+  for (let index = 0; index < mealSlots.length - 1; index += 1) {
+    const left = mealSlots[index]!;
+    const right = mealSlots[index + 1]!;
+    const leftId = bySlot.get(left.slotId);
+    const rightId = bySlot.get(right.slotId);
+    if (!leftId || !rightId || leftId === rightId) continue;
+    if (trySetRecipe(slots, bySlot, right.slotId, leftId)) return true;
+    if (trySetRecipe(slots, bySlot, left.slotId, rightId)) return true;
+  }
+  return false;
 }
 
 function trySetRecipe(

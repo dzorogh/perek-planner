@@ -44,62 +44,75 @@ export async function assignProposalsToSlots(
   const dayCount = menu.day_count;
 
   for (const proposal of proposals) {
-    const tryOrder = uniquePreserve([
-      proposal.recipeId,
-      ...rankedIds.filter((id) => id !== proposal.recipeId),
-    ]);
-
-    let placed = false;
-    for (const recipeId of tryOrder) {
-      if (isHardSuppressed(recipeId, suppress)) continue;
-      const fridge = fridgeById.get(recipeId);
-      if (fridge == null) continue;
-      if (!passesFridgeKeep(fridge, dayCount)) continue;
-      // FR12: shortest selected fridge-keep must still cover Menu length.
-      if (maxMenuDaysForRecipes([...selectedFridge, fridge]) < dayCount) {
-        continue;
-      }
-
-      const companionRecipeId = resolveCompanionId(
-        proposal.companionRecipeId,
-        recipeId,
-        fridgeById,
-        suppress,
-        dayCount,
-        [...selectedFridge, fridge],
-      );
-
-      const companionFridge =
-        companionRecipeId != null
-          ? fridgeById.get(companionRecipeId)
-          : undefined;
-
-      const { data: updated, error } = await supabase
-        .from("menu_slots")
-        .update({
-          recipe_id: recipeId,
-          companion_recipe_id: companionRecipeId,
-        })
-        .eq("id", proposal.slotId)
-        .eq("menu_id", menuId)
-        .select("id");
-
-      if (error || !updated?.length) {
-        continue;
-      }
-      selectedFridge.push(fridge);
-      if (companionFridge != null) selectedFridge.push(companionFridge);
-      placed = true;
-      assignedCount += 1;
-      break;
-    }
-
-    if (!placed) {
-      failedSlots.push(proposal.slotId);
-    }
+    const placed = await assignProposal(
+      supabase, menuId, proposal, rankedIds, fridgeById, suppress, dayCount, selectedFridge,
+    );
+    if (placed) assignedCount += 1;
+    else failedSlots.push(proposal.slotId);
   }
 
   return { assignedCount, failedSlots };
+}
+
+async function assignProposal(
+  supabase: SupabaseClient,
+  menuId: string,
+  proposal: ProposedAssignment,
+  rankedIds: string[],
+  fridgeById: Map<string, number>,
+  suppress: Pick<SuppressSets, "refusedIds" | "dislikedIds">,
+  dayCount: number,
+  selectedFridge: number[],
+): Promise<boolean> {
+  const tryOrder = uniquePreserve([
+    proposal.recipeId,
+    ...rankedIds.filter((id) => id !== proposal.recipeId),
+  ]);
+  for (const recipeId of tryOrder) {
+    const fridge = usableFridge(recipeId, fridgeById, suppress, dayCount, selectedFridge);
+    if (fridge == null) continue;
+    const companionRecipeId = resolveCompanionId(
+      proposal.companionRecipeId, recipeId, fridgeById, suppress, dayCount, [...selectedFridge, fridge],
+    );
+    const updated = await updateSlot(
+      supabase, menuId, proposal.slotId, recipeId, companionRecipeId,
+    );
+    if (!updated) continue;
+    selectedFridge.push(fridge);
+    const companionFridge = companionRecipeId ? fridgeById.get(companionRecipeId) : null;
+    if (companionFridge != null) selectedFridge.push(companionFridge);
+    return true;
+  }
+  return false;
+}
+
+function usableFridge(
+  recipeId: string,
+  fridgeById: ReadonlyMap<string, number>,
+  suppress: Pick<SuppressSets, "refusedIds" | "dislikedIds">,
+  dayCount: number,
+  selectedFridge: number[],
+): number | null {
+  if (isHardSuppressed(recipeId, suppress)) return null;
+  const fridge = fridgeById.get(recipeId);
+  if (fridge == null || !passesFridgeKeep(fridge, dayCount)) return null;
+  return maxMenuDaysForRecipes([...selectedFridge, fridge]) >= dayCount ? fridge : null;
+}
+
+async function updateSlot(
+  supabase: SupabaseClient,
+  menuId: string,
+  slotId: string,
+  recipeId: string,
+  companionRecipeId: string | null,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("menu_slots")
+    .update({ recipe_id: recipeId, companion_recipe_id: companionRecipeId })
+    .eq("id", slotId)
+    .eq("menu_id", menuId)
+    .select("id");
+  return !error && Boolean(data?.length);
 }
 
 function resolveCompanionId(

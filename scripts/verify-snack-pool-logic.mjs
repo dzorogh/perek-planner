@@ -14,7 +14,12 @@ function formatSnackLabel(label) {
 }
 
 function parseOptionalNonNegInt(raw) {
-  const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : NaN;
+  let n = NaN;
+  if (typeof raw === "number") {
+    n = raw;
+  } else if (typeof raw === "string") {
+    n = Number(raw);
+  }
   if (!Number.isFinite(n) || n < 0 || n === 0) return null;
   return Math.trunc(n);
 }

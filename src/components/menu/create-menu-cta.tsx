@@ -12,16 +12,26 @@ export function CreateMenuCta() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const createFromUrl = searchParams.get("create") === "1";
   const [open, setOpen] = useState(false);
+  const [latchedCreate, setLatchedCreate] = useState(false);
 
-  useEffect(() => {
-    if (searchParams.get("create") !== "1") return;
+  // Latch open from ?create=1 during render (React "adjusting state when props change").
+  if (createFromUrl && !latchedCreate) {
+    setLatchedCreate(true);
     setOpen(true);
+  } else if (!createFromUrl && latchedCreate) {
+    setLatchedCreate(false);
+  }
+
+  // Strip the one-shot query after it has opened the dialog.
+  useEffect(() => {
+    if (!createFromUrl) return;
     const next = new URLSearchParams(searchParams.toString());
     next.delete("create");
     const qs = next.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }, [pathname, router, searchParams]);
+  }, [createFromUrl, pathname, router, searchParams]);
 
   return (
     <>

@@ -25,25 +25,37 @@ export async function loadLastAssignedAt(
     return null;
   }
 
-  for (const row of data) {
-    const menus = row.menus as
-      | { user_id: string; created_at: string }
-      | { user_id: string; created_at: string }[]
-      | null;
-    const menu = Array.isArray(menus) ? menus[0] : menus;
-    if (!menu?.created_at) continue;
-    const at = new Date(menu.created_at);
-    if (Number.isNaN(at.getTime())) continue;
-    for (const recipeId of [row.recipe_id, row.companion_recipe_id]) {
-      if (typeof recipeId !== "string" || !recipeId) continue;
-      const prev = last.get(recipeId);
-      if (!prev || at > prev) {
-        last.set(recipeId, at);
-      }
-    }
-  }
+  for (const row of data) updateLastAssignedAt(last, row);
 
   return last;
+}
+
+function updateLastAssignedAt(
+  last: Map<string, Date>,
+  row: {
+    recipe_id: unknown;
+    companion_recipe_id: unknown;
+    menus: unknown;
+  },
+): void {
+  const menu = unwrapMenu(row.menus);
+  const at = menu?.created_at ? new Date(menu.created_at) : null;
+  if (!at || Number.isNaN(at.getTime())) return;
+  for (const recipeId of [row.recipe_id, row.companion_recipe_id]) {
+    if (typeof recipeId !== "string" || !recipeId) continue;
+    const previous = last.get(recipeId);
+    if (!previous || at > previous) last.set(recipeId, at);
+  }
+}
+
+function unwrapMenu(
+  value: unknown,
+): { user_id: string; created_at: string } | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  if (value && typeof value === "object") {
+    return value as { user_id: string; created_at: string };
+  }
+  return null;
 }
 
 /**

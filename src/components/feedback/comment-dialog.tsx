@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -40,9 +40,10 @@ export function CommentDialog({
 }: CommentDialogProps) {
   const [comment, setComment] = useState("");
 
-  useEffect(() => {
-    if (!open) setComment("");
-  }, [open]);
+  function handleOpenChange(next: boolean) {
+    if (!next) setComment("");
+    onOpenChange(next);
+  }
 
   const trimmed = comment.trim();
   const tooShort =
@@ -53,7 +54,7 @@ export function CommentDialog({
     !pending;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         data-component="comment-dialog"
         className="z-[70]"
@@ -106,7 +107,7 @@ export function CommentDialog({
               variant="ghost"
               className="rounded-sm"
               disabled={pending}
-              onClick={() => onOpenChange(false)}
+              onClick={() => handleOpenChange(false)}
             >
               Отмена
             </Button>

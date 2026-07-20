@@ -1,7 +1,7 @@
 "use client";
 
 import { MoreHorizontal } from "lucide-react";
-import { startTransition, useActionState, useEffect, useState } from "react";
+import { startTransition, useActionState, useState } from "react";
 
 import { CommentDialog } from "@/components/feedback/comment-dialog";
 import { Button } from "@/components/ui/button";
@@ -57,14 +57,6 @@ export function SnackSlotCard({
     SnackActionState,
     FormData
   >(refuseSnackAction, null);
-
-  useEffect(() => {
-    if (refuseState?.ok) setRefuseOpen(false);
-  }, [refuseState]);
-
-  useEffect(() => {
-    if (!snack && refuseOpen) setRefuseOpen(false);
-  }, [snack, refuseOpen]);
 
   const busy = resuggestPending || suggestPending || refusePending;
   const empty = !snack;
@@ -176,6 +168,7 @@ export function SnackSlotCard({
           pending={refusePending}
           error={refuseState && !refuseState.ok ? refuseState.error : null}
           onSubmit={(comment) => {
+            setRefuseOpen(false);
             runAction(refuseAction, {
               menuId,
               snackId: snack.id,

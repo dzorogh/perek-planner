@@ -35,6 +35,20 @@ type LineDraft = {
   sort_order: number;
 };
 
+type PreviousLine = {
+  ingredient_name: string;
+  line_kind: string;
+  quantity_amount: number | string | null;
+  quantity_unit: string | null;
+  sort_order: number;
+};
+
+function coerceNumber(raw: unknown): number | null {
+  if (typeof raw === "number") return raw;
+  if (typeof raw === "string") return Number(raw);
+  return null;
+}
+
 /**
  * Materialize (or regenerate) Shopping list from recipe ingredients + snacks.
  * Quantities = amount_per_serving × slot servings, aggregated by name+unit.
@@ -115,14 +129,14 @@ export async function buildShoppingList(
     }
 
     const ingsByRecipe = new Map<string, typeof ingredients>();
-    for (const row of ingredients ?? []) {
+    (ingredients ?? []).forEach((row) => {
       const rid = row.recipe_id as string;
       const list = ingsByRecipe.get(rid) ?? [];
       list.push(row);
       ingsByRecipe.set(rid, list);
-    }
+    });
 
-    for (const slot of slots) {
+    slots.forEach((slot) => {
       const servings =
         typeof slot.servings === "number" && slot.servings >= 1
           ? slot.servings
@@ -130,20 +144,15 @@ export async function buildShoppingList(
       const slotRecipeIds = [slot.recipe_id, slot.companion_recipe_id].filter(
         (id): id is string => typeof id === "string",
       );
-      for (const recipeId of slotRecipeIds) {
+      slotRecipeIds.forEach((recipeId) => {
         const ings = ingsByRecipe.get(recipeId) ?? [];
-        for (const row of ings) {
+        ings.forEach((row) => {
           const name = typeof row.name === "string" ? row.name.trim() : "";
-          if (!name) continue;
+          if (!name) return;
           const kind: "ingredient" | "pantry" =
             row.kind === "pantry" ? "pantry" : "ingredient";
           const unit = isIngredientUnit(row.unit) ? row.unit : null;
-          const perServing =
-            typeof row.amount_per_serving === "number"
-              ? row.amount_per_serving
-              : typeof row.amount_per_serving === "string"
-                ? Number(row.amount_per_serving)
-                : null;
+          const perServing = coerceNumber(row.amount_per_serving);
           const scaled =
             unit &&
               perServing != null &&
@@ -174,14 +183,14 @@ export async function buildShoppingList(
             existing.quantity_amount += scaled;
           }
           // If one side lacks quantity, keep the named line without inventing qty.
-        }
-      }
-    }
+        });
+      });
+    });
   }
 
   const drafts: LineDraft[] = [];
   let sort = 0;
-  for (const agg of byKey.values()) {
+  byKey.forEach((agg) => {
     drafts.push({
       ingredient_name: agg.ingredient_name,
       line_kind: agg.line_kind,
@@ -189,16 +198,16 @@ export async function buildShoppingList(
       quantity_unit: agg.quantity_unit,
       sort_order: sort++,
     });
-  }
+  });
 
   // Snacks always get their own section lines. If a snack label collides with
   // an ingredient name, keep both — shopping sections distinguish them.
   const seenSnackLabels = new Set<string>();
-  for (const row of snacksRes.data ?? []) {
+  (snacksRes.data ?? []).forEach((row) => {
     const name = typeof row.label === "string" ? row.label.trim() : "";
-    if (!name) continue;
+    if (!name) return;
     const key = name.toLocaleLowerCase("ru");
-    if (seenSnackLabels.has(key)) continue;
+    if (seenSnackLabels.has(key)) return;
     seenSnackLabels.add(key);
     drafts.push({
       ingredient_name: name,
@@ -207,7 +216,7 @@ export async function buildShoppingList(
       quantity_unit: null,
       sort_order: sort++,
     });
-  }
+  });
 
   const { data: existing } = await supabase
     .from("shopping_lists")
@@ -215,46 +224,11 @@ export async function buildShoppingList(
     .eq("menu_id", menuId)
     .maybeSingle();
 
-  let listId = existing?.id as string | undefined;
-  type PreviousLine = {
-    ingredient_name: string;
-    line_kind: string;
-    quantity_amount: number | string | null;
-    quantity_unit: string | null;
-    sort_order: number;
-  };
-  let previousLines: PreviousLine[] | null = null;
-
-  if (!listId) {
-    const { data: created, error: createError } = await supabase
-      .from("shopping_lists")
-      .insert({ menu_id: menuId })
-      .select("id")
-      .single();
-    if (createError || !created) {
-      return { ok: false, error: "Не удалось создать список покупок." };
-    }
-    listId = created.id;
-  } else {
-    await supabase
-      .from("shopping_lists")
-      .update({ updated_at: new Date().toISOString() })
-      .eq("id", listId);
-
-    const { data: prior } = await supabase
-      .from("shopping_list_lines")
-      .select(
-        "ingredient_name, line_kind, quantity_amount, quantity_unit, sort_order",
-      )
-      .eq("shopping_list_id", listId)
-      .order("sort_order", { ascending: true });
-    previousLines = (prior as PreviousLine[] | null) ?? [];
-
-    await supabase
-      .from("shopping_list_lines")
-      .delete()
-      .eq("shopping_list_id", listId);
+  const listState = await prepareShoppingList(supabase, menuId, existing?.id);
+  if (!listState) {
+    return { ok: false, error: "Не удалось создать список покупок." };
   }
+  const { listId, previousLines } = listState;
 
   if (drafts.length > 0) {
     const { error: linesError } = await supabase
@@ -305,12 +279,7 @@ export async function buildShoppingList(
         const unit = isIngredientUnit(l.quantity_unit)
           ? l.quantity_unit
           : null;
-        const amount =
-          typeof l.quantity_amount === "number"
-            ? l.quantity_amount
-            : typeof l.quantity_amount === "string"
-              ? Number(l.quantity_amount)
-              : null;
+        const amount = coerceNumber(l.quantity_amount);
         return {
           id: l.id,
           ingredientName: l.ingredient_name,
@@ -321,6 +290,35 @@ export async function buildShoppingList(
         };
       }),
     },
+  };
+}
+
+async function prepareShoppingList(
+  supabase: SupabaseClient,
+  menuId: string,
+  existingId: string | undefined,
+): Promise<{ listId: string; previousLines: PreviousLine[] | null } | null> {
+  if (!existingId) {
+    const { data, error } = await supabase
+      .from("shopping_lists")
+      .insert({ menu_id: menuId })
+      .select("id")
+      .single();
+    return error || !data ? null : { listId: data.id, previousLines: null };
+  }
+  await supabase
+    .from("shopping_lists")
+    .update({ updated_at: new Date().toISOString() })
+    .eq("id", existingId);
+  const { data } = await supabase
+    .from("shopping_list_lines")
+    .select("ingredient_name, line_kind, quantity_amount, quantity_unit, sort_order")
+    .eq("shopping_list_id", existingId)
+    .order("sort_order", { ascending: true });
+  await supabase.from("shopping_list_lines").delete().eq("shopping_list_id", existingId);
+  return {
+    listId: existingId,
+    previousLines: (data as PreviousLine[] | null) ?? [],
   };
 }
 

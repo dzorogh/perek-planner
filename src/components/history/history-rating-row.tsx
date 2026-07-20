@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useActionState, useEffect, useState } from "react";
+import { startTransition, useActionState, useState } from "react";
 
 import { CommentDialog } from "@/components/feedback/comment-dialog";
 import { RecipeTextPanel } from "@/components/recipes/recipe-text-panel";
@@ -55,10 +55,6 @@ export function HistoryRatingRow(props: RecipeProps | SnackProps) {
   const [dislikeOpen, setDislikeOpen] = useState(false);
   const current = asHistoryRating(props.rating);
 
-  useEffect(() => {
-    if (state?.ok) setDislikeOpen(false);
-  }, [state]);
-
   function submitLike() {
     const fd = new FormData();
     if (props.kind === "recipe") {
@@ -81,6 +77,7 @@ export function HistoryRatingRow(props: RecipeProps | SnackProps) {
     }
     fd.set("rating", "dislike");
     fd.set("comment", comment);
+    setDislikeOpen(false);
     startTransition(() => {
       formAction(fd);
     });

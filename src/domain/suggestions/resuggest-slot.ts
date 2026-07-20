@@ -3,7 +3,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { mealAllowsCompanion, type MealSlot } from "@/domain/menu/constants";
 import { passesFridgeKeep } from "@/domain/matching/eligibility";
 import { assignProposalsToSlots } from "@/domain/suggestions/assign";
-import { buildCandidates } from "@/domain/suggestions/candidates";
+import {
+  buildCandidates,
+  type SuggestionCandidate,
+} from "@/domain/suggestions/candidates";
 import { SUGGESTIONS_RU } from "@/domain/suggestions/constants";
 import {
   SUGGESTION_FAIL_RU,
@@ -49,6 +52,24 @@ export type ResuggestSlotResult =
 
 export type SlotDishTarget = "main" | "companion";
 
+type SlotRow = {
+  id: string;
+  day_index: number;
+  meal: string;
+  recipe_id: string | null;
+  companion_recipe_id: string | null;
+};
+
+type InventRebuildOk = {
+  ok: true;
+  candidates: SuggestionCandidate[];
+  inventedIds: Set<string>;
+  siblingNames: string[];
+  previousMenusDishes: string[];
+};
+
+type InventRebuildResult = InventRebuildOk | { ok: false; error: string };
+
 /**
  * Recipe names currently on the menu (AI invent/assign variety context).
  */
@@ -86,7 +107,7 @@ async function loadMenuRecipeNames(
     names.push(name);
   };
 
-  for (const row of data) {
+  data.forEach((row) => {
     pushName(
       row.recipe_id,
       row.recipes as { name: string } | { name: string }[] | null,
@@ -96,8 +117,218 @@ async function loadMenuRecipeNames(
       (row as { companion?: { name: string } | { name: string }[] | null })
         .companion,
     );
-  }
+  });
   return names;
+}
+
+function requireOpenRouter(
+  chat?: ChatCompletionsFn,
+): ResuggestSlotResult | null {
+  if (!getOpenRouterApiKey() && !chat) {
+    return { ok: false, error: SUGGESTION_FAIL_RU.no_key };
+  }
+  return null;
+}
+
+/**
+ * Shared invent → rebuild candidates pipeline used by resuggest / replace.
+ */
+async function inventAndRebuildCandidates(
+  supabase: SupabaseClient,
+  userId: string,
+  menuId: string,
+  meal: MealSlot,
+  excludeRecipeId: string | null | undefined,
+  inventN: number,
+  options: {
+    chat?: ChatCompletionsFn;
+    now?: Date;
+    extraAvoidNames?: string[];
+  },
+): Promise<InventRebuildResult> {
+  const now = options.now ?? new Date();
+  let built = await buildCandidates(supabase, userId, menuId, now);
+  if (!built.ok) {
+    return { ok: false, error: SUGGESTION_FAIL_RU.query };
+  }
+
+  const siblingNames = await loadMenuRecipeNames(supabase, menuId, {
+    excludeRecipeId: excludeRecipeId ?? undefined,
+  });
+  const previousMenusDishes =
+    (await loadRecentMenuDishNames(supabase, userId, {
+      excludeMenuId: menuId,
+    })) ?? [];
+  const avoidNames = [
+    ...previousMenusDishes,
+    ...siblingNames,
+    ...(options.extraAvoidNames ?? []),
+  ];
+  const exactAvoid = built.candidates.map((c) => c.name);
+
+  const invented = await inventAndPersistRecipes(supabase, menuId, inventN, {
+    chat: options.chat,
+    userId,
+    contextMeal: meal,
+    meals: [meal],
+    previousMenusDishes,
+    currentMenuDishes: siblingNames,
+    avoidNames,
+    exactAvoidNames: exactAvoid,
+  });
+
+  const inventedIds = new Set<string>();
+  if (invented.ok) {
+    invented.inventedIds.forEach((id) => inventedIds.add(id));
+    built = await buildCandidates(supabase, userId, menuId, now);
+    if (!built.ok) {
+      return { ok: false, error: SUGGESTION_FAIL_RU.query };
+    }
+  }
+
+  return {
+    ok: true,
+    candidates: built.candidates,
+    inventedIds,
+    siblingNames,
+    previousMenusDishes,
+  };
+}
+
+function selectMainPool<T extends { recipeId: string; name: string }>(
+  mealMains: T[],
+  withoutCurrent: T[],
+  allCandidates: T[],
+  currentRecipeId: string | null,
+): T[] {
+  if (mealMains.length > 0) return mealMains;
+  if (withoutCurrent.length > 0) return withoutCurrent;
+  return allCandidates.filter(
+    (candidate) =>
+      candidate.recipeId !== currentRecipeId &&
+      !looksLikeNoCookSnack(candidate.name),
+  );
+}
+
+function preferMainCandidates(
+  allCandidates: SuggestionCandidate[],
+  meal: MealSlot,
+  excludeRecipeId: string | null,
+  inventedIds: Set<string>,
+): SuggestionCandidate[] {
+  const withoutCurrent = allCandidates.filter(
+    (c) =>
+      c.recipeId !== excludeRecipeId &&
+      !looksLikeNoCookSnack(c.name) &&
+      !looksLikeCompanionOnly(c.name),
+  );
+  const mealMains = mainsForMeal(meal, withoutCurrent);
+  const pool = selectMainPool(
+    mealMains,
+    withoutCurrent,
+    allCandidates,
+    excludeRecipeId,
+  );
+  const minNeeded = mealAllowsCompanion(meal) ? 2 : 1;
+  return preferInventedCandidates(pool, inventedIds, minNeeded);
+}
+
+function preferCompanionCandidates(
+  allCandidates: SuggestionCandidate[],
+  excludeIds: Set<string>,
+  dayCount: number,
+  inventedIds: Set<string>,
+): SuggestionCandidate[] {
+  const fridgeOk = (c: SuggestionCandidate) =>
+    passesFridgeKeep(c.fridgeKeepDays, dayCount);
+  const sidePool = allCandidates.filter(
+    (c) =>
+      !excludeIds.has(c.recipeId) &&
+      !looksLikeNoCookSnack(c.name) &&
+      fridgeOk(c) &&
+      (c.plateRole === "companion" || looksLikeCompanionOnly(c.name)),
+  );
+  const anyPool = allCandidates.filter(
+    (c) =>
+      !excludeIds.has(c.recipeId) &&
+      !looksLikeNoCookSnack(c.name) &&
+      fridgeOk(c),
+  );
+  const pool = sidePool.length > 0 ? sidePool : anyPool;
+  return preferInventedCandidates(pool, inventedIds, 1);
+}
+
+async function proposeSlotAssignments(
+  promptSlots: SlotPrompt[],
+  candidates: SuggestionCandidate[],
+  chat: ChatCompletionsFn | undefined,
+  tasteNotes: Awaited<ReturnType<typeof loadTasteNotes>>,
+  inventedIds: Set<string>,
+  previousMenusDishes: string[],
+  siblingNames: string[],
+): Promise<
+  | { ok: true; proposals: ProposedAssignment[] }
+  | { ok: false; error: string }
+> {
+  if (!tasteNotes) {
+    return { ok: false, error: SUGGESTIONS_RU.tasteNotesFail };
+  }
+
+  let proposals: ProposedAssignment[];
+  try {
+    proposals = await proposeAssignmentsViaOpenRouter(
+      promptSlots,
+      candidates,
+      chat,
+      tasteNotes,
+      inventedIds,
+      previousMenusDishes,
+      siblingNames,
+    );
+  } catch (err) {
+    return { ok: false, error: resuggestFailMessage(err) };
+  }
+
+  if (proposals.length === 0) {
+    proposals = deterministicAssignments(promptSlots, candidates);
+  } else {
+    proposals = normalizePlateAssignments(promptSlots, proposals, candidates);
+  }
+
+  if (proposals.length === 0) {
+    return { ok: false, error: SUGGESTION_FAIL_RU.parse };
+  }
+  return { ok: true, proposals };
+}
+
+async function assignProposalsOrFail(
+  supabase: SupabaseClient,
+  userId: string,
+  menuId: string,
+  proposals: ProposedAssignment[],
+  candidates: SuggestionCandidate[],
+  forceSuppressIds: string[] = [],
+): Promise<ResuggestSlotResult> {
+  const suppress = await loadSuppressSets(supabase, userId);
+  if (!suppress) {
+    return { ok: false, error: SUGGESTION_FAIL_RU.query };
+  }
+  forceSuppressIds.forEach((id) => suppress.refusedIds.add(id));
+
+  const assignResult = await assignProposalsToSlots(
+    supabase,
+    menuId,
+    proposals,
+    candidates,
+    suppress,
+  );
+  if (
+    assignResult.assignedCount === 0 ||
+    assignResult.failedSlots.length > 0
+  ) {
+    return { ok: false, error: SUGGESTION_FAIL_RU.assign };
+  }
+  return { ok: true };
 }
 
 /**
@@ -114,12 +345,10 @@ export async function resuggestSlotForUser(
     target?: SlotDishTarget;
   } = {},
 ): Promise<ResuggestSlotResult> {
-  if (!getOpenRouterApiKey() && !options.chat) {
-    return { ok: false, error: SUGGESTION_FAIL_RU.no_key };
-  }
+  const keyError = requireOpenRouter(options.chat);
+  if (keyError) return keyError;
 
   const target: SlotDishTarget = options.target ?? "main";
-
   const { data: slot, error: slotError } = await supabase
     .from("menu_slots")
     .select("id, day_index, meal, recipe_id, companion_recipe_id, menu_id")
@@ -131,81 +360,56 @@ export async function resuggestSlotForUser(
     return { ok: false, error: "Слот не найден." };
   }
 
-  const meal = slot.meal as MealSlot;
-
   if (target === "companion") {
-    if (!mealAllowsCompanion(meal)) {
-      return { ok: false, error: "Для этого приёма компаньон не используется." };
-    }
-    if (!slot.recipe_id) {
-      return { ok: false, error: "Сначала выберите основное блюдо." };
-    }
-    return resuggestCompanionOnly(
-      supabase,
-      userId,
-      menuId,
-      slot,
-      options,
-    );
+    return startCompanionResuggest(supabase, userId, menuId, slot, options);
   }
 
-  const now = options.now ?? new Date();
-  let built = await buildCandidates(supabase, userId, menuId, now);
-  if (!built.ok) {
-    return { ok: false, error: SUGGESTION_FAIL_RU.query };
+  return resuggestMainOnly(supabase, userId, menuId, slot, options);
+}
+
+async function startCompanionResuggest(
+  supabase: SupabaseClient,
+  userId: string,
+  menuId: string,
+  slot: SlotRow,
+  options: { chat?: ChatCompletionsFn; now?: Date },
+): Promise<ResuggestSlotResult> {
+  const meal = slot.meal as MealSlot;
+  if (!mealAllowsCompanion(meal)) {
+    return { ok: false, error: "Для этого приёма компаньон не используется." };
   }
+  if (!slot.recipe_id) {
+    return { ok: false, error: "Сначала выберите основное блюдо." };
+  }
+  return resuggestCompanionOnly(supabase, userId, menuId, slot, options);
+}
 
-  const siblingNames = await loadMenuRecipeNames(supabase, menuId, {
-    excludeRecipeId: slot.recipe_id ?? undefined,
-  });
-  const previousMenusDishes =
-    (await loadRecentMenuDishNames(supabase, userId, {
-      excludeMenuId: menuId,
-    })) ?? [];
-  const avoidNames = [...previousMenusDishes, ...siblingNames];
-  const exactAvoid = built.candidates.map((c) => c.name);
-
-  // Companion meals need extras so AI can return complete OR main+companion.
+async function resuggestMainOnly(
+  supabase: SupabaseClient,
+  userId: string,
+  menuId: string,
+  slot: SlotRow,
+  options: { chat?: ChatCompletionsFn; now?: Date },
+): Promise<ResuggestSlotResult> {
+  const meal = slot.meal as MealSlot;
   const inventN = mealAllowsCompanion(meal) ? 4 : 3;
-  const invented = await inventAndPersistRecipes(supabase, menuId, inventN, {
-    chat: options.chat,
+  const rebuilt = await inventAndRebuildCandidates(
+    supabase,
     userId,
-    contextMeal: meal,
-    meals: [meal],
-    previousMenusDishes,
-    currentMenuDishes: siblingNames,
-    avoidNames,
-    exactAvoidNames: exactAvoid,
-  });
-
-  const inventedIds = new Set<string>();
-  if (invented.ok) {
-    for (const id of invented.inventedIds) inventedIds.add(id);
-    built = await buildCandidates(supabase, userId, menuId, now);
-    if (!built.ok) {
-      return { ok: false, error: SUGGESTION_FAIL_RU.query };
-    }
-  }
-
-  const withoutCurrent = built.candidates.filter(
-    (c) =>
-      c.recipeId !== slot.recipe_id &&
-      !looksLikeNoCookSnack(c.name) &&
-      !looksLikeCompanionOnly(c.name),
+    menuId,
+    meal,
+    slot.recipe_id,
+    inventN,
+    options,
   );
-  const mealMains = mainsForMeal(meal, withoutCurrent);
-  const pool =
-    mealMains.length > 0
-      ? mealMains
-      : withoutCurrent.length > 0
-        ? withoutCurrent
-        : built.candidates.filter(
-          (c) =>
-            c.recipeId !== slot.recipe_id && !looksLikeNoCookSnack(c.name),
-        );
-  const minNeeded = mealAllowsCompanion(meal) ? 2 : 1;
-  let candidates = preferInventedCandidates(pool, inventedIds, minNeeded);
+  if (!rebuilt.ok) return rebuilt;
 
+  const candidates = preferMainCandidates(
+    rebuilt.candidates,
+    meal,
+    slot.recipe_id,
+    rebuilt.inventedIds,
+  );
   if (candidates.length === 0) {
     return {
       ok: false,
@@ -218,147 +422,62 @@ export async function resuggestSlotForUser(
     dayIndex: slot.day_index,
     meal,
   };
-
   const tasteNotes = await loadTasteNotes(supabase, userId);
-  if (!tasteNotes) {
-    return { ok: false, error: SUGGESTIONS_RU.tasteNotesFail };
-  }
-
-  let proposals;
-  try {
-    proposals = await proposeAssignmentsViaOpenRouter(
-      [promptSlot],
-      candidates,
-      options.chat,
-      tasteNotes,
-      inventedIds,
-      previousMenusDishes,
-      siblingNames,
-    );
-  } catch (err) {
-    return { ok: false, error: resuggestFailMessage(err) };
-  }
-
-  if (proposals.length === 0) {
-    proposals = deterministicAssignments([promptSlot], candidates);
-  } else {
-    // proposeAssignmentsViaOpenRouter already normalizes; re-run if pool grew.
-    proposals = normalizePlateAssignments(
-      [promptSlot],
-      proposals,
-      candidates,
-    );
-  }
-
-  if (proposals.length === 0) {
-    return { ok: false, error: SUGGESTION_FAIL_RU.parse };
-  }
-
-  const suppress = await loadSuppressSets(supabase, userId);
-  if (!suppress) {
-    return { ok: false, error: SUGGESTION_FAIL_RU.query };
-  }
-
-  const assignResult = await assignProposalsToSlots(
-    supabase,
-    menuId,
-    proposals,
+  const proposed = await proposeSlotAssignments(
+    [promptSlot],
     candidates,
-    suppress,
+    options.chat,
+    tasteNotes,
+    rebuilt.inventedIds,
+    rebuilt.previousMenusDishes,
+    rebuilt.siblingNames,
   );
+  if (!proposed.ok) return proposed;
 
-  if (
-    assignResult.assignedCount === 0 ||
-    assignResult.failedSlots.length > 0
-  ) {
-    return { ok: false, error: SUGGESTION_FAIL_RU.assign };
-  }
-
-  return { ok: true };
+  return assignProposalsOrFail(
+    supabase,
+    userId,
+    menuId,
+    proposed.proposals,
+    candidates,
+  );
 }
 
 async function resuggestCompanionOnly(
   supabase: SupabaseClient,
   userId: string,
   menuId: string,
-  slot: {
-    id: string;
-    day_index: number;
-    meal: string;
-    recipe_id: string | null;
-    companion_recipe_id: string | null;
-  },
+  slot: SlotRow,
   options: { chat?: ChatCompletionsFn; now?: Date },
 ): Promise<ResuggestSlotResult> {
-  const now = options.now ?? new Date();
-  let built = await buildCandidates(supabase, userId, menuId, now);
-  if (!built.ok) {
-    return { ok: false, error: SUGGESTION_FAIL_RU.query };
-  }
-
   const meal = slot.meal as MealSlot;
-  const siblingNames = await loadMenuRecipeNames(supabase, menuId, {
-    excludeRecipeId: slot.companion_recipe_id ?? undefined,
-  });
-  const previousMenusDishes =
-    (await loadRecentMenuDishNames(supabase, userId, {
-      excludeMenuId: menuId,
-    })) ?? [];
-  const avoidNames = [...previousMenusDishes, ...siblingNames];
-  const exactAvoid = built.candidates.map((c) => c.name);
-
-  const invented = await inventAndPersistRecipes(supabase, menuId, 2, {
-    chat: options.chat,
+  const rebuilt = await inventAndRebuildCandidates(
+    supabase,
     userId,
-    contextMeal: meal,
-    meals: [meal],
-    previousMenusDishes,
-    currentMenuDishes: siblingNames,
-    avoidNames,
-    exactAvoidNames: exactAvoid,
-  });
+    menuId,
+    meal,
+    slot.companion_recipe_id,
+    2,
+    options,
+  );
+  if (!rebuilt.ok) return rebuilt;
 
-  const inventedIds = new Set<string>();
-  if (invented.ok) {
-    for (const id of invented.inventedIds) inventedIds.add(id);
-    built = await buildCandidates(supabase, userId, menuId, now);
-    if (!built.ok) {
-      return { ok: false, error: SUGGESTION_FAIL_RU.query };
-    }
-  }
-
-  const { data: menu, error: menuError } = await supabase
-    .from("menus")
-    .select("day_count")
-    .eq("id", menuId)
-    .maybeSingle();
-  if (menuError || !menu?.day_count) {
+  const dayCount = await loadMenuDayCount(supabase, menuId);
+  if (dayCount == null) {
     return { ok: false, error: SUGGESTION_FAIL_RU.query };
   }
-  const dayCount = menu.day_count;
 
   const exclude = new Set(
     [slot.recipe_id, slot.companion_recipe_id].filter(
       (id): id is string => typeof id === "string",
     ),
   );
-  const fridgeOk = (c: (typeof built.candidates)[number]) =>
-    passesFridgeKeep(c.fridgeKeepDays, dayCount);
-  const sidePool = built.candidates.filter(
-    (c) =>
-      !exclude.has(c.recipeId) &&
-      !looksLikeNoCookSnack(c.name) &&
-      fridgeOk(c) &&
-      (c.plateRole === "companion" || looksLikeCompanionOnly(c.name)),
+  const candidates = preferCompanionCandidates(
+    rebuilt.candidates,
+    exclude,
+    dayCount,
+    rebuilt.inventedIds,
   );
-  const anyPool = built.candidates.filter(
-    (c) =>
-      !exclude.has(c.recipeId) &&
-      !looksLikeNoCookSnack(c.name) &&
-      fridgeOk(c),
-  );
-  const pool = sidePool.length > 0 ? sidePool : anyPool;
-  const candidates = preferInventedCandidates(pool, inventedIds, 1);
   if (candidates.length === 0) {
     return {
       ok: false,
@@ -366,68 +485,122 @@ async function resuggestCompanionOnly(
     };
   }
 
+  const companionId = await chooseCompanionId(
+    slot,
+    candidates,
+    options.chat,
+    rebuilt,
+    userId,
+    supabase,
+  );
+  if (!companionId) {
+    return { ok: false, error: SUGGESTIONS_RU.tasteNotesFail };
+  }
+
+  return persistCompanionId(
+    supabase,
+    userId,
+    menuId,
+    slot,
+    companionId,
+    candidates,
+    dayCount,
+  );
+}
+
+async function loadMenuDayCount(
+  supabase: SupabaseClient,
+  menuId: string,
+): Promise<number | null> {
+  const { data: menu, error: menuError } = await supabase
+    .from("menus")
+    .select("day_count")
+    .eq("id", menuId)
+    .maybeSingle();
+  if (menuError || !menu?.day_count) return null;
+  return menu.day_count;
+}
+
+async function chooseCompanionId(
+  slot: SlotRow,
+  candidates: SuggestionCandidate[],
+  chat: ChatCompletionsFn | undefined,
+  rebuilt: InventRebuildOk,
+  userId: string,
+  supabase: SupabaseClient,
+): Promise<string | null> {
+  const meal = slot.meal as MealSlot;
   const promptSlot: SlotPrompt = {
     slotId: slot.id,
     dayIndex: slot.day_index,
     meal,
   };
   const tasteNotes = await loadTasteNotes(supabase, userId);
-  if (!tasteNotes) {
-    return { ok: false, error: SUGGESTIONS_RU.tasteNotesFail };
-  }
+  if (!tasteNotes) return null;
 
-  let companionId: string | null = null;
   try {
     const proposals = await proposeAssignmentsViaOpenRouter(
       [promptSlot],
       candidates,
-      options.chat,
+      chat,
       tasteNotes,
-      inventedIds,
-      previousMenusDishes,
-      siblingNames,
+      rebuilt.inventedIds,
+      rebuilt.previousMenusDishes,
+      rebuilt.siblingNames,
     );
-    const chosen = proposals[0];
-    if (chosen?.companionRecipeId && chosen.companionRecipeId !== slot.recipe_id) {
-      companionId = chosen.companionRecipeId;
-    } else if (
-      chosen?.recipeId &&
-      chosen.recipeId !== slot.recipe_id &&
-      candidates.some((c) => c.recipeId === chosen.recipeId)
-    ) {
-      // Model may put the companion in recipeId when asked for a side-only pick.
-      companionId = chosen.recipeId;
-    }
+    return companionIdFromProposal(proposals[0], slot.recipe_id, candidates);
   } catch {
-    // fall through to deterministic pick
+    return candidates[0]!.recipeId;
   }
+}
 
-  if (!companionId) {
-    companionId = candidates[0]!.recipeId;
+function companionIdFromProposal(
+  chosen: ProposedAssignment | undefined,
+  mainRecipeId: string | null,
+  candidates: SuggestionCandidate[],
+): string {
+  if (chosen?.companionRecipeId && chosen.companionRecipeId !== mainRecipeId) {
+    return chosen.companionRecipeId;
   }
+  if (
+    chosen?.recipeId &&
+    chosen.recipeId !== mainRecipeId &&
+    candidates.some((c) => c.recipeId === chosen.recipeId)
+  ) {
+    // Model may put the companion in recipeId when asked for a side-only pick.
+    return chosen.recipeId;
+  }
+  return candidates[0]!.recipeId;
+}
 
+async function persistCompanionId(
+  supabase: SupabaseClient,
+  userId: string,
+  menuId: string,
+  slot: SlotRow,
+  companionId: string,
+  candidates: SuggestionCandidate[],
+  dayCount: number,
+): Promise<ResuggestSlotResult> {
   const suppress = await loadSuppressSets(supabase, userId);
   if (!suppress) {
     return { ok: false, error: SUGGESTION_FAIL_RU.query };
   }
-  const isUsable = (id: string) => {
-    if (suppress.refusedIds.has(id) || suppress.dislikedIds.has(id)) {
-      return false;
-    }
-    const cand = candidates.find((c) => c.recipeId === id);
-    return cand != null && passesFridgeKeep(cand.fridgeKeepDays, dayCount);
-  };
-  if (!isUsable(companionId)) {
-    const alt = candidates.find((c) => isUsable(c.recipeId));
-    if (!alt) {
-      return { ok: false, error: SUGGESTION_FAIL_RU.assign };
-    }
-    companionId = alt.recipeId;
+
+  const usableId = resolveUsableCompanionId(
+    companionId,
+    candidates,
+    suppress.refusedIds,
+    suppress.dislikedIds,
+    dayCount,
+  );
+  if (!usableId) {
+    return { ok: false, error: SUGGESTION_FAIL_RU.assign };
   }
 
   const { data: updated, error } = await supabase
     .from("menu_slots")
-    .update({ companion_recipe_id: companionId })
+    .update({ companion_recipe_id: usableId })
     .eq("id", slot.id)
     .eq("menu_id", menuId)
     .select("id");
@@ -435,8 +608,23 @@ async function resuggestCompanionOnly(
   if (error || !updated?.length) {
     return { ok: false, error: SUGGESTION_FAIL_RU.assign };
   }
-
   return { ok: true };
+}
+
+function resolveUsableCompanionId(
+  companionId: string,
+  candidates: SuggestionCandidate[],
+  refusedIds: Set<string>,
+  dislikedIds: Set<string>,
+  dayCount: number,
+): string | null {
+  const isUsable = (id: string) => {
+    if (refusedIds.has(id) || dislikedIds.has(id)) return false;
+    const cand = candidates.find((c) => c.recipeId === id);
+    return cand != null && passesFridgeKeep(cand.fridgeKeepDays, dayCount);
+  };
+  if (isUsable(companionId)) return companionId;
+  return candidates.find((c) => isUsable(c.recipeId))?.recipeId ?? null;
 }
 
 /** Clear companion dish for a slot (main stays). */
@@ -479,12 +667,10 @@ export async function resuggestRecipeAcrossMenu(
   slotId: string,
   options: ReplaceAcrossOptions & { target?: SlotDishTarget } = {},
 ): Promise<ResuggestSlotResult> {
-  if (!getOpenRouterApiKey() && !options.chat) {
-    return { ok: false, error: SUGGESTION_FAIL_RU.no_key };
-  }
+  const keyError = requireOpenRouter(options.chat);
+  if (keyError) return keyError;
 
   const target: SlotDishTarget = options.target ?? "main";
-
   const { data: slot, error: slotError } = await supabase
     .from("menu_slots")
     .select("id, recipe_id, companion_recipe_id")
@@ -496,16 +682,9 @@ export async function resuggestRecipeAcrossMenu(
     return { ok: false, error: "Слот не найден." };
   }
 
-  const recipeId =
-    target === "companion" ? slot.companion_recipe_id : slot.recipe_id;
+  const recipeId = selectedRecipeId(slot, target);
   if (!recipeId) {
-    return {
-      ok: false,
-      error:
-        target === "companion"
-          ? "В слоте нет компаньона."
-          : "В слоте нет блюда.",
-    };
+    return { ok: false, error: missingTargetMessage(target) };
   }
 
   return replaceRecipeIdAcrossMenu(
@@ -533,9 +712,8 @@ export async function refuseAndReplaceRecipeAcrossMenu(
     target?: SlotDishTarget;
   } = {},
 ): Promise<ResuggestSlotResult> {
-  if (!getOpenRouterApiKey() && !options.chat) {
-    return { ok: false, error: SUGGESTION_FAIL_RU.no_key };
-  }
+  const keyError = requireOpenRouter(options.chat);
+  if (keyError) return keyError;
 
   const comment = normalizeFeedbackComment(options.comment ?? "");
   if (!isValidFeedbackComment(comment)) {
@@ -546,7 +724,6 @@ export async function refuseAndReplaceRecipeAcrossMenu(
   }
 
   const target: SlotDishTarget = options.target ?? "main";
-
   const { data: slot, error: slotError } = await supabase
     .from("menu_slots")
     .select("id, recipe_id, companion_recipe_id")
@@ -558,16 +735,9 @@ export async function refuseAndReplaceRecipeAcrossMenu(
     return { ok: false, error: "Слот не найден." };
   }
 
-  const refusedRecipeId =
-    target === "companion" ? slot.companion_recipe_id : slot.recipe_id;
+  const refusedRecipeId = selectedRecipeId(slot, target);
   if (!refusedRecipeId) {
-    return {
-      ok: false,
-      error:
-        target === "companion"
-          ? "В слоте нет компаньона."
-          : "В слоте нет блюда.",
-    };
+    return { ok: false, error: missingTargetMessage(target) };
   }
 
   const { error: refuseError } = await supabase.from("recipe_refusals").upsert(
@@ -609,9 +779,20 @@ export async function refuseAndReplaceRecipeAcrossMenu(
       .delete()
       .eq("user_id", userId)
       .eq("recipe_id", refusedRecipeId);
-    return replaced;
   }
   return replaced;
+}
+
+function selectedRecipeId(
+  slot: { recipe_id: string | null; companion_recipe_id: string | null },
+  target: SlotDishTarget,
+): string | null {
+  return target === "companion" ? slot.companion_recipe_id : slot.recipe_id;
+}
+
+function missingTargetMessage(target: SlotDishTarget): string {
+  if (target === "companion") return "В слоте нет компаньона.";
+  return "В слоте нет блюда.";
 }
 
 async function replaceRecipeIdAcrossMenu(
@@ -621,6 +802,77 @@ async function replaceRecipeIdAcrossMenu(
   recipeId: string,
   options: ReplaceAcrossOptions = {},
 ): Promise<ResuggestSlotResult> {
+  const slots = await loadSlotsWithRecipe(supabase, menuId, recipeId);
+  if (!slots.ok) return slots;
+
+  const contextMeal = (slots.asMain[0] ?? slots.asCompanion[0])!
+    .meal as MealSlot;
+  const rebuilt = await inventReplaceCandidates(
+    supabase,
+    userId,
+    menuId,
+    recipeId,
+    contextMeal,
+    options,
+  );
+  if (!rebuilt.ok) return rebuilt;
+
+  const candidates = preferMainCandidates(
+    rebuilt.candidates,
+    contextMeal,
+    recipeId,
+    rebuilt.inventedIds,
+  );
+  if (candidates.length === 0) {
+    return {
+      ok: false,
+      error: "Нет другого доступного блюда для замены.",
+    };
+  }
+
+  const plate = await chooseReplacementPlate(
+    supabase,
+    userId,
+    slots.asMain,
+    candidates,
+    contextMeal,
+    rebuilt,
+    options.chat,
+  );
+  if (!plate.ok) return plate;
+
+  if (slots.asMain.length > 0) {
+    const mainResult = await replaceMains(
+      supabase,
+      userId,
+      menuId,
+      slots.asMain,
+      plate,
+      candidates,
+      options.forceSuppressIds ?? [],
+    );
+    if (!mainResult.ok) return mainResult;
+    plate.chosenCompanionId = mainResult.chosenCompanionId;
+  }
+
+  return replaceCompanions(
+    supabase,
+    menuId,
+    slots.asMain,
+    slots.asCompanion,
+    plate.chosenId,
+    plate.chosenCompanionId,
+  );
+}
+
+async function loadSlotsWithRecipe(
+  supabase: SupabaseClient,
+  menuId: string,
+  recipeId: string,
+): Promise<
+  | { ok: true; asMain: SlotRow[]; asCompanion: SlotRow[] }
+  | { ok: false; error: string }
+> {
   const { data: allSlots, error: slotsError } = await supabase
     .from("menu_slots")
     .select("id, day_index, meal, recipe_id, companion_recipe_id")
@@ -632,86 +884,61 @@ async function replaceRecipeIdAcrossMenu(
 
   const asMain = allSlots.filter((s) => s.recipe_id === recipeId);
   const asCompanion = allSlots.filter((s) => s.companion_recipe_id === recipeId);
-
   if (asMain.length === 0 && asCompanion.length === 0) {
     return { ok: false, error: "Не удалось найти слоты с этим блюдом." };
   }
+  return { ok: true, asMain, asCompanion };
+}
 
+async function inventReplaceCandidates(
+  supabase: SupabaseClient,
+  userId: string,
+  menuId: string,
+  recipeId: string,
+  contextMeal: MealSlot,
+  options: ReplaceAcrossOptions,
+): Promise<InventRebuildResult> {
   const now = options.now ?? new Date();
-  let built = await buildCandidates(supabase, userId, menuId, now);
+  const built = await buildCandidates(supabase, userId, menuId, now);
   if (!built.ok) {
     return { ok: false, error: SUGGESTION_FAIL_RU.query };
   }
-
-  const contextMeal = (asMain[0] ?? asCompanion[0])!.meal as MealSlot;
-  const siblingNames = await loadMenuRecipeNames(supabase, menuId, {
-    excludeRecipeId: recipeId,
-  });
-  const previousMenusDishes =
-    (await loadRecentMenuDishNames(supabase, userId, {
-      excludeMenuId: menuId,
-    })) ?? [];
   const refusedName =
     built.candidates.find((c) => c.recipeId === recipeId)?.name ?? "";
-  const avoidNames = [
-    ...previousMenusDishes,
-    ...siblingNames,
-    ...(refusedName ? [refusedName] : []),
-  ];
-  const exactAvoid = built.candidates.map((c) => c.name);
-
   const inventN = mealAllowsCompanion(contextMeal) ? 4 : 3;
-  const invented = await inventAndPersistRecipes(supabase, menuId, inventN, {
-    chat: options.chat,
+  return inventAndRebuildCandidates(
+    supabase,
     userId,
+    menuId,
     contextMeal,
-    meals: [contextMeal],
-    previousMenusDishes,
-    currentMenuDishes: siblingNames,
-    avoidNames,
-    exactAvoidNames: exactAvoid,
-  });
-
-  const inventedIds = new Set<string>();
-  if (invented.ok) {
-    for (const id of invented.inventedIds) inventedIds.add(id);
-    built = await buildCandidates(supabase, userId, menuId, now);
-    if (!built.ok) {
-      return { ok: false, error: SUGGESTION_FAIL_RU.query };
-    }
-  }
-
-  const withoutRefused = built.candidates.filter(
-    (c) =>
-      c.recipeId !== recipeId &&
-      !looksLikeNoCookSnack(c.name) &&
-      !looksLikeCompanionOnly(c.name),
+    recipeId,
+    inventN,
+    {
+      chat: options.chat,
+      now,
+      extraAvoidNames: refusedName ? [refusedName] : [],
+    },
   );
-  const mealMains = mainsForMeal(contextMeal, withoutRefused);
-  const replacePool =
-    mealMains.length > 0
-      ? mealMains
-      : withoutRefused.length > 0
-        ? withoutRefused
-        : built.candidates.filter(
-          (c) => c.recipeId !== recipeId && !looksLikeNoCookSnack(c.name),
-        );
-  const minNeeded = mealAllowsCompanion(contextMeal) ? 2 : 1;
-  const candidates = preferInventedCandidates(
-    replacePool,
-    inventedIds,
-    minNeeded,
-  );
+}
 
-  if (candidates.length === 0) {
-    return {
-      ok: false,
-      error: "Нет другого доступного блюда для замены.",
-    };
-  }
+type ReplacementPlate = {
+  ok: true;
+  chosenId: string;
+  chosenCompanionId: string | null;
+  chosenPlateKind: ProposedAssignment["plateKind"];
+};
 
+async function chooseReplacementPlate(
+  supabase: SupabaseClient,
+  userId: string,
+  asMain: SlotRow[],
+  candidates: SuggestionCandidate[],
+  contextMeal: MealSlot,
+  rebuilt: InventRebuildOk,
+  chat?: ChatCompletionsFn,
+): Promise<ReplacementPlate | { ok: false; error: string }> {
   const sharedId =
-    [...inventedIds].find((id) =>
+    [...rebuilt.inventedIds].find((id) =>
       candidates.some((c) => c.recipeId === id),
     ) ?? candidates[0]!.recipeId;
 
@@ -723,81 +950,98 @@ async function replaceRecipeIdAcrossMenu(
     ? "complete"
     : null;
 
-  if (asMain.length > 0) {
-    const promptSlots: SlotPrompt[] = asMain.map((row) => ({
-      slotId: row.id,
-      dayIndex: row.day_index,
-      meal: row.meal as MealSlot,
-    }));
-    const tasteNotes = await loadTasteNotes(supabase, userId);
-    if (!tasteNotes) {
-      return { ok: false, error: SUGGESTIONS_RU.tasteNotesFail };
-    }
-    try {
-      const llm = await proposeAssignmentsViaOpenRouter(
-        promptSlots,
-        candidates,
-        options.chat,
-        tasteNotes,
-        inventedIds,
-        previousMenusDishes,
-        siblingNames,
-      );
-      if (llm.length > 0) {
-        const first = llm[0]!;
-        chosenId = first.recipeId;
-        chosenCompanionId = first.companionRecipeId ?? null;
-        chosenPlateKind = first.plateKind ?? chosenPlateKind;
-      }
-    } catch (err) {
-      // OpenRouter/Suggestion parse issues → keep deterministic sharedId below.
-      if (!(err instanceof OpenRouterError || err instanceof SuggestionError)) {
-        return { ok: false, error: resuggestFailMessage(err) };
-      }
-    }
-
-    const suppress = await loadSuppressSets(supabase, userId);
-    if (!suppress) {
-      return { ok: false, error: SUGGESTION_FAIL_RU.query };
-    }
-    for (const id of options.forceSuppressIds ?? []) {
-      suppress.refusedIds.add(id);
-    }
-
-    // Same replacement plate across all days that had the refused main.
-    let proposals: ProposedAssignment[] = asMain.map((row) => ({
-      slotId: row.id,
-      recipeId: chosenId,
-      companionRecipeId: chosenCompanionId,
-      plateKind: chosenPlateKind,
-    }));
-    proposals = normalizePlateAssignments(promptSlots, proposals, candidates);
-
-    const assignResult = await assignProposalsToSlots(
-      supabase,
-      menuId,
-      proposals,
-      candidates,
-      suppress,
-    );
-
-    if (
-      assignResult.assignedCount === 0 ||
-      assignResult.failedSlots.length > 0
-    ) {
-      return { ok: false, error: SUGGESTION_FAIL_RU.assign };
-    }
-
-    // Keep chosenCompanionId in sync with what normalize produced.
-    chosenCompanionId = proposals[0]?.companionRecipeId ?? null;
+  if (asMain.length === 0) {
+    return { ok: true, chosenId, chosenCompanionId, chosenPlateKind };
   }
 
-  // Replace companion placements (including slots that only had it as companion).
-  for (const row of asCompanion) {
-    // Skip if we already rewrote this slot as main above.
-    if (asMain.some((m) => m.id === row.id)) {
-      continue;
+  const promptSlots: SlotPrompt[] = asMain.map((row) => ({
+    slotId: row.id,
+    dayIndex: row.day_index,
+    meal: row.meal as MealSlot,
+  }));
+  const tasteNotes = await loadTasteNotes(supabase, userId);
+  if (!tasteNotes) {
+    return { ok: false, error: SUGGESTIONS_RU.tasteNotesFail };
+  }
+
+  try {
+    const llm = await proposeAssignmentsViaOpenRouter(
+      promptSlots,
+      candidates,
+      chat,
+      tasteNotes,
+      rebuilt.inventedIds,
+      rebuilt.previousMenusDishes,
+      rebuilt.siblingNames,
+    );
+    if (llm.length > 0) {
+      const first = llm[0]!;
+      chosenId = first.recipeId;
+      chosenCompanionId = first.companionRecipeId ?? null;
+      chosenPlateKind = first.plateKind ?? chosenPlateKind;
     }
+  } catch (err) {
+    if (!(err instanceof OpenRouterError || err instanceof SuggestionError)) {
+      return { ok: false, error: resuggestFailMessage(err) };
+    }
+  }
+
+  return { ok: true, chosenId, chosenCompanionId, chosenPlateKind };
+}
+
+async function replaceMains(
+  supabase: SupabaseClient,
+  userId: string,
+  menuId: string,
+  asMain: SlotRow[],
+  plate: ReplacementPlate,
+  candidates: SuggestionCandidate[],
+  forceSuppressIds: string[],
+): Promise<
+  | { ok: true; chosenCompanionId: string | null }
+  | { ok: false; error: string }
+> {
+  const promptSlots: SlotPrompt[] = asMain.map((row) => ({
+    slotId: row.id,
+    dayIndex: row.day_index,
+    meal: row.meal as MealSlot,
+  }));
+
+  let proposals: ProposedAssignment[] = asMain.map((row) => ({
+    slotId: row.id,
+    recipeId: plate.chosenId,
+    companionRecipeId: plate.chosenCompanionId,
+    plateKind: plate.chosenPlateKind,
+  }));
+  proposals = normalizePlateAssignments(promptSlots, proposals, candidates);
+
+  const assigned = await assignProposalsOrFail(
+    supabase,
+    userId,
+    menuId,
+    proposals,
+    candidates,
+    forceSuppressIds,
+  );
+  if (!assigned.ok) return assigned;
+
+  return {
+    ok: true,
+    chosenCompanionId: proposals[0]?.companionRecipeId ?? null,
+  };
+}
+
+async function replaceCompanions(
+  supabase: SupabaseClient,
+  menuId: string,
+  asMain: SlotRow[],
+  asCompanion: SlotRow[],
+  chosenId: string,
+  chosenCompanionId: string | null,
+): Promise<ResuggestSlotResult> {
+  const mainIds = new Set(asMain.map((m) => m.id));
+  for (const row of asCompanion) {
+    if (mainIds.has(row.id)) continue;
     const nextCompanion =
       chosenId === row.recipe_id ? null : (chosenCompanionId ?? chosenId);
     const { error } = await supabase
@@ -809,6 +1053,5 @@ async function replaceRecipeIdAcrossMenu(
       return { ok: false, error: SUGGESTION_FAIL_RU.assign };
     }
   }
-
   return { ok: true };
 }

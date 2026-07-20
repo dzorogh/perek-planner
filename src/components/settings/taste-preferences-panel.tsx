@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useActionState, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -23,27 +23,18 @@ type TastePreferencesPanelProps = {
 };
 
 export function TastePreferencesPanel({ items }: TastePreferencesPanelProps) {
-  const [kind, setKind] = useState<TastePreferenceKind>("ban");
-  const [body, setBody] = useState("");
-  const formRef = useRef<HTMLFormElement>(null);
-
   const [addState, addAction, addPending] = useActionState<
     TastePreferenceActionState,
     FormData
   >(addTastePreferenceAction, null);
 
-  useEffect(() => {
-    if (addState?.ok) {
-      formRef.current?.reset();
-      setKind("ban");
-      setBody("");
-    }
-  }, [addState]);
-
-  const canSubmit =
-    body.trim().length >= MIN_FEEDBACK_COMMENT_LENGTH &&
-    body.trim().length <= MAX_FEEDBACK_COMMENT_LENGTH &&
-    !addPending;
+  // Remount the form after a successful add so fields reset without an effect.
+  const [formKey, setFormKey] = useState(0);
+  const [seenAddState, setSeenAddState] = useState(addState);
+  if (addState !== seenAddState) {
+    setSeenAddState(addState);
+    if (addState?.ok) setFormKey((key) => key + 1);
+  }
 
   return (
     <section
@@ -58,51 +49,12 @@ export function TastePreferencesPanel({ items }: TastePreferencesPanelProps) {
         пожелание — предпочитать, когда можно.
       </p>
 
-      <form
-        ref={formRef}
+      <AddPreferenceForm
+        key={formKey}
         action={addAction}
-        className="mt-4 space-y-3"
-      >
-        <div className="flex gap-2">
-          <KindToggle kind={kind} onChange={setKind} />
-          <input type="hidden" name="kind" value={kind} />
-        </div>
-        <label className="block text-[11px] font-semibold uppercase tracking-[0.04em] text-slot-label">
-          Текст
-        </label>
-        <textarea
-          name="body"
-          rows={2}
-          maxLength={MAX_FEEDBACK_COMMENT_LENGTH}
-          value={body}
-          onChange={(event) => setBody(event.target.value)}
-          placeholder={
-            kind === "ban"
-              ? "Например: без гречки и капусты"
-              : "Например: чаще рыбу на ужин"
-          }
-          disabled={addPending}
-          className="flex min-h-[64px] w-full rounded-sm border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-        />
-        <p className="text-xs text-muted-foreground">
-          Минимум {MIN_FEEDBACK_COMMENT_LENGTH} символа.
-        </p>
-        {addState && !addState.ok ? (
-          <p className="text-xs text-warning-fg" role="alert">
-            {addState.error}
-          </p>
-        ) : null}
-        <div className="flex justify-end">
-          <Button
-            type="submit"
-            className="rounded-sm"
-            disabled={!canSubmit}
-            aria-busy={addPending}
-          >
-            {addPending ? "Сохраняем…" : "Добавить"}
-          </Button>
-        </div>
-      </form>
+        pending={addPending}
+        addState={addState}
+      />
 
       {items.length === 0 ? (
         <p className="mt-5 text-sm text-muted-foreground">
@@ -116,6 +68,68 @@ export function TastePreferencesPanel({ items }: TastePreferencesPanelProps) {
         </ul>
       )}
     </section>
+  );
+}
+
+function AddPreferenceForm({
+  action,
+  pending,
+  addState,
+}: {
+  action: (payload: FormData) => void;
+  pending: boolean;
+  addState: TastePreferenceActionState;
+}) {
+  const [kind, setKind] = useState<TastePreferenceKind>("ban");
+  const [body, setBody] = useState("");
+
+  const canSubmit =
+    body.trim().length >= MIN_FEEDBACK_COMMENT_LENGTH &&
+    body.trim().length <= MAX_FEEDBACK_COMMENT_LENGTH &&
+    !pending;
+
+  return (
+    <form action={action} className="mt-4 space-y-3">
+      <div className="flex gap-2">
+        <KindToggle kind={kind} onChange={setKind} />
+        <input type="hidden" name="kind" value={kind} />
+      </div>
+      <label className="block text-[11px] font-semibold uppercase tracking-[0.04em] text-slot-label">
+        Текст
+      </label>
+      <textarea
+        name="body"
+        rows={2}
+        maxLength={MAX_FEEDBACK_COMMENT_LENGTH}
+        value={body}
+        onChange={(event) => setBody(event.target.value)}
+        placeholder={
+          kind === "ban"
+            ? "Например: без гречки и капусты"
+            : "Например: чаще рыбу на ужин"
+        }
+        disabled={pending}
+        className="flex min-h-[64px] w-full rounded-sm border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+      />
+      <p className="text-xs text-muted-foreground">
+        Минимум {MIN_FEEDBACK_COMMENT_LENGTH} символа.
+      </p>
+      {addState && !addState.ok ? (
+        <p className="text-xs text-warning-fg" role="alert">
+          {addState.error}
+        </p>
+      ) : null}
+      <div className="flex justify-end">
+        <Button
+          type="submit"
+          className="rounded-sm"
+          disabled={!canSubmit}
+          aria-busy={pending}
+        >
+          {pending ? "Сохраняем…" : "Добавить"}
+        </Button>
+      </div>
+    </form>
   );
 }
 

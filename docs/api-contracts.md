@@ -38,6 +38,8 @@ Auth: Supabase session cookies (`@supabase/ssr`). OpenRouter only from server mo
 | `deleteMenuAction` | `src/domain/history/delete-actions.ts` | Delete menu (cascade) |
 | `addTastePreferenceAction` | `src/domain/settings/taste-preference-actions.ts` | Insert ban/wish |
 | `deleteTastePreferenceAction` | same | Delete preference |
+| `loadAiDebugLogAction` | `src/domain/settings/ai-debug-actions.ts` | Latest OpenRouter request/response pairs (process memory) |
+| `clearAiDebugLogAction` | same | Clear AI debug ring buffer |
 
 ## RSC / non-action entry points
 

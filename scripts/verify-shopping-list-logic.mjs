@@ -21,7 +21,7 @@ function roundQuantity(amount, unit) {
 
 function formatQuantity(amount, unit) {
   if (amount == null || unit == null) return null;
-  if (!(amount > 0)) return null;
+  if (amount <= 0) return null;
   const rounded = roundQuantity(amount, unit);
   const num =
     Number.isInteger(rounded) || rounded >= 10
@@ -63,34 +63,48 @@ function formatShoppingListCopy(list) {
 }
 
 /** Aggregate amount_per_serving × servings by name+unit. */
+function scaledIngredientAmount(row, servings) {
+  if (!row.unit || row.amount_per_serving <= 0) return null;
+  return row.amount_per_serving * servings;
+}
+
+function ingredientKey(row, scaled) {
+  const unit = scaled == null ? "" : row.unit;
+  return `${row.kind}|${row.name.toLowerCase()}|${unit}`;
+}
+
+function createShoppingLine(row, scaled) {
+  return {
+    ingredientName: row.name,
+    lineKind: row.kind === "pantry" ? "pantry" : "ingredient",
+    quantityAmount: scaled,
+    quantityUnit: scaled == null ? null : row.unit,
+  };
+}
+
+function addToExistingLine(existing, scaled, unit) {
+  if (
+    existing.quantityAmount != null &&
+    scaled != null &&
+    existing.quantityUnit === unit
+  ) {
+    existing.quantityAmount += scaled;
+  }
+}
+
 function aggregateLines(slots, ingredientsByRecipe) {
   const byKey = new Map();
   for (const slot of slots) {
     const ings = ingredientsByRecipe[slot.recipe_id] ?? [];
     for (const row of ings) {
-      const scaled =
-        row.unit && row.amount_per_serving > 0
-          ? row.amount_per_serving * slot.servings
-          : null;
-      const key =
-        scaled != null
-          ? `${row.kind}|${row.name.toLowerCase()}|${row.unit}`
-          : `${row.kind}|${row.name.toLowerCase()}|`;
+      const scaled = scaledIngredientAmount(row, slot.servings);
+      const key = ingredientKey(row, scaled);
       const existing = byKey.get(key);
       if (!existing) {
-        byKey.set(key, {
-          ingredientName: row.name,
-          lineKind: row.kind === "pantry" ? "pantry" : "ingredient",
-          quantityAmount: scaled,
-          quantityUnit: scaled != null ? row.unit : null,
-        });
-      } else if (
-        existing.quantityAmount != null &&
-        scaled != null &&
-        existing.quantityUnit === row.unit
-      ) {
-        existing.quantityAmount += scaled;
+        byKey.set(key, createShoppingLine(row, scaled));
+        continue;
       }
+      addToExistingLine(existing, scaled, row.unit);
     }
   }
   return [...byKey.values()];

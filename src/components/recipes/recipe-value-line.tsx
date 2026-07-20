@@ -43,12 +43,13 @@ export function RecipeValueDetail({
   const kbjuPer = formatKbjuLine(perServing);
   const kbjuBatch = formatKbjuLine(batch);
 
-  const priceLine =
-    pricePer && priceBatch && totalServings > 1
-      ? `${pricePer} на порцию · ${priceBatch} на ${totalServings}`
-      : pricePer
-        ? `${pricePer} на порцию`
-        : null;
+  let priceLine: string | null = null;
+  if (pricePer) {
+    priceLine = `${pricePer} на порцию`;
+    if (priceBatch && totalServings > 1) {
+      priceLine = `${priceLine} · ${priceBatch} на ${totalServings}`;
+    }
+  }
 
   if (!priceLine && !kbjuPer) return null;
 

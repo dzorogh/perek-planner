@@ -113,40 +113,11 @@ export async function loadMenuSkeleton(
 
   const mapped: MenuSlotView[] = [];
   for (const row of slotsRes.data ?? []) {
-    if (!isMealSlot(row.meal)) {
+    const slot = mapMenuSlot(row, menu.day_count);
+    if (!slot) {
       return { menu: null, error: "Слоты меню повреждены." };
     }
-    if (row.day_index < 1 || row.day_index > menu.day_count) {
-      return { menu: null, error: "Слоты меню повреждены." };
-    }
-    const recipeRow = unwrapRecipe(
-      row.recipes as RecipeJoin | RecipeJoin[] | null,
-    );
-    const companionRow = unwrapRecipe(
-      (row as { companion?: RecipeJoin | RecipeJoin[] | null }).companion,
-    );
-    mapped.push({
-      id: row.id,
-      dayIndex: row.day_index,
-      meal: row.meal,
-      recipeId: row.recipe_id,
-      recipeName: recipeRow?.name ?? null,
-      recipeBodyText: recipeRow?.body_text ?? null,
-      recipeIngredients: mapIngredientRows(recipeRow?.critical_ingredients),
-      recipeValue: recipeRow
-        ? mapPerServingValue(recipeRow)
-        : { ...EMPTY_PER_SERVING },
-      companionRecipeId: row.companion_recipe_id ?? null,
-      companionRecipeName: companionRow?.name ?? null,
-      companionRecipeBodyText: companionRow?.body_text ?? null,
-      companionRecipeIngredients: mapIngredientRows(
-        companionRow?.critical_ingredients,
-      ),
-      companionRecipeValue: companionRow
-        ? mapPerServingValue(companionRow)
-        : { ...EMPTY_PER_SERVING },
-      servings: typeof row.servings === "number" ? row.servings : 2,
-    });
+    mapped.push(slot);
   }
 
   if (mapped.length > maxSlotCount(menu.day_count)) {
@@ -174,5 +145,48 @@ export async function loadMenuSkeleton(
       snacks,
     },
     error: null,
+  };
+}
+
+function mapMenuSlot(
+  row: {
+    id: string;
+    day_index: number;
+    meal: unknown;
+    recipe_id: string | null;
+    companion_recipe_id: string | null;
+    servings: unknown;
+    recipes: unknown;
+    companion?: unknown;
+  },
+  dayCount: number,
+): MenuSlotView | null {
+  if (
+    typeof row.meal !== "string" ||
+    !isMealSlot(row.meal) ||
+    row.day_index < 1 ||
+    row.day_index > dayCount
+  ) {
+    return null;
+  }
+  const recipe = unwrapRecipe(row.recipes as RecipeJoin | RecipeJoin[] | null);
+  const companion = unwrapRecipe(row.companion as RecipeJoin | RecipeJoin[] | null);
+  return {
+    id: row.id,
+    dayIndex: row.day_index,
+    meal: row.meal,
+    recipeId: row.recipe_id,
+    recipeName: recipe?.name ?? null,
+    recipeBodyText: recipe?.body_text ?? null,
+    recipeIngredients: mapIngredientRows(recipe?.critical_ingredients),
+    recipeValue: recipe ? mapPerServingValue(recipe) : { ...EMPTY_PER_SERVING },
+    companionRecipeId: row.companion_recipe_id ?? null,
+    companionRecipeName: companion?.name ?? null,
+    companionRecipeBodyText: companion?.body_text ?? null,
+    companionRecipeIngredients: mapIngredientRows(companion?.critical_ingredients),
+    companionRecipeValue: companion
+      ? mapPerServingValue(companion)
+      : { ...EMPTY_PER_SERVING },
+    servings: typeof row.servings === "number" ? row.servings : 2,
   };
 }

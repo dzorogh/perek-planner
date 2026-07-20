@@ -35,6 +35,32 @@ type IngredientRow = {
   sort_order?: unknown;
 };
 
+function coerceNumber(raw: unknown): number {
+  if (typeof raw === "number") return raw;
+  if (typeof raw === "string") return Number(raw);
+  return NaN;
+}
+
+function mapIngredientRow(
+  row: IngredientRow,
+  sort: number,
+): RecipeIngredientView & { sort: number } | null {
+  const name = typeof row.name === "string" ? row.name.trim() : "";
+  if (!name || (row.kind !== "critical" && row.kind !== "pantry")) return null;
+
+  const amountNum = coerceNumber(row.amount_per_serving);
+  const unit = isIngredientUnit(row.unit) ? row.unit : null;
+  const amountPerServing =
+    unit && Number.isFinite(amountNum) && amountNum > 0 ? amountNum : null;
+  return {
+    name,
+    kind: row.kind,
+    amountPerServing,
+    unit: amountPerServing != null ? unit : null,
+    sort,
+  };
+}
+
 export function mapIngredientRows(
   rows: IngredientRow[] | null | undefined,
 ): RecipeIngredientView[] {
@@ -42,30 +68,12 @@ export function mapIngredientRows(
 
   const mapped: Array<RecipeIngredientView & { sort: number }> = [];
   for (const row of rows) {
-    const name = typeof row.name === "string" ? row.name.trim() : "";
-    if (!name) continue;
-    if (row.kind !== "critical" && row.kind !== "pantry") continue;
-    const amountRaw = row.amount_per_serving;
-    const amountNum =
-      typeof amountRaw === "number"
-        ? amountRaw
-        : typeof amountRaw === "string"
-          ? Number(amountRaw)
-          : NaN;
-    const unit = isIngredientUnit(row.unit) ? row.unit : null;
-    const amountPerServing =
-      unit && Number.isFinite(amountNum) && amountNum > 0 ? amountNum : null;
     const sort =
       typeof row.sort_order === "number" && Number.isFinite(row.sort_order)
         ? row.sort_order
         : mapped.length + 1;
-    mapped.push({
-      name,
-      kind: row.kind,
-      amountPerServing: amountPerServing != null ? amountPerServing : null,
-      unit: amountPerServing != null ? unit : null,
-      sort,
-    });
+    const mappedRow = mapIngredientRow(row, sort);
+    if (mappedRow) mapped.push(mappedRow);
   }
 
   mapped.sort((a, b) => a.sort - b.sort);

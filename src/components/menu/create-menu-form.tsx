@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 
 import { DayLengthPicker } from "@/components/menu/day-length-picker";
 import {
@@ -30,11 +30,8 @@ export function CreateMenuForm({ onPendingChange }: CreateMenuFormProps = {}) {
   const [mealTypes, setMealTypes] = useState<MealTypesSelection>(
     DEFAULT_MEAL_TYPES_SELECTION,
   );
-  const idempotencyKeyRef = useRef(
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `create-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-  );
+  // Stable per form instance; lazy init keeps render pure (no Date.now / Math.random).
+  const [idempotencyKey] = useState(() => crypto.randomUUID());
   const [state, formAction, isPending] = useActionState<
     CreateMenuSkeletonActionState,
     FormData
@@ -51,7 +48,7 @@ export function CreateMenuForm({ onPendingChange }: CreateMenuFormProps = {}) {
       <input type="hidden" name="dayCount" value={dayCount} />
       <input type="hidden" name="peopleCount" value={peopleCount} />
       <input type="hidden" name="meals" value={mealsCsv} />
-      <input type="hidden" name="idempotencyKey" value={idempotencyKeyRef.current} />
+      <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       <input
         type="hidden"
         name="includeSnacks"

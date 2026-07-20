@@ -73,7 +73,10 @@ Code does not classify dishes by keywords — your plateKind is authoritative.
 - companionRecipeId must differ from recipeId and must come from the candidate list.
 
 You MUST only use recipe ids from the provided candidate list.
-Respect operatorTasteNotes always: kind=ban is hard never; kind=wish is soft prefer.
+Respect operatorTasteNotes always:
+- constraint is PRIMARY (the operator's rule). Generalize it: «не люблю каши» / «Не предлагай каши» forbids ALL porridges/каши, not one title.
+- exampleDish is secondary context only (a dish that triggered the note). Never limit a ban to that exact name.
+- kind=ban is hard never for the constraint meaning; kind=wish is soft prefer.
 Respond with a single JSON object:
 {"assignments":[{"slotId":"...","recipeId":"...","plateKind":"complete"|"needs_companion","companionRecipeId":"...?"},...]}.
 You may leave some slots unassigned by omitting them if candidates are scarce.
@@ -110,7 +113,7 @@ export async function proposeAssignmentsViaOpenRouter(
 
   const userContent = JSON.stringify({
     instruction:
-      "Fill meal slots. Prefer freshlyInvented=true, then recentlyUsed=false. Honor operatorTasteNotes. Batch across days (>=50% multi-day reuse of the *exact same* recipe id) without cloning full day signatures. HARD variety: never assign a different recipe that is a culinary near-variant of currentMenuDishes or of another distinct recipe already used in this plan (topping swaps forbidden: творожная запеканка с ягодами ≈ с изюмом; оладьи≈панкейки). When currentMenuDishes is set (slot replace), pick a clearly different form. Never reuse the same recipe twice within one calendar day (main or companion; no lunch/dinner swaps of the same pair). Breakfast-family: cooked dishes only, no plateKind/companion. For lunch/dinner/late_dinner: YOU judge plateKind — code trusts it. ALWAYS set plateKind. ALWAYS include protein on the plate (in main or companion). plateKind=complete → omit companion (плов/лазанья/голубцы/пельмени and other self-contained one-pots — NEVER add a гарнир). plateKind=needs_companion → MUST set companionRecipeId (котлеты/филе/стейк need a side; veg/carb-only mains need a protein companion, never another side). Wrong example to avoid: плов + картофельные дольки.",
+      "Fill meal slots. Prefer freshlyInvented=true, then recentlyUsed=false. Honor operatorTasteNotes: constraint is PRIMARY (generalize — «не люблю каши» forbids all каши); exampleDish is secondary only. Batch across days (>=50% multi-day reuse of the *exact same* recipe id) without cloning full day signatures. HARD variety: never assign a different recipe that is a culinary near-variant of currentMenuDishes or of another distinct recipe already used in this plan (topping swaps forbidden: творожная запеканка с ягодами ≈ с изюмом; оладьи≈панкейки). When currentMenuDishes is set (slot replace), pick a clearly different form. Never reuse the same recipe twice within one calendar day (main or companion; no lunch/dinner swaps of the same pair). Breakfast-family: cooked dishes only, no plateKind/companion. For lunch/dinner/late_dinner: YOU judge plateKind — code trusts it. ALWAYS set plateKind. ALWAYS include protein on the plate (in main or companion). plateKind=complete → omit companion (плов/лазанья/голубцы/пельмени and other self-contained one-pots — NEVER add a гарнир). plateKind=needs_companion → MUST set companionRecipeId (котлеты/филе/стейк need a side; veg/carb-only mains need a protein companion, never another side). Wrong example to avoid: плов + картофельные дольки.",
     slots: slotPayload,
     candidates: candidatePayload,
     previousMenusDishes: previousMenusDishes.slice(0, 60),
@@ -160,45 +163,50 @@ export function parseAssignmentsJson(
   const seenSlots = new Set<string>();
 
   for (const item of root.assignments) {
-    if (!item || typeof item !== "object") continue;
-    const row = item as {
-      slotId?: unknown;
-      recipeId?: unknown;
-      companionRecipeId?: unknown;
-      plateKind?: unknown;
-    };
-    const slotId = row.slotId;
-    const recipeId = row.recipeId;
-    if (typeof slotId !== "string" || typeof recipeId !== "string") continue;
-    if (!allowedSlotIds.has(slotId) || !allowedRecipeIds.has(recipeId)) continue;
-    if (seenSlots.has(slotId)) continue;
-    seenSlots.add(slotId);
-
-    const meal = mealBySlot.get(slotId);
-    const plateKind =
-      meal && mealAllowsCompanion(meal) ? parsePlateKind(row.plateKind) : null;
-
-    let companionRecipeId: string | null = null;
-    const rawCompanion = row.companionRecipeId;
-    if (
-      meal &&
-      mealAllowsCompanion(meal) &&
-      typeof rawCompanion === "string" &&
-      allowedRecipeIds.has(rawCompanion) &&
-      rawCompanion !== recipeId
-    ) {
-      companionRecipeId = rawCompanion;
-    }
-
-    out.push({
-      slotId,
-      recipeId,
-      companionRecipeId,
-      plateKind,
-    });
+    const assignment = parseAssignmentItem(
+      item,
+      allowedRecipeIds,
+      allowedSlotIds,
+      seenSlots,
+      mealBySlot,
+    );
+    if (assignment) out.push(assignment);
   }
 
   return out;
+}
+
+function parseAssignmentItem(
+  item: unknown,
+  allowedRecipeIds: ReadonlySet<string>,
+  allowedSlotIds: ReadonlySet<string>,
+  seenSlots: Set<string>,
+  mealBySlot: ReadonlyMap<string, MealSlot>,
+): PlateAssignment | null {
+  if (!item || typeof item !== "object") return null;
+  const row = item as Record<string, unknown>;
+  const slotId = row.slotId;
+  const recipeId = row.recipeId;
+  if (typeof slotId !== "string" || typeof recipeId !== "string") return null;
+  if (!allowedSlotIds.has(slotId) || !allowedRecipeIds.has(recipeId) || seenSlots.has(slotId)) {
+    return null;
+  }
+  seenSlots.add(slotId);
+  const meal = mealBySlot.get(slotId);
+  const allowsCompanion = Boolean(meal && mealAllowsCompanion(meal));
+  const rawCompanion = row.companionRecipeId;
+  const companionRecipeId = allowsCompanion &&
+    typeof rawCompanion === "string" &&
+    rawCompanion !== recipeId &&
+    allowedRecipeIds.has(rawCompanion)
+    ? rawCompanion
+    : null;
+  return {
+    slotId,
+    recipeId,
+    companionRecipeId,
+    plateKind: allowsCompanion ? parsePlateKind(row.plateKind) : null,
+  };
 }
 
 function extractJsonObject(text: string): string {

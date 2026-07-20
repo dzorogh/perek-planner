@@ -1,7 +1,7 @@
 "use client";
 
 import { MoreHorizontal } from "lucide-react";
-import { startTransition, useActionState, useEffect, useState } from "react";
+import { startTransition, useActionState, useState } from "react";
 
 import { CommentDialog } from "@/components/feedback/comment-dialog";
 import { Button } from "@/components/ui/button";
@@ -65,10 +65,6 @@ export function SlotCardActions({
     SlotActionState,
     FormData
   >(clearCompanionAction, null);
-
-  useEffect(() => {
-    if (refuseState?.ok) setRefuseOpen(false);
-  }, [refuseState]);
 
   const busy =
     resuggestPending || resuggestAllPending || refusePending || clearPending;
@@ -171,6 +167,7 @@ export function SlotCardActions({
         pending={refusePending}
         error={refuseState && !refuseState.ok ? refuseState.error : null}
         onSubmit={(comment) => {
+          setRefuseOpen(false);
           runAction(refuseFormAction, { comment });
         }}
       />
