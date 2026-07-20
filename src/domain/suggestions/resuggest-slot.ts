@@ -176,20 +176,19 @@ async function inventAndRebuildCandidates(
     avoidNames,
     exactAvoidNames: exactAvoid,
   });
+  if (!invented.ok) {
+    return { ok: false, error: SUGGESTION_FAIL_RU[invented.reason] };
+  }
 
-  const inventedIds = new Set<string>();
-  if (invented.ok) {
-    invented.inventedIds.forEach((id) => inventedIds.add(id));
-    built = await buildCandidates(supabase, userId, menuId, now);
-    if (!built.ok) {
-      return { ok: false, error: SUGGESTION_FAIL_RU.query };
-    }
+  built = await buildCandidates(supabase, userId, menuId, now);
+  if (!built.ok) {
+    return { ok: false, error: SUGGESTION_FAIL_RU.query };
   }
 
   return {
     ok: true,
     candidates: built.candidates,
-    inventedIds,
+    inventedIds: new Set(invented.inventedIds),
     siblingNames,
     previousMenusDishes,
   };
@@ -229,8 +228,7 @@ function preferMainCandidates(
     allCandidates,
     excludeRecipeId,
   );
-  const minNeeded = mealAllowsCompanion(meal) ? 2 : 1;
-  return preferInventedCandidates(pool, inventedIds, minNeeded);
+  return preferInventedCandidates(pool, inventedIds);
 }
 
 function preferCompanionCandidates(
@@ -255,7 +253,7 @@ function preferCompanionCandidates(
       fridgeOk(c),
   );
   const pool = sidePool.length > 0 ? sidePool : anyPool;
-  return preferInventedCandidates(pool, inventedIds, 1);
+  return preferInventedCandidates(pool, inventedIds);
 }
 
 async function proposeSlotAssignments(

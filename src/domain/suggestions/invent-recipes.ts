@@ -26,7 +26,7 @@ import {
 
 /**
  * How many *fresh* dishes we want for a staggered batch menu.
- * Used as a floor for preferInventedCandidates.
+ * Used when sizing invent batches / deficit checks.
  */
 export function candidateDeficitThreshold(slotCount: number): number {
   return Math.max(5, Math.ceil(slotCount * 0.6));

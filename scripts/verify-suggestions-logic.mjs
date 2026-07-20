@@ -69,19 +69,9 @@ function mealOrderIndex(meal) {
   return idx >= 0 ? idx : 99;
 }
 
-function preferInventedCandidates(candidates, inventedIds, minNeeded) {
-  if (inventedIds.size > 0) {
-    const invented = candidates.filter((c) => inventedIds.has(c.recipeId));
-    if (invented.length >= Math.min(minNeeded, inventedIds.size)) {
-      return invented.length >= minNeeded
-        ? invented
-        : [
-            ...invented,
-            ...candidates.filter((c) => !inventedIds.has(c.recipeId)),
-          ];
-    }
-  }
-  return preferFreshCandidates(candidates, minNeeded);
+function preferInventedCandidates(candidates, inventedIds) {
+  if (inventedIds.size === 0) return [];
+  return candidates.filter((c) => inventedIds.has(c.recipeId));
 }
 
 function extractJsonObject(text) {
@@ -207,7 +197,7 @@ check(
   inventCountPerMenu(9, ["breakfast", "lunch", "dinner"]) >= 6,
 );
 check(
-  "preferInventedCandidates picks new ids",
+  "preferInventedCandidates picks new ids only",
   preferInventedCandidates(
     [
       { recipeId: "old", recentlyUsed: false },
@@ -215,8 +205,21 @@ check(
       { recipeId: "new2", recentlyUsed: false },
     ],
     new Set(["new1", "new2"]),
-    2,
   ).every((c) => c.recipeId.startsWith("new")),
+);
+check(
+  "preferInventedCandidates never falls back to library",
+  preferInventedCandidates(
+    [
+      { recipeId: "old", recentlyUsed: false },
+      { recipeId: "new1", recentlyUsed: false },
+    ],
+    new Set(["new1"]),
+  ).length === 1 &&
+    preferInventedCandidates(
+      [{ recipeId: "old", recentlyUsed: false }],
+      new Set(),
+    ).length === 0,
 );
 
 const allowedR = new Set(["rec-a", "rec-b", "rec-side"]);

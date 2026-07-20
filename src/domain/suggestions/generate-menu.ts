@@ -16,7 +16,6 @@ import {
 } from "@/domain/suggestions/errors";
 import { loadRecentMenuDishNames } from "@/domain/suggestions/history";
 import {
-  candidateDeficitThreshold,
   inventAndPersistRecipes,
   inventCountPerMenu,
 } from "@/domain/suggestions/invent-recipes";
@@ -54,7 +53,8 @@ export type GenerateMenuOptions = {
 };
 
 /**
- * Create Menu skeleton + AI-fill slots (library + invent-then-persist).
+ * Create Menu skeleton + AI invent-then-assign for cookable slots.
+ * Assign pool is this run's inventions only — never reuses the old library.
  * Eligibility: fridge-keep + Refusal/dislike suppress only.
  * On failure: delete Menu (orphan rollback).
  */
@@ -230,16 +230,18 @@ async function fillCookableSlots(
       );
     }
 
-    // Prefer this menu's inventions so consecutive menus don't reshuffle the same stack.
-    // Drop snack-like library leftovers — перекусы live in menu_snacks, not cookable slots.
+    // Assign only recipes invented for this menu — never recycle the old library.
+    // Drop snack-like leftovers — перекусы live in menu_snacks, not cookable slots.
     const cookable = built.candidates.filter(
       (c) => !looksLikeNoCookSnack(c.name),
     );
-    const assignPool = preferInventedCandidates(
-      cookable.length > 0 ? cookable : built.candidates,
-      inventedIds,
-      candidateDeficitThreshold(slotCount),
-    );
+    const assignPool = preferInventedCandidates(cookable, inventedIds);
+    if (assignPool.length === 0) {
+      throw new SuggestionError(
+        "zero_eligible",
+        SUGGESTION_FAIL_RU.zero_eligible,
+      );
+    }
 
     const { data: slotRows, error: slotsError } = await supabase
       .from("menu_slots")

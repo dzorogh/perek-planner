@@ -52,25 +52,15 @@ export function preferFreshCandidates<T extends { recentlyUsed: boolean }>(
 }
 
 /**
- * Prefer just-invented recipes for this menu; else fresh; else full list.
+ * Restrict the assign pool to recipes invented in this generation.
+ * Never fall back to the pre-existing library — cookable slots are AI-invented only.
  */
 export function preferInventedCandidates<
-  T extends { recipeId: string; recentlyUsed: boolean },
+  T extends { recipeId: string },
 >(
   candidates: T[],
   inventedIds: ReadonlySet<string>,
-  minNeeded: number,
 ): T[] {
-  if (inventedIds.size > 0) {
-    const invented = candidates.filter((c) => inventedIds.has(c.recipeId));
-    if (invented.length >= Math.min(minNeeded, inventedIds.size)) {
-      return invented.length >= minNeeded
-        ? invented
-        : [
-          ...invented,
-          ...candidates.filter((c) => !inventedIds.has(c.recipeId)),
-        ];
-    }
-  }
-  return preferFreshCandidates(candidates, minNeeded);
+  if (inventedIds.size === 0) return [];
+  return candidates.filter((c) => inventedIds.has(c.recipeId));
 }
