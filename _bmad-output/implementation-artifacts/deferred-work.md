@@ -51,3 +51,12 @@
 - `menu/actions.ts` vs `*-actions.ts` naming — rename when next large menu-actions touch.
 - History load ignoring ratings query errors — surface soft warning if users report missing stars.
 - Create-skeleton `_userId` unused (relies on RPC/`auth.uid()`) — document or assert caller identity later.
+
+## Deferred from: code review of project-context.md — Chunk 3 Infra (2026-07-20)
+
+- Shared `recipes` / `critical_ingredients` authenticated write RLS (`using (true)`) — intentional for single-operator shared library; tighten ownership if multi-tenant.
+- Price backfill heuristics (`*100` / `/10` migrations) — already applied; revisit only with audited source flags.
+- Duplicate migration timestamp `20260720110000_*` — rename only with coordinated history rewrite.
+- DB-level cap on `taste_preferences` row count — app enforces `MAX_TASTE_PREFERENCES`; add trigger if abuse appears.
+- Auth bypass stronger than `NODE_ENV !== production` (e.g. explicit `KEPLO_ENV`) — revisit if deploy misconfig risk rises.
+- `critical_ingredients` UPDATE policy/grant — invent uses insert/delete; add update if in-place edits become a path.

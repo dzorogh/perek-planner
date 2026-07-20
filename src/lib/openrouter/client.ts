@@ -1,3 +1,5 @@
+import "server-only";
+
 /**
  * OpenRouter Chat Completions client (server-only).
  * Never import from Client Components. Never use NEXT_PUBLIC_* keys.
@@ -112,7 +114,11 @@ export async function openRouterChatCompletions(
   }
 
   let json: {
-    choices?: Array<{ message?: { content?: string | null } }>;
+    choices?: Array<{
+      message?: {
+        content?: string | null | Array<{ type?: string; text?: string }>;
+      };
+    }>;
   };
   try {
     json = (await response.json()) as typeof json;
@@ -120,9 +126,29 @@ export async function openRouterChatCompletions(
     throw new OpenRouterError("OpenRouter returned invalid JSON");
   }
 
-  const content = json.choices?.[0]?.message?.content;
-  if (typeof content !== "string" || content.trim().length === 0) {
+  const content = extractAssistantText(json.choices?.[0]?.message?.content);
+  if (!content) {
     throw new OpenRouterError("OpenRouter returned empty content");
   }
   return content;
+}
+
+function extractAssistantText(
+  content:
+    | string
+    | null
+    | undefined
+    | Array<{ type?: string; text?: string }>,
+): string | null {
+  if (typeof content === "string") {
+    const trimmed = content.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  if (!Array.isArray(content)) return null;
+  const text = content
+    .filter((part) => part?.type === "text" && typeof part.text === "string")
+    .map((part) => part.text!)
+    .join("");
+  const trimmed = text.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }

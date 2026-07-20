@@ -1,0 +1,2729 @@
+diff --git a/src/lib/openrouter/client.ts b/src/lib/openrouter/client.ts
+new file mode 100644
+index 0000000..0b1aa2f
+--- /dev/null
++++ b/src/lib/openrouter/client.ts
+@@ -0,0 +1,128 @@
++/**
++ * OpenRouter Chat Completions client (server-only).
++ * Never import from Client Components. Never use NEXT_PUBLIC_* keys.
++ */
++
++export const OPENROUTER_CHAT_URL =
++  "https://openrouter.ai/api/v1/chat/completions";
++
++/**
++ * Default for menu invent/snacks — fast JSON + Nitro throughput routing.
++ * Override with OPENROUTER_MODEL.
++ */
++export const DEFAULT_OPENROUTER_MODEL = "openai/gpt-4o-mini:nitro";
++
++/**
++ * Hard cap so generate action cannot hang indefinitely.
++ * Chunked invent on gpt-4o-mini:nitro is usually well under this; keep as safety net.
++ */
++export const OPENROUTER_TIMEOUT_MS = 90_000;
++
++export type OpenRouterChatMessage = {
++  role: "system" | "user" | "assistant";
++  content: string;
++};
++
++export type OpenRouterChatRequest = {
++  model?: string;
++  messages: OpenRouterChatMessage[];
++  temperature?: number;
++  responseFormatJson?: boolean;
++};
++
++export class OpenRouterError extends Error {
++  readonly code = "OPENROUTER_ERROR" as const;
++
++  constructor(
++    message: string,
++    public readonly causeStatus?: number,
++  ) {
++    super(message);
++    this.name = "OpenRouterError";
++  }
++}
++
++export function getOpenRouterApiKey(): string | null {
++  const key = process.env.OPENROUTER_API_KEY?.trim();
++  return key && key.length > 0 ? key : null;
++}
++
++export function getOpenRouterModel(): string {
++  const model = process.env.OPENROUTER_MODEL?.trim();
++  return model && model.length > 0 ? model : DEFAULT_OPENROUTER_MODEL;
++}
++
++export type ChatCompletionsFn = (
++  request: OpenRouterChatRequest,
++) => Promise<string>;
++
++/**
++ * Call OpenRouter chat completions; returns assistant message content.
++ */
++export async function openRouterChatCompletions(
++  request: OpenRouterChatRequest,
++): Promise<string> {
++  const apiKey = getOpenRouterApiKey();
++  if (!apiKey) {
++    throw new OpenRouterError("OPENROUTER_API_KEY is not configured");
++  }
++
++  const model = request.model ?? getOpenRouterModel();
++  const body: Record<string, unknown> = {
++    model,
++    messages: request.messages,
++    temperature: request.temperature ?? 0.4,
++  };
++  if (request.responseFormatJson) {
++    body.response_format = { type: "json_object" };
++  }
++
++  const headers: Record<string, string> = {
++    Authorization: `Bearer ${apiKey}`,
++    "Content-Type": "application/json",
++  };
++  const referer = process.env.OPENROUTER_HTTP_REFERER?.trim();
++  const title = process.env.OPENROUTER_APP_TITLE?.trim();
++  if (referer) headers["HTTP-Referer"] = referer;
++  if (title) headers["X-OpenRouter-Title"] = title;
++
++  let response: Response;
++  try {
++    response = await fetch(OPENROUTER_CHAT_URL, {
++      method: "POST",
++      headers,
++      body: JSON.stringify(body),
++      signal: AbortSignal.timeout(OPENROUTER_TIMEOUT_MS),
++    });
++  } catch (err) {
++    if (err instanceof Error && err.name === "TimeoutError") {
++      throw new OpenRouterError("OpenRouter request timed out");
++    }
++    if (err instanceof Error && err.name === "AbortError") {
++      throw new OpenRouterError("OpenRouter request aborted");
++    }
++    throw new OpenRouterError("Failed to reach OpenRouter");
++  }
++
++  if (!response.ok) {
++    throw new OpenRouterError(
++      `OpenRouter HTTP ${response.status}`,
++      response.status,
++    );
++  }
++
++  let json: {
++    choices?: Array<{ message?: { content?: string | null } }>;
++  };
++  try {
++    json = (await response.json()) as typeof json;
++  } catch {
++    throw new OpenRouterError("OpenRouter returned invalid JSON");
++  }
++
++  const content = json.choices?.[0]?.message?.content;
++  if (typeof content !== "string" || content.trim().length === 0) {
++    throw new OpenRouterError("OpenRouter returned empty content");
++  }
++  return content;
++}
+diff --git a/src/lib/supabase/auth-errors.ts b/src/lib/supabase/auth-errors.ts
+new file mode 100644
+index 0000000..e03055f
+--- /dev/null
++++ b/src/lib/supabase/auth-errors.ts
+@@ -0,0 +1,10 @@
++/** Supabase returns this from getUser() when there is simply no session cookie. */
++export function isAuthSessionMissingError(
++  error: { name?: string; message?: string } | null | undefined,
++): boolean {
++  if (!error) return false;
++  return (
++    error.name === "AuthSessionMissingError" ||
++    /auth session missing/i.test(error.message ?? "")
++  );
++}
+diff --git a/src/lib/supabase/middleware.ts b/src/lib/supabase/middleware.ts
+new file mode 100644
+index 0000000..9389119
+--- /dev/null
++++ b/src/lib/supabase/middleware.ts
+@@ -0,0 +1,119 @@
++import { createServerClient } from "@supabase/ssr";
++import { NextResponse, type NextRequest } from "next/server";
++
++import { isAuthSessionMissingError } from "@/lib/supabase/auth-errors";
++
++const AUTH_PATH_PREFIX = "/auth";
++
++type CookieToSet = {
++  name: string;
++  value: string;
++  options?: Parameters<NextResponse["cookies"]["set"]>[2];
++};
++
++function isPublicPath(pathname: string) {
++  return pathname === AUTH_PATH_PREFIX || pathname.startsWith(`${AUTH_PATH_PREFIX}/`);
++}
++
++function envReady() {
++  return Boolean(
++    process.env.NEXT_PUBLIC_SUPABASE_URL &&
++    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
++  );
++}
++
++function redirectWithCookies(
++  request: NextRequest,
++  pathname: string,
++  cookiesToSet: CookieToSet[],
++) {
++  const url = request.nextUrl.clone();
++  url.pathname = pathname;
++  const redirectResponse = NextResponse.redirect(url);
++  // Preserve refreshed session cookies on redirect (including attributes).
++  for (const { name, value, options } of cookiesToSet) {
++    redirectResponse.cookies.set(name, value, options);
++  }
++  return redirectResponse;
++}
++
++export async function updateSession(request: NextRequest) {
++  let supabaseResponse = NextResponse.next({
++    request,
++  });
++  let cookiesToSet: CookieToSet[] = [];
++
++  const bypassAuth =
++    process.env.KEPLO_DEV_BYPASS_AUTH === "true" &&
++    process.env.NODE_ENV !== "production";
++
++  if (process.env.KEPLO_DEV_BYPASS_AUTH === "true" && process.env.NODE_ENV === "production") {
++    console.error(
++      "KEPLO_DEV_BYPASS_AUTH is enabled in production; ignoring bypass.",
++    );
++  }
++
++  if (!envReady()) {
++    if (!bypassAuth && !isPublicPath(request.nextUrl.pathname)) {
++      return redirectWithCookies(request, "/auth/login", cookiesToSet);
++    }
++    return supabaseResponse;
++  }
++
++  const supabase = createServerClient(
++    process.env.NEXT_PUBLIC_SUPABASE_URL!,
++    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
++    {
++      cookies: {
++        getAll() {
++          return request.cookies.getAll();
++        },
++        setAll(nextCookiesToSet) {
++          cookiesToSet = nextCookiesToSet;
++          nextCookiesToSet.forEach(({ name, value }) =>
++            request.cookies.set(name, value),
++          );
++          supabaseResponse = NextResponse.next({
++            request,
++          });
++          nextCookiesToSet.forEach(({ name, value, options }) =>
++            supabaseResponse.cookies.set(name, value, options),
++          );
++        },
++      },
++    },
++  );
++
++  let user: Awaited<
++    ReturnType<typeof supabase.auth.getUser>
++  >["data"]["user"] = null;
++  let authCheckFailed = false;
++
++  try {
++    const { data, error } = await supabase.auth.getUser();
++    user = data.user;
++    // No cookie/session is signed-out, not a transient outage.
++    if (error && !isAuthSessionMissingError(error)) {
++      authCheckFailed = true;
++    }
++  } catch {
++    authCheckFailed = true;
++  }
++
++  // True transient auth failures (network / 5xx): do not bounce a possibly-valid session.
++  if (authCheckFailed) {
++    return supabaseResponse;
++  }
++
++  // Bypass: allow shell without a session, but still refresh cookies when present
++  // and send signed-in operators away from /auth/login.
++  if (!bypassAuth && !user && !isPublicPath(request.nextUrl.pathname)) {
++    return redirectWithCookies(request, "/auth/login", cookiesToSet);
++  }
++
++  if (user && request.nextUrl.pathname.startsWith("/auth/login")) {
++    return redirectWithCookies(request, "/", cookiesToSet);
++  }
++
++  return supabaseResponse;
++}
+diff --git a/src/lib/supabase/server.ts b/src/lib/supabase/server.ts
+index fb35301..1c78d2d 100644
+--- a/src/lib/supabase/server.ts
++++ b/src/lib/supabase/server.ts
+@@ -1,11 +1,6 @@
+ import { createServerClient } from "@supabase/ssr";
+ import { cookies } from "next/headers";
+ 
+-/**
+- * Especially important if using Fluid compute: Don't put this client in a
+- * global variable. Always create a new client within each function when using
+- * it.
+- */
+ export async function createClient() {
+   const cookieStore = await cookies();
+ 
+@@ -23,9 +18,7 @@ export async function createClient() {
+               cookieStore.set(name, value, options),
+             );
+           } catch {
+-            // The `setAll` method was called from a Server Component.
+-            // This can be ignored if you have proxy refreshing
+-            // user sessions.
++            // Called from a Server Component; proxy refreshes sessions.
+           }
+         },
+       },
+diff --git a/src/lib/utils.ts b/src/lib/utils.ts
+index 8173d37..572cfff 100644
+--- a/src/lib/utils.ts
++++ b/src/lib/utils.ts
+@@ -5,7 +5,7 @@ export function cn(...inputs: ClassValue[]) {
+   return twMerge(clsx(inputs));
+ }
+ 
+-// This check can be removed, it is just for tutorial purposes
+-export const hasEnvVars =
++export const hasEnvVars = Boolean(
+   process.env.NEXT_PUBLIC_SUPABASE_URL &&
+-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
++  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
++);
+diff --git a/supabase/migrations/20260720010000_user_settings_rls.sql b/supabase/migrations/20260720010000_user_settings_rls.sql
+new file mode 100644
+index 0000000..d0bb5a0
+--- /dev/null
++++ b/supabase/migrations/20260720010000_user_settings_rls.sql
+@@ -0,0 +1,42 @@
++-- Story 1.2: minimal user-owned table + RLS (AD-5 / NFR5).
++-- selected_store_id + stores FK deferred to Story 1.3.
++
++create table if not exists public.user_settings (
++  user_id uuid primary key references auth.users (id) on delete cascade,
++  created_at timestamptz not null default now(),
++  updated_at timestamptz not null default now()
++);
++
++comment on table public.user_settings is
++  'Per-operator settings. Store selection columns added in Story 1.3.';
++
++alter table public.user_settings enable row level security;
++
++create policy "user_settings_select_own"
++  on public.user_settings
++  for select
++  to authenticated
++  using (auth.uid() = user_id);
++
++create policy "user_settings_insert_own"
++  on public.user_settings
++  for insert
++  to authenticated
++  with check (auth.uid() = user_id);
++
++create policy "user_settings_update_own"
++  on public.user_settings
++  for update
++  to authenticated
++  using (auth.uid() = user_id)
++  with check (auth.uid() = user_id);
++
++create policy "user_settings_delete_own"
++  on public.user_settings
++  for delete
++  to authenticated
++  using (auth.uid() = user_id);
++
++-- Explicit deny for anon: no policies for role anon → RLS blocks all access.
++revoke all on table public.user_settings from anon;
++grant select, insert, update, delete on table public.user_settings to authenticated;
+diff --git a/supabase/migrations/20260720020000_stores_and_selected_store.sql b/supabase/migrations/20260720020000_stores_and_selected_store.sql
+new file mode 100644
+index 0000000..7aae32c
+--- /dev/null
++++ b/supabase/migrations/20260720020000_stores_and_selected_store.sql
+@@ -0,0 +1,44 @@
++-- Story 1.3: stores catalog seed + user_settings.selected_store_id (AD-9).
++-- Default store: д. Алабино, 92 (stable UUID for app defaults).
++
++create table if not exists public.stores (
++  id uuid primary key default gen_random_uuid(),
++  chain text not null check (chain = 'primary'),
++  external_id text not null unique,
++  display_name text not null,
++  created_at timestamptz not null default now(),
++  updated_at timestamptz not null default now()
++);
++
++comment on table public.stores is
++  'Stores for Settings picker. Catalog sync (Story 1.4) uses external_id.';
++
++-- Stable default UUID — keep in sync with src/domain/settings/constants.ts
++insert into public.stores (id, chain, external_id, display_name)
++values (
++  'a1000000-0000-4000-8000-000000000001',
++  'primary',
++  'alabino-92',
++  'д. Алабино, 92'
++)
++on conflict (id) do nothing;
++
++alter table public.user_settings
++  add column if not exists selected_store_id uuid references public.stores (id);
++
++comment on column public.user_settings.selected_store_id is
++  'Live store preference (AD-9). Null until app initializes default Alabino.';
++
++alter table public.stores enable row level security;
++
++create policy "stores_select_authenticated"
++  on public.stores
++  for select
++  to authenticated
++  using (true);
++
++-- No INSERT/UPDATE/DELETE policies for authenticated — writes via service role / migrations only.
++-- Supabase defaults often GRANT ALL to authenticated on new tables — revoke writes explicitly.
++revoke all on table public.stores from anon;
++revoke all on table public.stores from authenticated;
++grant select on table public.stores to authenticated;
+diff --git a/supabase/migrations/20260720020100_stores_revoke_authenticated_writes.sql b/supabase/migrations/20260720020100_stores_revoke_authenticated_writes.sql
+new file mode 100644
+index 0000000..d905ed3
+--- /dev/null
++++ b/supabase/migrations/20260720020100_stores_revoke_authenticated_writes.sql
+@@ -0,0 +1,6 @@
++-- Tighten Story 1.3 stores privileges: authenticated SELECT only.
++-- Supabase default grants often include INSERT/UPDATE/DELETE for authenticated.
++
++revoke all on table public.stores from anon;
++revoke all on table public.stores from authenticated;
++grant select on table public.stores to authenticated;
+diff --git a/supabase/migrations/20260720020200_remove_placeholder_second_store.sql b/supabase/migrations/20260720020200_remove_placeholder_second_store.sql
+new file mode 100644
+index 0000000..48e43e8
+--- /dev/null
++++ b/supabase/migrations/20260720020200_remove_placeholder_second_store.sql
+@@ -0,0 +1,12 @@
++-- Story 1.3 review: remove fake seed store (keep only д. Алабино, 92).
++
++-- Point any preference at the default Alabino store before delete.
++update public.user_settings
++set
++  selected_store_id = 'a1000000-0000-4000-8000-000000000001',
++  updated_at = now()
++where selected_store_id = 'a1000000-0000-4000-8000-000000000002';
++
++delete from public.stores
++where id = 'a1000000-0000-4000-8000-000000000002'
++   or external_id = 'placeholder-second';
+diff --git a/supabase/migrations/20260720030000_products_catalog_sync_runs.sql b/supabase/migrations/20260720030000_products_catalog_sync_runs.sql
+new file mode 100644
+index 0000000..b01971c
+--- /dev/null
++++ b/supabase/migrations/20260720030000_products_catalog_sync_runs.sql
+@@ -0,0 +1,66 @@
++-- Story 1.4: products + catalog_sync_runs (AD-2, AD-8).
++-- Freshness for Story 1.5 (FR-18): latest catalog_sync_runs row for the active store.
++-- Recommended "fresh": status = 'success' AND finished_at >= now() - interval '24 hours' (UTC).
++-- Do NOT use products.updated_at for stale detection.
++
++create table if not exists public.products (
++  id uuid primary key default gen_random_uuid(),
++  store_id uuid not null references public.stores (id) on delete cascade,
++  external_id text not null,
++  name text not null,
++  price_cents integer null check (price_cents is null or price_cents >= 0),
++  availability_status text not null check (
++    availability_status in ('in_stock', 'out_of_stock', 'unknown')
++  ),
++  created_at timestamptz not null default now(),
++  updated_at timestamptz not null default now(),
++  unique (store_id, external_id)
++);
++
++comment on table public.products is
++  'Store-scoped catalog. Sole writer: Python sync worker (service role). Availability: availability_status only (AD-8).';
++
++comment on column public.products.availability_status is
++  'Single availability field written by sync: in_stock | out_of_stock | unknown.';
++
++create index if not exists products_store_id_idx on public.products (store_id);
++
++create table if not exists public.catalog_sync_runs (
++  id uuid primary key default gen_random_uuid(),
++  store_id uuid not null references public.stores (id) on delete cascade,
++  status text not null check (status in ('running', 'success', 'failed')),
++  started_at timestamptz not null default now(),
++  finished_at timestamptz null,
++  error_message text null,
++  products_upserted integer null
++);
++
++comment on table public.catalog_sync_runs is
++  'Sync run log. FR-18 / Story 1.5 reads latest row per store for stale signal (not products.updated_at). Fresh ≈ success within 24h UTC.';
++
++create index if not exists catalog_sync_runs_store_started_idx
++  on public.catalog_sync_runs (store_id, started_at desc);
++
++alter table public.products enable row level security;
++alter table public.catalog_sync_runs enable row level security;
++
++create policy "products_select_authenticated"
++  on public.products
++  for select
++  to authenticated
++  using (true);
++
++create policy "catalog_sync_runs_select_authenticated"
++  on public.catalog_sync_runs
++  for select
++  to authenticated
++  using (true);
++
++-- No write policies for authenticated — service role / migrations only.
++revoke all on table public.products from anon;
++revoke all on table public.products from authenticated;
++grant select on table public.products to authenticated;
++
++revoke all on table public.catalog_sync_runs from anon;
++revoke all on table public.catalog_sync_runs from authenticated;
++grant select on table public.catalog_sync_runs to authenticated;
+diff --git a/supabase/migrations/20260720030100_catalog_sync_runs_finished_at_check.sql b/supabase/migrations/20260720030100_catalog_sync_runs_finished_at_check.sql
+new file mode 100644
+index 0000000..561e196
+--- /dev/null
++++ b/supabase/migrations/20260720030100_catalog_sync_runs_finished_at_check.sql
+@@ -0,0 +1,19 @@
++-- Story 1.4 review: terminal sync runs must always set finished_at.
++-- Repair any legacy terminal rows missing finished_at before adding the check.
++update public.catalog_sync_runs
++set finished_at = coalesce(finished_at, started_at, now())
++where status in ('success', 'failed') and finished_at is null;
++
++update public.catalog_sync_runs
++set finished_at = null
++where status = 'running' and finished_at is not null;
++
++alter table public.catalog_sync_runs
++  drop constraint if exists catalog_sync_runs_finished_at_terminal;
++
++alter table public.catalog_sync_runs
++  add constraint catalog_sync_runs_finished_at_terminal
++  check (
++    (status = 'running' and finished_at is null)
++    or (status in ('success', 'failed') and finished_at is not null)
++  );
+diff --git a/supabase/migrations/20260720040000_menus_menu_slots_recipes.sql b/supabase/migrations/20260720040000_menus_menu_slots_recipes.sql
+new file mode 100644
+index 0000000..5b9485f
+--- /dev/null
++++ b/supabase/migrations/20260720040000_menus_menu_slots_recipes.sql
+@@ -0,0 +1,214 @@
++-- Story 2.1: Menu skeleton (AD-9 store snapshot, Model C slots, FR12 fridge-keep prep).
++-- day_index is 1..day_count (documented; constrained 1..4 to match day_count domain).
++
++create table if not exists public.recipes (
++  id uuid primary key default gen_random_uuid(),
++  name text not null,
++  fridge_keep_days integer not null check (fridge_keep_days >= 1),
++  created_at timestamptz not null default now(),
++  updated_at timestamptz not null default now()
++);
++
++comment on table public.recipes is
++  'Minimal Recipe reference for MenuSlot FK and FR12 fridge-keep prep. Matching/ingredients come in Story 2.2.';
++
++comment on column public.recipes.fridge_keep_days is
++  'Days the dish keeps in the fridge; eligibility vs Menu length is Story 2.2.';
++
++create table if not exists public.menus (
++  id uuid primary key default gen_random_uuid(),
++  user_id uuid not null references auth.users (id) on delete cascade,
++  store_id uuid not null references public.stores (id),
++  day_count integer not null check (day_count in (1, 2, 3, 4)),
++  default_servings_per_meal integer not null default 2
++    check (default_servings_per_meal >= 1),
++  created_at timestamptz not null default now(),
++  updated_at timestamptz not null default now()
++);
++
++comment on table public.menus is
++  'Operator Menu plan. store_id is snapshotted from Settings at create (AD-9); Settings changes do not rewrite past Menus.';
++
++comment on column public.menus.store_id is
++  'AD-9 snapshot of user_settings.selected_store_id at Menu creation.';
++
++comment on column public.menus.day_count is
++  'Menu length 1–4 days (FR-1). Slots use day_index 1..day_count.';
++
++comment on column public.menus.default_servings_per_meal is
++  'FR-2 default people per meal (default 2). Portion-plan UI is Epic 3.';
++
++create index if not exists menus_user_created_idx
++  on public.menus (user_id, created_at desc);
++
++create table if not exists public.menu_slots (
++  id uuid primary key default gen_random_uuid(),
++  menu_id uuid not null references public.menus (id) on delete cascade,
++  day_index integer not null check (day_index >= 1 and day_index <= 4),
++  meal text not null check (meal in ('breakfast', 'lunch', 'dinner')),
++  recipe_id uuid references public.recipes (id),
++  created_at timestamptz not null default now(),
++  updated_at timestamptz not null default now(),
++  unique (menu_id, day_index, meal)
++);
++
++comment on table public.menu_slots is
++  'Model C day × meal slots (breakfast/lunch/dinner). Empty slot = recipe_id null.';
++
++comment on column public.menu_slots.day_index is
++  '1-based day within menus.day_count (always 1..day_count for valid skeletons).';
++
++create index if not exists menu_slots_menu_idx
++  on public.menu_slots (menu_id);
++
++-- RLS -----------------------------------------------------------------------
++
++alter table public.recipes enable row level security;
++alter table public.menus enable row level security;
++alter table public.menu_slots enable row level security;
++
++create policy "recipes_select_authenticated"
++  on public.recipes
++  for select
++  to authenticated
++  using (true);
++
++-- No INSERT/UPDATE/DELETE for authenticated on recipes in 2.1 (seed/service later).
++
++create policy "menus_select_own"
++  on public.menus
++  for select
++  to authenticated
++  using (auth.uid() = user_id);
++
++create policy "menus_insert_own"
++  on public.menus
++  for insert
++  to authenticated
++  with check (auth.uid() = user_id);
++
++create policy "menus_update_own"
++  on public.menus
++  for update
++  to authenticated
++  using (auth.uid() = user_id)
++  with check (auth.uid() = user_id);
++
++create policy "menus_delete_own"
++  on public.menus
++  for delete
++  to authenticated
++  using (auth.uid() = user_id);
++
++create policy "menu_slots_select_own"
++  on public.menu_slots
++  for select
++  to authenticated
++  using (
++    exists (
++      select 1 from public.menus m
++      where m.id = menu_slots.menu_id and m.user_id = auth.uid()
++    )
++  );
++
++create policy "menu_slots_insert_own"
++  on public.menu_slots
++  for insert
++  to authenticated
++  with check (
++    exists (
++      select 1 from public.menus m
++      where m.id = menu_slots.menu_id and m.user_id = auth.uid()
++    )
++  );
++
++create policy "menu_slots_update_own"
++  on public.menu_slots
++  for update
++  to authenticated
++  using (
++    exists (
++      select 1 from public.menus m
++      where m.id = menu_slots.menu_id and m.user_id = auth.uid()
++    )
++  )
++  with check (
++    exists (
++      select 1 from public.menus m
++      where m.id = menu_slots.menu_id and m.user_id = auth.uid()
++    )
++  );
++
++create policy "menu_slots_delete_own"
++  on public.menu_slots
++  for delete
++  to authenticated
++  using (
++    exists (
++      select 1 from public.menus m
++      where m.id = menu_slots.menu_id and m.user_id = auth.uid()
++    )
++  );
++
++revoke all on table public.recipes from anon;
++revoke all on table public.menus from anon;
++revoke all on table public.menu_slots from anon;
++
++revoke all on table public.recipes from authenticated;
++revoke all on table public.menus from authenticated;
++revoke all on table public.menu_slots from authenticated;
++
++grant select on table public.recipes to authenticated;
++grant select, insert, update, delete on table public.menus to authenticated;
++grant select, insert, update, delete on table public.menu_slots to authenticated;
++
++-- Atomic skeleton create (menu + day_count×3 empty slots) -----------------
++
++create or replace function public.create_menu_skeleton(
++  p_store_id uuid,
++  p_day_count integer
++)
++returns uuid
++language plpgsql
++security invoker
++set search_path = public
++as $$
++declare
++  v_user_id uuid := auth.uid();
++  v_menu_id uuid;
++  v_day integer;
++  v_meal text;
++begin
++  if v_user_id is null then
++    raise exception 'not authenticated';
++  end if;
++
++  if p_day_count not in (1, 2, 3, 4) then
++    raise exception 'invalid day_count';
++  end if;
++
++  if p_store_id is null then
++    raise exception 'store_id required';
++  end if;
++
++  insert into public.menus (user_id, store_id, day_count, default_servings_per_meal)
++  values (v_user_id, p_store_id, p_day_count, 2)
++  returning id into v_menu_id;
++
++  for v_day in 1..p_day_count loop
++    foreach v_meal in array array['breakfast', 'lunch', 'dinner']::text[] loop
++      insert into public.menu_slots (menu_id, day_index, meal, recipe_id)
++      values (v_menu_id, v_day, v_meal, null);
++    end loop;
++  end loop;
++
++  return v_menu_id;
++end;
++$$;
++
++comment on function public.create_menu_skeleton(uuid, integer) is
++  'Story 2.1: atomically create Menu + empty Model C slots for the session user.';
++
++revoke all on function public.create_menu_skeleton(uuid, integer) from public;
++revoke all on function public.create_menu_skeleton(uuid, integer) from anon;
++grant execute on function public.create_menu_skeleton(uuid, integer) to authenticated;
+diff --git a/supabase/migrations/20260720040100_menu_skeleton_hardening.sql b/supabase/migrations/20260720040100_menu_skeleton_hardening.sql
+new file mode 100644
+index 0000000..b4ed115
+--- /dev/null
++++ b/supabase/migrations/20260720040100_menu_skeleton_hardening.sql
+@@ -0,0 +1,130 @@
++-- Story 2.1 review patches: AD-8 freshness + AD-9 store in RPC;
++-- freeze menus.store_id/day_count; enforce day_index <= day_count.
++
++-- Replace create_menu_skeleton: only p_day_count; store from Settings; freshness in-SQL.
++drop function if exists public.create_menu_skeleton(uuid, integer);
++
++create or replace function public.create_menu_skeleton(p_day_count integer)
++returns uuid
++language plpgsql
++security invoker
++set search_path = public
++as $$
++declare
++  v_user_id uuid := auth.uid();
++  v_store_id uuid;
++  v_menu_id uuid;
++  v_day integer;
++  v_meal text;
++  v_run_status text;
++  v_run_finished timestamptz;
++begin
++  if v_user_id is null then
++    raise exception 'not authenticated';
++  end if;
++
++  if p_day_count not in (1, 2, 3, 4) then
++    raise exception 'invalid day_count';
++  end if;
++
++  select selected_store_id
++    into v_store_id
++  from public.user_settings
++  where user_id = v_user_id;
++
++  if v_store_id is null then
++    raise exception 'store not selected';
++  end if;
++
++  -- AD-8: latest catalog_sync_runs row for snapshotted store must be fresh success.
++  select status, finished_at
++    into v_run_status, v_run_finished
++  from public.catalog_sync_runs
++  where store_id = v_store_id
++  order by started_at desc
++  limit 1;
++
++  if v_run_status is distinct from 'success'
++     or v_run_finished is null
++     or v_run_finished < (now() - interval '24 hours') then
++    raise exception 'catalog not fresh';
++  end if;
++
++  insert into public.menus (user_id, store_id, day_count, default_servings_per_meal)
++  values (v_user_id, v_store_id, p_day_count, 2)
++  returning id into v_menu_id;
++
++  for v_day in 1..p_day_count loop
++    foreach v_meal in array array['breakfast', 'lunch', 'dinner']::text[] loop
++      insert into public.menu_slots (menu_id, day_index, meal, recipe_id)
++      values (v_menu_id, v_day, v_meal, null);
++    end loop;
++  end loop;
++
++  return v_menu_id;
++end;
++$$;
++
++comment on function public.create_menu_skeleton(integer) is
++  'Story 2.1: create Menu + empty slots; store from user_settings; AD-8 freshness enforced in-SQL.';
++
++revoke all on function public.create_menu_skeleton(integer) from public;
++revoke all on function public.create_menu_skeleton(integer) from anon;
++grant execute on function public.create_menu_skeleton(integer) to authenticated;
++
++-- Freeze AD-9 snapshot fields after create.
++create or replace function public.menus_freeze_snapshot_columns()
++returns trigger
++language plpgsql
++set search_path = public
++as $$
++begin
++  if new.store_id is distinct from old.store_id then
++    raise exception 'menus.store_id is immutable (AD-9 snapshot)';
++  end if;
++  if new.day_count is distinct from old.day_count then
++    raise exception 'menus.day_count is immutable after create';
++  end if;
++  if new.user_id is distinct from old.user_id then
++    raise exception 'menus.user_id is immutable';
++  end if;
++  return new;
++end;
++$$;
++
++drop trigger if exists menus_freeze_snapshot_columns_trg on public.menus;
++create trigger menus_freeze_snapshot_columns_trg
++  before update on public.menus
++  for each row
++  execute function public.menus_freeze_snapshot_columns();
++
++-- Enforce day_index within parent day_count on insert/update.
++create or replace function public.menu_slots_day_index_within_menu()
++returns trigger
++language plpgsql
++set search_path = public
++as $$
++declare
++  v_day_count integer;
++begin
++  select day_count into v_day_count
++  from public.menus
++  where id = new.menu_id;
++
++  if v_day_count is null then
++    raise exception 'menu not found for slot';
++  end if;
++
++  if new.day_index < 1 or new.day_index > v_day_count then
++    raise exception 'menu_slots.day_index must be between 1 and menus.day_count';
++  end if;
++
++  return new;
++end;
++$$;
++
++drop trigger if exists menu_slots_day_index_within_menu_trg on public.menu_slots;
++create trigger menu_slots_day_index_within_menu_trg
++  before insert or update on public.menu_slots
++  for each row
++  execute function public.menu_slots_day_index_within_menu();
+diff --git a/supabase/migrations/20260720050000_critical_ingredients_checked_matches.sql b/supabase/migrations/20260720050000_critical_ingredients_checked_matches.sql
+new file mode 100644
+index 0000000..6e1551d
+--- /dev/null
++++ b/supabase/migrations/20260720050000_critical_ingredients_checked_matches.sql
+@@ -0,0 +1,176 @@
++-- Story 2.2: CriticalIngredient + Menu-scoped CheckedMatch (AD-3, AD-7).
++-- Fridge-keep remains on recipes.fridge_keep_days (no FridgeKeep table).
++
++create table if not exists public.critical_ingredients (
++  id uuid primary key default gen_random_uuid(),
++  recipe_id uuid not null references public.recipes (id) on delete cascade,
++  name text not null,
++  kind text not null check (kind in ('critical', 'pantry')),
++  sort_order integer not null default 0,
++  created_at timestamptz not null default now(),
++  updated_at timestamptz not null default now(),
++  unique (recipe_id, name)
++);
++
++comment on table public.critical_ingredients is
++  'Recipe Critical/Pantry ingredients for matching eligibility (Story 2.2). kind=pantry gates catalog presence (FR-13).';
++
++comment on column public.critical_ingredients.name is
++  'Match key against products.name (case-insensitive containment / tokens).';
++
++comment on column public.critical_ingredients.kind is
++  'critical = needs in-stock CheckedMatch; pantry = catalog presence gate (list lines Epic 3).';
++
++create index if not exists critical_ingredients_recipe_idx
++  on public.critical_ingredients (recipe_id);
++
++create table if not exists public.checked_matches (
++  id uuid primary key default gen_random_uuid(),
++  menu_id uuid not null references public.menus (id) on delete cascade,
++  recipe_id uuid not null references public.recipes (id) on delete cascade,
++  critical_ingredient_id uuid not null references public.critical_ingredients (id) on delete cascade,
++  product_id uuid not null references public.products (id),
++  menu_slot_id uuid null references public.menu_slots (id) on delete set null,
++  created_at timestamptz not null default now(),
++  updated_at timestamptz not null default now(),
++  -- Pre-assign matching (2.2): one resolution per Menu × Critical ingredient.
++  unique (menu_id, critical_ingredient_id)
++);
++
++comment on table public.checked_matches is
++  'Menu-scoped CheckedMatch rows (AD-7). Written only by Next matching module. menu_slot_id nullable until slot assign (2.3/2.4).';
++
++create index if not exists checked_matches_menu_idx
++  on public.checked_matches (menu_id);
++
++create index if not exists checked_matches_menu_recipe_idx
++  on public.checked_matches (menu_id, recipe_id);
++
++-- RLS -----------------------------------------------------------------------
++
++alter table public.critical_ingredients enable row level security;
++alter table public.checked_matches enable row level security;
++
++create policy "critical_ingredients_select_authenticated"
++  on public.critical_ingredients
++  for select
++  to authenticated
++  using (true);
++
++-- Seed/migrations write recipes+ingredients; no authenticated writes in 2.2.
++
++create policy "checked_matches_select_own"
++  on public.checked_matches
++  for select
++  to authenticated
++  using (
++    exists (
++      select 1 from public.menus m
++      where m.id = checked_matches.menu_id and m.user_id = auth.uid()
++    )
++  );
++
++create policy "checked_matches_insert_own"
++  on public.checked_matches
++  for insert
++  to authenticated
++  with check (
++    exists (
++      select 1 from public.menus m
++      where m.id = checked_matches.menu_id and m.user_id = auth.uid()
++    )
++  );
++
++create policy "checked_matches_update_own"
++  on public.checked_matches
++  for update
++  to authenticated
++  using (
++    exists (
++      select 1 from public.menus m
++      where m.id = checked_matches.menu_id and m.user_id = auth.uid()
++    )
++  )
++  with check (
++    exists (
++      select 1 from public.menus m
++      where m.id = checked_matches.menu_id and m.user_id = auth.uid()
++    )
++  );
++
++create policy "checked_matches_delete_own"
++  on public.checked_matches
++  for delete
++  to authenticated
++  using (
++    exists (
++      select 1 from public.menus m
++      where m.id = checked_matches.menu_id and m.user_id = auth.uid()
++    )
++  );
++
++revoke all on table public.critical_ingredients from anon;
++revoke all on table public.checked_matches from anon;
++
++revoke all on table public.critical_ingredients from authenticated;
++revoke all on table public.checked_matches from authenticated;
++
++grant select on table public.critical_ingredients to authenticated;
++grant select, insert, update, delete on table public.checked_matches to authenticated;
++
++-- Seed recipes for matching smoke (stable UUIDs) -----------------------------
++-- Recipe A: fridge 4d, critical + pantry — can match if catalog has products
++-- Recipe B: fridge 1d — fails fridge-keep for menus longer than 1 day
++
++insert into public.recipes (id, name, fridge_keep_days)
++values
++  (
++    'b2000000-0000-4000-8000-000000000001',
++    'Тушёная курица с гречкой',
++    4
++  ),
++  (
++    'b2000000-0000-4000-8000-000000000002',
++    'Омлет со свежей зеленью',
++    1
++  )
++on conflict (id) do nothing;
++
++insert into public.critical_ingredients (id, recipe_id, name, kind, sort_order)
++values
++  (
++    'c2000000-0000-4000-8000-000000000001',
++    'b2000000-0000-4000-8000-000000000001',
++    'курица',
++    'critical',
++    1
++  ),
++  (
++    'c2000000-0000-4000-8000-000000000002',
++    'b2000000-0000-4000-8000-000000000001',
++    'гречка',
++    'critical',
++    2
++  ),
++  (
++    'c2000000-0000-4000-8000-000000000003',
++    'b2000000-0000-4000-8000-000000000001',
++    'соль',
++    'pantry',
++    3
++  ),
++  (
++    'c2000000-0000-4000-8000-000000000004',
++    'b2000000-0000-4000-8000-000000000002',
++    'яйца',
++    'critical',
++    1
++  ),
++  (
++    'c2000000-0000-4000-8000-000000000005',
++    'b2000000-0000-4000-8000-000000000002',
++    'зелень',
++    'critical',
++    2
++  )
++on conflict (recipe_id, name) do nothing;
+diff --git a/supabase/migrations/20260720050100_checked_matches_hardening.sql b/supabase/migrations/20260720050100_checked_matches_hardening.sql
+new file mode 100644
+index 0000000..7886c04
+--- /dev/null
++++ b/supabase/migrations/20260720050100_checked_matches_hardening.sql
+@@ -0,0 +1,123 @@
++-- Story 2.2 review: atomic replace RPC + consistency checks on checked_matches.
++
++-- Consistency: recipe_id matches ingredient; slot same menu; product same store.
++create or replace function public.checked_matches_enforce_consistency()
++returns trigger
++language plpgsql
++set search_path = public
++as $$
++declare
++  v_ing_recipe uuid;
++  v_menu_store uuid;
++  v_product_store uuid;
++  v_slot_menu uuid;
++begin
++  select recipe_id into v_ing_recipe
++  from public.critical_ingredients
++  where id = new.critical_ingredient_id;
++
++  if v_ing_recipe is null then
++    raise exception 'critical_ingredient not found';
++  end if;
++
++  if new.recipe_id is distinct from v_ing_recipe then
++    raise exception 'checked_matches.recipe_id must match critical_ingredients.recipe_id';
++  end if;
++
++  select store_id into v_menu_store
++  from public.menus
++  where id = new.menu_id;
++
++  if v_menu_store is null then
++    raise exception 'menu not found for checked_match';
++  end if;
++
++  select store_id into v_product_store
++  from public.products
++  where id = new.product_id;
++
++  if v_product_store is null then
++    raise exception 'product not found for checked_match';
++  end if;
++
++  if v_product_store is distinct from v_menu_store then
++    raise exception 'checked_matches.product must belong to menus.store_id snapshot';
++  end if;
++
++  if new.menu_slot_id is not null then
++    select menu_id into v_slot_menu
++    from public.menu_slots
++    where id = new.menu_slot_id;
++
++    if v_slot_menu is null or v_slot_menu is distinct from new.menu_id then
++      raise exception 'checked_matches.menu_slot_id must belong to the same menu';
++    end if;
++  end if;
++
++  return new;
++end;
++$$;
++
++drop trigger if exists checked_matches_enforce_consistency_trg on public.checked_matches;
++create trigger checked_matches_enforce_consistency_trg
++  before insert or update on public.checked_matches
++  for each row
++  execute function public.checked_matches_enforce_consistency();
++
++-- Atomic replace for (menu_id, recipe_id).
++create or replace function public.replace_checked_matches(
++  p_menu_id uuid,
++  p_recipe_id uuid,
++  p_rows jsonb
++)
++returns void
++language plpgsql
++security invoker
++set search_path = public
++as $$
++declare
++  v_user uuid := auth.uid();
++  v_owner uuid;
++  r jsonb;
++begin
++  if v_user is null then
++    raise exception 'not authenticated';
++  end if;
++
++  select user_id into v_owner from public.menus where id = p_menu_id;
++  if v_owner is null or v_owner is distinct from v_user then
++    raise exception 'menu not found or not owned';
++  end if;
++
++  delete from public.checked_matches
++  where menu_id = p_menu_id and recipe_id = p_recipe_id;
++
++  if p_rows is null or jsonb_typeof(p_rows) <> 'array' then
++    return;
++  end if;
++
++  for r in select * from jsonb_array_elements(p_rows)
++  loop
++    insert into public.checked_matches (
++      menu_id,
++      recipe_id,
++      critical_ingredient_id,
++      product_id,
++      menu_slot_id
++    ) values (
++      p_menu_id,
++      p_recipe_id,
++      (r->>'critical_ingredient_id')::uuid,
++      (r->>'product_id')::uuid,
++      null
++    );
++  end loop;
++end;
++$$;
++
++comment on function public.replace_checked_matches(uuid, uuid, jsonb) is
++  'Story 2.2: atomically replace CheckedMatch rows for a Menu×Recipe.';
++
++revoke all on function public.replace_checked_matches(uuid, uuid, jsonb) from public;
++revoke all on function public.replace_checked_matches(uuid, uuid, jsonb) from anon;
++grant execute on function public.replace_checked_matches(uuid, uuid, jsonb) to authenticated;
+diff --git a/supabase/migrations/20260720060000_recipe_refusals_ratings.sql b/supabase/migrations/20260720060000_recipe_refusals_ratings.sql
+new file mode 100644
+index 0000000..f3bb91c
+--- /dev/null
++++ b/supabase/migrations/20260720060000_recipe_refusals_ratings.sql
+@@ -0,0 +1,75 @@
++-- Story 2.3: Refusal + Rating tables for suggestion hard-suppress / weighting (AD-4).
++-- Write UI comes later (2.6 Refusal CTA, Epic 4 Rating). Tables exist so suppress path is real.
++
++create table if not exists public.recipe_refusals (
++  id uuid primary key default gen_random_uuid(),
++  user_id uuid not null references auth.users (id) on delete cascade,
++  recipe_id uuid not null references public.recipes (id) on delete cascade,
++  created_at timestamptz not null default now(),
++  unique (user_id, recipe_id)
++);
++
++comment on table public.recipe_refusals is
++  'Operator Refusal of a Recipe — hard-suppressed from AI suggestions (AD-4, FR8). Written by Story 2.6 UI.';
++
++create index if not exists recipe_refusals_user_idx
++  on public.recipe_refusals (user_id);
++
++create table if not exists public.recipe_ratings (
++  id uuid primary key default gen_random_uuid(),
++  user_id uuid not null references auth.users (id) on delete cascade,
++  recipe_id uuid not null references public.recipes (id) on delete cascade,
++  -- like / medium / dislike — dislike is hard-suppressed (AD-4).
++  rating text not null check (rating in ('dislike', 'medium', 'like')),
++  created_at timestamptz not null default now(),
++  updated_at timestamptz not null default now(),
++  unique (user_id, recipe_id)
++);
++
++comment on table public.recipe_ratings is
++  'Operator Rating of a Recipe. dislike hard-suppress; like weighted higher in long-idle ranking (Story 2.3). Write UI Epic 4.';
++
++comment on column public.recipe_ratings.rating is
++  'dislike = never suggest; medium = neutral; like = prefer among long-idle candidates.';
++
++create index if not exists recipe_ratings_user_idx
++  on public.recipe_ratings (user_id);
++
++-- RLS -----------------------------------------------------------------------
++
++alter table public.recipe_refusals enable row level security;
++alter table public.recipe_ratings enable row level security;
++
++create policy "recipe_refusals_select_own"
++  on public.recipe_refusals for select to authenticated
++  using (user_id = auth.uid());
++
++create policy "recipe_refusals_insert_own"
++  on public.recipe_refusals for insert to authenticated
++  with check (user_id = auth.uid());
++
++create policy "recipe_refusals_delete_own"
++  on public.recipe_refusals for delete to authenticated
++  using (user_id = auth.uid());
++
++create policy "recipe_ratings_select_own"
++  on public.recipe_ratings for select to authenticated
++  using (user_id = auth.uid());
++
++create policy "recipe_ratings_insert_own"
++  on public.recipe_ratings for insert to authenticated
++  with check (user_id = auth.uid());
++
++create policy "recipe_ratings_update_own"
++  on public.recipe_ratings for update to authenticated
++  using (user_id = auth.uid())
++  with check (user_id = auth.uid());
++
++create policy "recipe_ratings_delete_own"
++  on public.recipe_ratings for delete to authenticated
++  using (user_id = auth.uid());
++
++revoke all on table public.recipe_refusals from anon, public;
++revoke all on table public.recipe_ratings from anon, public;
++grant select, insert, delete on table public.recipe_refusals to authenticated;
++grant select, insert, update, delete on table public.recipe_ratings to authenticated;
+diff --git a/supabase/migrations/20260720070000_menus_slot_edit_passed.sql b/supabase/migrations/20260720070000_menus_slot_edit_passed.sql
+new file mode 100644
+index 0000000..5e2175c
+--- /dev/null
++++ b/supabase/migrations/20260720070000_menus_slot_edit_passed.sql
+@@ -0,0 +1,7 @@
++-- Story 2.4: UJ-1 gate — operator must pass slot edit before Shopping list (FR23).
++
++alter table public.menus
++  add column if not exists slot_edit_passed_at timestamptz null;
++
++comment on column public.menus.slot_edit_passed_at is
++  'Set when operator continues from Menu slot edit to Portion plan (UJ-1 / FR23). Null = Shopping list blocked.';
+diff --git a/supabase/migrations/20260720080000_menu_snacks.sql b/supabase/migrations/20260720080000_menu_snacks.sql
+new file mode 100644
+index 0000000..164a27d
+--- /dev/null
++++ b/supabase/migrations/20260720080000_menu_snacks.sql
+@@ -0,0 +1,46 @@
++-- Story 2.5: Menu-scoped no-cook Snacks (product chips). Shopping list lines in Epic 3.
++
++create table if not exists public.menu_snacks (
++  id uuid primary key default gen_random_uuid(),
++  menu_id uuid not null references public.menus (id) on delete cascade,
++  product_id uuid not null references public.products (id),
++  created_at timestamptz not null default now(),
++  unique (menu_id, product_id)
++);
++
++comment on table public.menu_snacks is
++  'No-cook Snacks on a Menu (FR4). Product refs only — not meal slots / not cook session. List lines Epic 3.';
++
++create index if not exists menu_snacks_menu_idx on public.menu_snacks (menu_id);
++
++alter table public.menu_snacks enable row level security;
++
++create policy "menu_snacks_select_own"
++  on public.menu_snacks for select to authenticated
++  using (
++    exists (
++      select 1 from public.menus m
++      where m.id = menu_snacks.menu_id and m.user_id = auth.uid()
++    )
++  );
++
++create policy "menu_snacks_insert_own"
++  on public.menu_snacks for insert to authenticated
++  with check (
++    exists (
++      select 1 from public.menus m
++      where m.id = menu_snacks.menu_id and m.user_id = auth.uid()
++    )
++  );
++
++create policy "menu_snacks_delete_own"
++  on public.menu_snacks for delete to authenticated
++  using (
++    exists (
++      select 1 from public.menus m
++      where m.id = menu_snacks.menu_id and m.user_id = auth.uid()
++    )
++  );
++
++revoke all on table public.menu_snacks from anon, public;
++grant select, insert, delete on table public.menu_snacks to authenticated;
+diff --git a/supabase/migrations/20260720090000_slot_servings_shopping_lists.sql b/supabase/migrations/20260720090000_slot_servings_shopping_lists.sql
+new file mode 100644
+index 0000000..e377fce
+--- /dev/null
++++ b/supabase/migrations/20260720090000_slot_servings_shopping_lists.sql
+@@ -0,0 +1,121 @@
++-- Epic 3: per-slot servings + Shopping list snapshot (AD-11).
++
++alter table public.menu_slots
++  add column if not exists servings integer not null default 2
++    check (servings >= 1 and servings <= 20);
++
++comment on column public.menu_slots.servings is
++  'Portion-plan servings for this day×meal (Story 3.1). Default 2 (FR2).';
++
++-- Backfill already handled by DEFAULT for new rows; existing get 2 via DEFAULT on add.
++
++create table if not exists public.shopping_lists (
++  id uuid primary key default gen_random_uuid(),
++  menu_id uuid not null unique references public.menus (id) on delete cascade,
++  created_at timestamptz not null default now(),
++  updated_at timestamptz not null default now()
++);
++
++comment on table public.shopping_lists is
++  'Materialized Shopping list snapshot per Menu (AD-11). Regenerating replaces lines.';
++
++create table if not exists public.shopping_list_lines (
++  id uuid primary key default gen_random_uuid(),
++  shopping_list_id uuid not null references public.shopping_lists (id) on delete cascade,
++  product_id uuid null references public.products (id),
++  product_name text not null,
++  line_kind text not null check (line_kind in ('matched', 'pantry', 'snack')),
++  checked_match_id uuid null references public.checked_matches (id) on delete set null,
++  price_cents integer null,
++  sort_order integer not null default 0,
++  created_at timestamptz not null default now()
++);
++
++comment on table public.shopping_list_lines is
++  'Snapshot lines: matched (from CheckedMatch), pantry staples, snacks. No in-app edit.';
++
++create index if not exists shopping_list_lines_list_idx
++  on public.shopping_list_lines (shopping_list_id);
++
++alter table public.shopping_lists enable row level security;
++alter table public.shopping_list_lines enable row level security;
++
++create policy "shopping_lists_select_own"
++  on public.shopping_lists for select to authenticated
++  using (
++    exists (
++      select 1 from public.menus m
++      where m.id = shopping_lists.menu_id and m.user_id = auth.uid()
++    )
++  );
++
++create policy "shopping_lists_insert_own"
++  on public.shopping_lists for insert to authenticated
++  with check (
++    exists (
++      select 1 from public.menus m
++      where m.id = shopping_lists.menu_id and m.user_id = auth.uid()
++    )
++  );
++
++create policy "shopping_lists_update_own"
++  on public.shopping_lists for update to authenticated
++  using (
++    exists (
++      select 1 from public.menus m
++      where m.id = shopping_lists.menu_id and m.user_id = auth.uid()
++    )
++  )
++  with check (
++    exists (
++      select 1 from public.menus m
++      where m.id = shopping_lists.menu_id and m.user_id = auth.uid()
++    )
++  );
++
++create policy "shopping_lists_delete_own"
++  on public.shopping_lists for delete to authenticated
++  using (
++    exists (
++      select 1 from public.menus m
++      where m.id = shopping_lists.menu_id and m.user_id = auth.uid()
++    )
++  );
++
++create policy "shopping_list_lines_select_own"
++  on public.shopping_list_lines for select to authenticated
++  using (
++    exists (
++      select 1
++      from public.shopping_lists sl
++      join public.menus m on m.id = sl.menu_id
++      where sl.id = shopping_list_lines.shopping_list_id and m.user_id = auth.uid()
++    )
++  );
++
++create policy "shopping_list_lines_insert_own"
++  on public.shopping_list_lines for insert to authenticated
++  with check (
++    exists (
++      select 1
++      from public.shopping_lists sl
++      join public.menus m on m.id = sl.menu_id
++      where sl.id = shopping_list_lines.shopping_list_id and m.user_id = auth.uid()
++    )
++  );
++
++create policy "shopping_list_lines_delete_own"
++  on public.shopping_list_lines for delete to authenticated
++  using (
++    exists (
++      select 1
++      from public.shopping_lists sl
++      join public.menus m on m.id = sl.menu_id
++      where sl.id = shopping_list_lines.shopping_list_id and m.user_id = auth.uid()
++    )
++  );
++
++revoke all on table public.shopping_lists from anon, public;
++revoke all on table public.shopping_list_lines from anon, public;
++grant select, insert, update, delete on table public.shopping_lists to authenticated;
++grant select, insert, delete on table public.shopping_list_lines to authenticated;
+diff --git a/supabase/migrations/20260720100000_history_ratings_recipe_text.sql b/supabase/migrations/20260720100000_history_ratings_recipe_text.sql
+new file mode 100644
+index 0000000..5f120e4
+--- /dev/null
++++ b/supabase/migrations/20260720100000_history_ratings_recipe_text.sql
+@@ -0,0 +1,68 @@
++-- Epic 4: recipe text, rating reasons, snack ratings.
++
++alter table public.recipes
++  add column if not exists body_text text not null default '';
++
++comment on column public.recipes.body_text is
++  'Full Recipe text for recipe-text-panel (FR22). Empty string when unknown — never invent content.';
++
++update public.recipes
++set body_text = case
++  when body_text = '' then
++    'Текст рецепта пока не заполнен. Добавьте шаги в каталоге рецептов позже.'
++  else body_text
++end
++where body_text = '';
++
++alter table public.recipe_ratings
++  add column if not exists reason text null
++    check (
++      reason is null
++      or reason in ('too_hard', 'not_tasty', 'too_long', 'other')
++    );
++
++comment on column public.recipe_ratings.reason is
++  'v1 reasons: too_hard | not_tasty | too_long | other (FR9).';
++
++create table if not exists public.snack_ratings (
++  id uuid primary key default gen_random_uuid(),
++  user_id uuid not null references auth.users (id) on delete cascade,
++  product_id uuid not null references public.products (id) on delete cascade,
++  rating text not null check (rating in ('dislike', 'medium', 'like')),
++  reason text null
++    check (
++      reason is null
++      or reason in ('too_hard', 'not_tasty', 'too_long', 'other')
++    ),
++  created_at timestamptz not null default now(),
++  updated_at timestamptz not null default now(),
++  unique (user_id, product_id)
++);
++
++comment on table public.snack_ratings is
++  'Operator Rating of a Snack Product. dislike hard-suppresses snack search (FR9).';
++
++create index if not exists snack_ratings_user_idx
++  on public.snack_ratings (user_id);
++
++alter table public.snack_ratings enable row level security;
++
++create policy "snack_ratings_select_own"
++  on public.snack_ratings for select to authenticated
++  using (user_id = auth.uid());
++
++create policy "snack_ratings_insert_own"
++  on public.snack_ratings for insert to authenticated
++  with check (user_id = auth.uid());
++
++create policy "snack_ratings_update_own"
++  on public.snack_ratings for update to authenticated
++  using (user_id = auth.uid())
++  with check (user_id = auth.uid());
++
++create policy "snack_ratings_delete_own"
++  on public.snack_ratings for delete to authenticated
++  using (user_id = auth.uid());
++
++revoke all on table public.snack_ratings from anon, public;
++grant select, insert, update, delete on table public.snack_ratings to authenticated;
+diff --git a/supabase/migrations/20260720110000_rating_updated_at_and_revoke_rls_helper.sql b/supabase/migrations/20260720110000_rating_updated_at_and_revoke_rls_helper.sql
+new file mode 100644
+index 0000000..87641a3
+--- /dev/null
++++ b/supabase/migrations/20260720110000_rating_updated_at_and_revoke_rls_helper.sql
+@@ -0,0 +1,26 @@
++-- Close deferred: keep rating updated_at honest on write; lock down event-trigger helper RPC.
++
++create or replace function public.set_updated_at()
++returns trigger
++language plpgsql
++as $$
++begin
++  new.updated_at = now();
++  return new;
++end;
++$$;
++
++drop trigger if exists recipe_ratings_set_updated_at on public.recipe_ratings;
++create trigger recipe_ratings_set_updated_at
++  before update on public.recipe_ratings
++  for each row
++  execute function public.set_updated_at();
++
++drop trigger if exists snack_ratings_set_updated_at on public.snack_ratings;
++create trigger snack_ratings_set_updated_at
++  before update on public.snack_ratings
++  for each row
++  execute function public.set_updated_at();
++
++-- Event-trigger helper must not be callable via PostgREST as anon/authenticated.
++revoke execute on function public.rls_auto_enable() from anon, authenticated, public;
+diff --git a/supabase/migrations/20260720110000_recipes_invent_and_seed_body.sql b/supabase/migrations/20260720110000_recipes_invent_and_seed_body.sql
+new file mode 100644
+index 0000000..5638e3a
+--- /dev/null
++++ b/supabase/migrations/20260720110000_recipes_invent_and_seed_body.sql
+@@ -0,0 +1,63 @@
++-- AI invent-then-persist: authenticated may add shared library recipes + ingredients.
++-- Seed recipes get real body_text (not placeholder).
++
++grant insert, delete on table public.recipes to authenticated;
++grant insert, delete on table public.critical_ingredients to authenticated;
++
++drop policy if exists "recipes_insert_authenticated" on public.recipes;
++create policy "recipes_insert_authenticated"
++  on public.recipes
++  for insert
++  to authenticated
++  with check (true);
++
++drop policy if exists "recipes_delete_authenticated" on public.recipes;
++create policy "recipes_delete_authenticated"
++  on public.recipes
++  for delete
++  to authenticated
++  using (true);
++
++drop policy if exists "critical_ingredients_insert_authenticated"
++  on public.critical_ingredients;
++create policy "critical_ingredients_insert_authenticated"
++  on public.critical_ingredients
++  for insert
++  to authenticated
++  with check (true);
++
++drop policy if exists "critical_ingredients_delete_authenticated"
++  on public.critical_ingredients;
++create policy "critical_ingredients_delete_authenticated"
++  on public.critical_ingredients
++  for delete
++  to authenticated
++  using (true);
++
++comment on table public.recipes is
++  'Shared recipe library. Seeded + OpenRouter invent-then-persist (AD-4). '
++  'Assignment still uses library ids only after invent; Refusal/dislike hard-suppress.';
++
++update public.recipes
++set
++  body_text = $chicken$
++1. Курицу нарежьте крупными кусками, посолите.
++2. Обжарьте на сковороде до лёгкой корочки, переложите в кастрюлю.
++3. Добавьте промытую гречку, залейте водой так, чтобы крупа была покрыта на 1–2 см.
++4. Доведите до кипения, уменьшите огонь и тушите под крышкой 25–30 минут, пока гречка не станет мягкой.
++5. Дайте постоять 5 минут и подавайте.
++$chicken$,
++  updated_at = now()
++where id = 'b2000000-0000-4000-8000-000000000001';
++
++update public.recipes
++set
++  body_text = $omelet$
++1. Яйца взбейте вилкой с щепоткой соли.
++2. Зелень мелко нарежьте и вмешайте в яичную смесь.
++3. Разогрейте сковороду с небольшим количеством масла.
++4. Вылейте смесь, жарьте на среднем огне под крышкой 3–5 минут до схватывания.
++5. Сложите пополам или подавайте целиком, пока горячий.
++$omelet$,
++  updated_at = now()
++where id = 'b2000000-0000-4000-8000-000000000002';
+diff --git a/supabase/migrations/20260720110100_set_updated_at_search_path.sql b/supabase/migrations/20260720110100_set_updated_at_search_path.sql
+new file mode 100644
+index 0000000..90b0da8
+--- /dev/null
++++ b/supabase/migrations/20260720110100_set_updated_at_search_path.sql
+@@ -0,0 +1,12 @@
++-- Fix advisor: mutable search_path on set_updated_at.
++
++create or replace function public.set_updated_at()
++returns trigger
++language plpgsql
++set search_path = pg_catalog
++as $$
++begin
++  new.updated_at = now();
++  return new;
++end;
++$$;
+diff --git a/supabase/migrations/20260720120000_drop_catalog_buyability.sql b/supabase/migrations/20260720120000_drop_catalog_buyability.sql
+new file mode 100644
+index 0000000..18b6947
+--- /dev/null
++++ b/supabase/migrations/20260720120000_drop_catalog_buyability.sql
+@@ -0,0 +1,294 @@
++-- Drop store-catalog buyability: no stores/products/sync/checked_matches.
++-- Planner keeps recipes + ingredient-name shopping lists + free-text snacks.
++
++-- ---------------------------------------------------------------------------
++-- 1. Clear shopping snapshot lines (schema rewrite)
++-- ---------------------------------------------------------------------------
++truncate public.shopping_list_lines;
++
++alter table public.shopping_list_lines
++  drop constraint if exists shopping_list_lines_product_id_fkey;
++
++alter table public.shopping_list_lines
++  drop constraint if exists shopping_list_lines_checked_match_id_fkey;
++
++alter table public.shopping_list_lines
++  drop column if exists product_id;
++
++alter table public.shopping_list_lines
++  drop column if exists checked_match_id;
++
++alter table public.shopping_list_lines
++  drop column if exists price_cents;
++
++-- Rename product_name → ingredient_name when present
++do $$
++begin
++  if exists (
++    select 1 from information_schema.columns
++    where table_schema = 'public'
++      and table_name = 'shopping_list_lines'
++      and column_name = 'product_name'
++  ) and not exists (
++    select 1 from information_schema.columns
++    where table_schema = 'public'
++      and table_name = 'shopping_list_lines'
++      and column_name = 'ingredient_name'
++  ) then
++    alter table public.shopping_list_lines rename column product_name to ingredient_name;
++  end if;
++end $$;
++
++alter table public.shopping_list_lines
++  add column if not exists ingredient_name text;
++
++update public.shopping_list_lines
++set ingredient_name = coalesce(ingredient_name, '')
++where ingredient_name is null;
++
++alter table public.shopping_list_lines
++  alter column ingredient_name set not null;
++
++alter table public.shopping_list_lines
++  drop constraint if exists shopping_list_lines_line_kind_check;
++
++alter table public.shopping_list_lines
++  add constraint shopping_list_lines_line_kind_check
++  check (line_kind in ('ingredient', 'pantry', 'snack'));
++
++comment on table public.shopping_list_lines is
++  'Snapshot lines from recipe critical_ingredients + free-text snacks. No SKU/price.';
++
++comment on column public.shopping_list_lines.ingredient_name is
++  'Display name for the shopping line (ingredient or snack label).';
++
++-- ---------------------------------------------------------------------------
++-- 2. menu_snacks: product_id → label
++-- ---------------------------------------------------------------------------
++drop table if exists public.menu_snacks cascade;
++
++create table public.menu_snacks (
++  id uuid primary key default gen_random_uuid(),
++  menu_id uuid not null references public.menus (id) on delete cascade,
++  label text not null,
++  created_at timestamptz not null default now(),
++  unique (menu_id, label),
++  constraint menu_snacks_label_nonempty check (char_length(trim(label)) > 0)
++);
++
++comment on table public.menu_snacks is
++  'No-cook free-text snacks on a Menu (no product catalog).';
++
++create index menu_snacks_menu_idx on public.menu_snacks (menu_id);
++
++alter table public.menu_snacks enable row level security;
++
++create policy "menu_snacks_select_own"
++  on public.menu_snacks for select to authenticated
++  using (
++    exists (
++      select 1 from public.menus m
++      where m.id = menu_snacks.menu_id and m.user_id = auth.uid()
++    )
++  );
++
++create policy "menu_snacks_insert_own"
++  on public.menu_snacks for insert to authenticated
++  with check (
++    exists (
++      select 1 from public.menus m
++      where m.id = menu_snacks.menu_id and m.user_id = auth.uid()
++    )
++  );
++
++create policy "menu_snacks_delete_own"
++  on public.menu_snacks for delete to authenticated
++  using (
++    exists (
++      select 1 from public.menus m
++      where m.id = menu_snacks.menu_id and m.user_id = auth.uid()
++    )
++  );
++
++revoke all on table public.menu_snacks from anon, public;
++grant select, insert, delete on table public.menu_snacks to authenticated;
++
++-- ---------------------------------------------------------------------------
++-- 3. snack_ratings: product_id → label
++-- ---------------------------------------------------------------------------
++drop trigger if exists snack_ratings_set_updated_at on public.snack_ratings;
++drop table if exists public.snack_ratings cascade;
++
++create table public.snack_ratings (
++  id uuid primary key default gen_random_uuid(),
++  user_id uuid not null references auth.users (id) on delete cascade,
++  label text not null,
++  rating text not null check (rating in ('dislike', 'medium', 'like')),
++  reason text null
++    check (
++      reason is null
++      or reason in ('too_hard', 'not_tasty', 'too_long', 'other')
++    ),
++  created_at timestamptz not null default now(),
++  updated_at timestamptz not null default now(),
++  unique (user_id, label),
++  constraint snack_ratings_label_nonempty check (char_length(trim(label)) > 0)
++);
++
++comment on table public.snack_ratings is
++  'Operator rating of a free-text snack label. dislike hard-suppresses that label.';
++
++create index snack_ratings_user_idx on public.snack_ratings (user_id);
++
++alter table public.snack_ratings enable row level security;
++
++create policy "snack_ratings_select_own"
++  on public.snack_ratings for select to authenticated
++  using (user_id = auth.uid());
++
++create policy "snack_ratings_insert_own"
++  on public.snack_ratings for insert to authenticated
++  with check (user_id = auth.uid());
++
++create policy "snack_ratings_update_own"
++  on public.snack_ratings for update to authenticated
++  using (user_id = auth.uid())
++  with check (user_id = auth.uid());
++
++create policy "snack_ratings_delete_own"
++  on public.snack_ratings for delete to authenticated
++  using (user_id = auth.uid());
++
++revoke all on table public.snack_ratings from anon, public;
++grant select, insert, update, delete on table public.snack_ratings to authenticated;
++
++create or replace function public.snack_ratings_set_updated_at()
++returns trigger
++language plpgsql
++set search_path = public
++as $$
++begin
++  new.updated_at := now();
++  return new;
++end;
++$$;
++
++create trigger snack_ratings_set_updated_at
++  before update on public.snack_ratings
++  for each row
++  execute function public.snack_ratings_set_updated_at();
++
++-- ---------------------------------------------------------------------------
++-- 4. Drop checked_matches + helpers
++-- ---------------------------------------------------------------------------
++drop function if exists public.replace_checked_matches(uuid, uuid, jsonb);
++drop trigger if exists checked_matches_enforce_consistency_trg on public.checked_matches;
++drop function if exists public.checked_matches_enforce_consistency();
++drop table if exists public.checked_matches cascade;
++
++-- ---------------------------------------------------------------------------
++-- 5. menus: drop store_id; rewrite freeze + create_menu_skeleton
++-- ---------------------------------------------------------------------------
++drop trigger if exists menus_freeze_snapshot_columns_trg on public.menus;
++
++alter table public.menus
++  drop constraint if exists menus_store_id_fkey;
++
++alter table public.menus
++  drop column if exists store_id;
++
++create or replace function public.menus_freeze_snapshot_columns()
++returns trigger
++language plpgsql
++set search_path = public
++as $$
++begin
++  if new.day_count is distinct from old.day_count then
++    raise exception 'menus.day_count is immutable after create';
++  end if;
++  if new.user_id is distinct from old.user_id then
++    raise exception 'menus.user_id is immutable';
++  end if;
++  return new;
++end;
++$$;
++
++create trigger menus_freeze_snapshot_columns_trg
++  before update on public.menus
++  for each row
++  execute function public.menus_freeze_snapshot_columns();
++
++create or replace function public.create_menu_skeleton(p_day_count integer)
++returns uuid
++language plpgsql
++security invoker
++set search_path = public
++as $$
++declare
++  v_user_id uuid := auth.uid();
++  v_menu_id uuid;
++  v_day integer;
++  v_meal text;
++begin
++  if v_user_id is null then
++    raise exception 'not authenticated';
++  end if;
++
++  if p_day_count not in (1, 2, 3, 4) then
++    raise exception 'invalid day_count';
++  end if;
++
++  insert into public.menus (user_id, day_count, default_servings_per_meal)
++  values (v_user_id, p_day_count, 2)
++  returning id into v_menu_id;
++
++  for v_day in 1..p_day_count loop
++    foreach v_meal in array array['breakfast', 'lunch', 'dinner']::text[] loop
++      insert into public.menu_slots (menu_id, day_index, meal, recipe_id)
++      values (v_menu_id, v_day, v_meal, null);
++    end loop;
++  end loop;
++
++  return v_menu_id;
++end;
++$$;
++
++comment on function public.create_menu_skeleton(integer) is
++  'Create Menu + empty slots for auth user. No store / catalog freshness.';
++
++revoke all on function public.create_menu_skeleton(integer) from public;
++revoke all on function public.create_menu_skeleton(integer) from anon;
++grant execute on function public.create_menu_skeleton(integer) to authenticated;
++
++-- ---------------------------------------------------------------------------
++-- 6. Drop catalog tables + selected_store
++-- ---------------------------------------------------------------------------
++alter table public.user_settings
++  drop constraint if exists user_settings_selected_store_id_fkey;
++
++alter table public.user_settings
++  drop column if exists selected_store_id;
++
++drop table if exists public.catalog_sync_runs cascade;
++drop table if exists public.products cascade;
++drop table if exists public.stores cascade;
++
++-- ---------------------------------------------------------------------------
++-- 7. Allow authenticated to invent recipes into shared library
++-- ---------------------------------------------------------------------------
++create policy "recipes_insert_authenticated"
++  on public.recipes for insert to authenticated
++  with check (true);
++
++create policy "recipes_update_authenticated"
++  on public.recipes for update to authenticated
++  using (true)
++  with check (true);
++
++grant insert, update on table public.recipes to authenticated;
++
++create policy "critical_ingredients_insert_authenticated"
++  on public.critical_ingredients for insert to authenticated
++  with check (true);
++
++grant insert on table public.critical_ingredients to authenticated;
+diff --git a/supabase/migrations/20260720120100_recipes_delete_and_seed_body.sql b/supabase/migrations/20260720120100_recipes_delete_and_seed_body.sql
+new file mode 100644
+index 0000000..29205f9
+--- /dev/null
++++ b/supabase/migrations/20260720120100_recipes_delete_and_seed_body.sql
+@@ -0,0 +1,22 @@
++-- Invent rollback may delete orphan recipes; seed real body_text for library recipes.
++
++drop policy if exists "recipes_delete_authenticated" on public.recipes;
++
++create policy "recipes_delete_authenticated"
++  on public.recipes for delete to authenticated
++  using (true);
++
++grant delete on table public.recipes to authenticated;
++
++update public.recipes
++set body_text = case id
++  when 'b2000000-0000-4000-8000-000000000001' then
++    E'1. Курицу нарежьте кусками, обжарьте до румяной корочки.\n2. Добавьте лук и морковь, тушите 5 минут.\n3. Всыпьте промытую гречку, залейте водой, посолите.\n4. Тушите под крышкой 25–30 минут до готовности крупы.\n5. Дайте настояться 10 минут перед подачей.'
++  when 'b2000000-0000-4000-8000-000000000002' then
++    E'1. Взбейте яйца с щепоткой соли.\n2. Разогрейте сковороду с небольшим количеством масла.\n3. Вылейте яйца, готовьте на среднем огне до схватывания.\n4. Посыпьте свежей зеленью, сложите пополам и подайте.'
++  else body_text
++end
++where id in (
++  'b2000000-0000-4000-8000-000000000001',
++  'b2000000-0000-4000-8000-000000000002'
++);
+diff --git a/supabase/migrations/20260720130000_people_count_and_ingredient_amounts.sql b/supabase/migrations/20260720130000_people_count_and_ingredient_amounts.sql
+new file mode 100644
+index 0000000..265ca8a
+--- /dev/null
++++ b/supabase/migrations/20260720130000_people_count_and_ingredient_amounts.sql
+@@ -0,0 +1,112 @@
++-- People count at menu create; ingredient amounts for shopping list quantities.
++
++-- 1) Ingredient amounts (per 1 serving / person)
++alter table public.critical_ingredients
++  add column if not exists amount_per_serving numeric null
++    check (amount_per_serving is null or amount_per_serving > 0),
++  add column if not exists unit text null
++    check (unit is null or unit in ('g', 'ml', 'pcs', 'tsp', 'tbsp'));
++
++comment on column public.critical_ingredients.amount_per_serving is
++  'Amount needed per 1 person serving. Scaled by menu_slots.servings in shopping list.';
++comment on column public.critical_ingredients.unit is
++  'g | ml | pcs | tsp | tbsp. Null when amount unknown.';
++
++-- Consistency: both set or both null
++alter table public.critical_ingredients
++  drop constraint if exists critical_ingredients_amount_unit_pair;
++alter table public.critical_ingredients
++  add constraint critical_ingredients_amount_unit_pair
++  check (
++    (amount_per_serving is null and unit is null)
++    or (amount_per_serving is not null and unit is not null)
++  );
++
++-- 2) Shopping list line quantities (snapshot)
++alter table public.shopping_list_lines
++  add column if not exists quantity_amount numeric null
++    check (quantity_amount is null or quantity_amount > 0),
++  add column if not exists quantity_unit text null
++    check (quantity_unit is null or quantity_unit in ('g', 'ml', 'pcs', 'tsp', 'tbsp'));
++
++alter table public.shopping_list_lines
++  drop constraint if exists shopping_list_lines_qty_unit_pair;
++alter table public.shopping_list_lines
++  add constraint shopping_list_lines_qty_unit_pair
++  check (
++    (quantity_amount is null and quantity_unit is null)
++    or (quantity_amount is not null and quantity_unit is not null)
++  );
++
++-- 3) create_menu_skeleton accepts people count; stamps slot servings
++drop function if exists public.create_menu_skeleton(integer);
++
++create or replace function public.create_menu_skeleton(
++  p_day_count integer,
++  p_servings integer default 2
++)
++returns uuid
++language plpgsql
++security invoker
++set search_path = public
++as $$
++declare
++  v_user_id uuid := auth.uid();
++  v_menu_id uuid;
++  v_day integer;
++  v_meal text;
++  v_servings integer := coalesce(p_servings, 2);
++begin
++  if v_user_id is null then
++    raise exception 'not authenticated';
++  end if;
++
++  if p_day_count not in (1, 2, 3, 4) then
++    raise exception 'invalid day_count';
++  end if;
++
++  if v_servings < 1 or v_servings > 20 then
++    raise exception 'invalid servings';
++  end if;
++
++  insert into public.menus (user_id, day_count, default_servings_per_meal)
++  values (v_user_id, p_day_count, v_servings)
++  returning id into v_menu_id;
++
++  for v_day in 1..p_day_count loop
++    foreach v_meal in array array['breakfast', 'lunch', 'dinner']::text[] loop
++      insert into public.menu_slots (menu_id, day_index, meal, recipe_id, servings)
++      values (v_menu_id, v_day, v_meal, null, v_servings);
++    end loop;
++  end loop;
++
++  return v_menu_id;
++end;
++$$;
++
++comment on function public.create_menu_skeleton(integer, integer) is
++  'Create Menu + empty slots; p_servings = people count applied to all slots.';
++
++revoke all on function public.create_menu_skeleton(integer, integer) from public;
++revoke all on function public.create_menu_skeleton(integer, integer) from anon;
++grant execute on function public.create_menu_skeleton(integer, integer) to authenticated;
++
++-- 4) Backfill sensible per-serving amounts for known seed/library names
++update public.critical_ingredients set amount_per_serving = 40, unit = 'g'
++  where unit is null and lower(name) in ('гречка', 'овсяные хлопья');
++update public.critical_ingredients set amount_per_serving = 100, unit = 'g'
++  where unit is null and lower(name) in ('шампиньоны', 'помидоры', 'капуста', 'морковь', 'лук');
++update public.critical_ingredients set amount_per_serving = 150, unit = 'g'
++  where unit is null and lower(name) in ('картофель');
++update public.critical_ingredients set amount_per_serving = 200, unit = 'ml'
++  where unit is null and lower(name) in ('молоко');
++update public.critical_ingredients set amount_per_serving = 2, unit = 'pcs'
++  where unit is null and lower(name) in ('яйца');
++update public.critical_ingredients set amount_per_serving = 10, unit = 'g'
++  where unit is null and lower(name) in ('зелень', 'сыр');
++update public.critical_ingredients set amount_per_serving = 120, unit = 'g'
++  where unit is null and lower(name) in ('курица', 'мясо');
++update public.critical_ingredients set amount_per_serving = 2, unit = 'g'
++  where unit is null and lower(name) in ('соль');
++update public.critical_ingredients set amount_per_serving = 10, unit = 'ml'
++  where unit is null and lower(name) in ('масло', 'масло растительное');
+diff --git a/supabase/migrations/20260720140000_menu_snacks_per_day.sql b/supabase/migrations/20260720140000_menu_snacks_per_day.sql
+new file mode 100644
+index 0000000..06f8462
+--- /dev/null
++++ b/supabase/migrations/20260720140000_menu_snacks_per_day.sql
+@@ -0,0 +1,58 @@
++-- One generated snack per menu day; replace in place (no manual-add primary path).
++
++alter table public.menu_snacks
++  add column if not exists day_index integer;
++
++-- Backfill: assign sequential day_index within each menu
++with ranked as (
++  select
++    id,
++    row_number() over (partition by menu_id order by created_at, id) as rn
++  from public.menu_snacks
++  where day_index is null
++)
++update public.menu_snacks s
++set day_index = r.rn
++from ranked r
++where s.id = r.id;
++
++-- Drop snacks that no longer fit day_count (edge leftovers)
++delete from public.menu_snacks ms
++using public.menus m
++where ms.menu_id = m.id
++  and (ms.day_index is null or ms.day_index < 1 or ms.day_index > m.day_count);
++
++alter table public.menu_snacks
++  alter column day_index set not null;
++
++alter table public.menu_snacks
++  drop constraint if exists menu_snacks_day_index_check;
++alter table public.menu_snacks
++  add constraint menu_snacks_day_index_check
++  check (day_index >= 1 and day_index <= 4);
++
++alter table public.menu_snacks
++  drop constraint if exists menu_snacks_menu_day_unique;
++alter table public.menu_snacks
++  add constraint menu_snacks_menu_day_unique unique (menu_id, day_index);
++
++comment on column public.menu_snacks.day_index is
++  'Day within the Menu (1..day_count). One snack slot per day; generated with the menu.';
++
++drop policy if exists "menu_snacks_update_own" on public.menu_snacks;
++create policy "menu_snacks_update_own"
++  on public.menu_snacks for update to authenticated
++  using (
++    exists (
++      select 1 from public.menus m
++      where m.id = menu_snacks.menu_id and m.user_id = auth.uid()
++    )
++  )
++  with check (
++    exists (
++      select 1 from public.menus m
++      where m.id = menu_snacks.menu_id and m.user_id = auth.uid()
++    )
++  );
++
++grant update on table public.menu_snacks to authenticated;
+diff --git a/supabase/migrations/20260720150000_free_text_feedback_comments.sql b/supabase/migrations/20260720150000_free_text_feedback_comments.sql
+new file mode 100644
+index 0000000..a72cbae
+--- /dev/null
++++ b/supabase/migrations/20260720150000_free_text_feedback_comments.sql
+@@ -0,0 +1,86 @@
++-- Free-text comments on refusals and dislike ratings (required for dislike).
++
++-- 1) recipe_refusals.comment
++alter table public.recipe_refusals
++  add column if not exists comment text null;
++
++comment on column public.recipe_refusals.comment is
++  'Operator free-text reason (e.g. «Не люблю тушёную капусту»). Fed into AI invent/assign prompts.';
++
++alter table public.recipe_refusals
++  drop constraint if exists recipe_refusals_comment_nonempty;
++alter table public.recipe_refusals
++  add constraint recipe_refusals_comment_nonempty
++  check (comment is null or char_length(trim(comment)) > 0);
++
++drop policy if exists "recipe_refusals_update_own" on public.recipe_refusals;
++create policy "recipe_refusals_update_own"
++  on public.recipe_refusals for update to authenticated
++  using (user_id = auth.uid())
++  with check (user_id = auth.uid());
++
++grant update on table public.recipe_refusals to authenticated;
++
++-- 2) recipe_ratings.reason → free text (was enum taxonomy)
++alter table public.recipe_ratings
++  drop constraint if exists recipe_ratings_reason_check;
++
++-- Migrate old taxonomy codes to Russian labels
++update public.recipe_ratings
++set reason = case reason
++  when 'too_hard' then 'Слишком сложно'
++  when 'not_tasty' then 'Не вкусно'
++  when 'too_long' then 'Слишком долго'
++  when 'other' then 'Другое'
++  else reason
++end
++where reason in ('too_hard', 'not_tasty', 'too_long', 'other');
++
++-- Existing dislikes without reason get a placeholder so constraint can apply
++update public.recipe_ratings
++set reason = 'Без комментария (старая оценка)'
++where rating = 'dislike'
++  and (reason is null or char_length(trim(reason)) = 0);
++
++alter table public.recipe_ratings
++  drop constraint if exists recipe_ratings_dislike_needs_comment;
++alter table public.recipe_ratings
++  add constraint recipe_ratings_dislike_needs_comment
++  check (
++    rating <> 'dislike'
++    or (reason is not null and char_length(trim(reason)) > 0)
++  );
++
++comment on column public.recipe_ratings.reason is
++  'Free-text comment. Required when rating=dislike; ignored for like.';
++
++-- 3) snack_ratings.reason → free text
++alter table public.snack_ratings
++  drop constraint if exists snack_ratings_reason_check;
++
++update public.snack_ratings
++set reason = case reason
++  when 'too_hard' then 'Слишком сложно'
++  when 'not_tasty' then 'Не вкусно'
++  when 'too_long' then 'Слишком долго'
++  when 'other' then 'Другое'
++  else reason
++end
++where reason in ('too_hard', 'not_tasty', 'too_long', 'other');
++
++update public.snack_ratings
++set reason = 'Без комментария (старая оценка)'
++where rating = 'dislike'
++  and (reason is null or char_length(trim(reason)) = 0);
++
++alter table public.snack_ratings
++  drop constraint if exists snack_ratings_dislike_needs_comment;
++alter table public.snack_ratings
++  add constraint snack_ratings_dislike_needs_comment
++  check (
++    rating <> 'dislike'
++    or (reason is not null and char_length(trim(reason)) > 0)
++  );
++
++comment on column public.snack_ratings.reason is
++  'Free-text comment. Required when rating=dislike; ignored for like.';
+diff --git a/supabase/migrations/20260720160000_selectable_meals_second_breakfast.sql b/supabase/migrations/20260720160000_selectable_meals_second_breakfast.sql
+new file mode 100644
+index 0000000..e9f8345
+--- /dev/null
++++ b/supabase/migrations/20260720160000_selectable_meals_second_breakfast.sql
+@@ -0,0 +1,83 @@
++-- Selectable meal types at menu create; add second_breakfast slot.
++
++alter table public.menu_slots
++  drop constraint if exists menu_slots_meal_check;
++
++alter table public.menu_slots
++  add constraint menu_slots_meal_check
++  check (meal in ('breakfast', 'second_breakfast', 'lunch', 'dinner'));
++
++comment on column public.menu_slots.meal is
++  'Meal slot: breakfast | second_breakfast | lunch | dinner. Which meals exist is chosen at create.';
++
++drop function if exists public.create_menu_skeleton(integer, integer);
++
++create or replace function public.create_menu_skeleton(
++  p_day_count integer,
++  p_servings integer default 2,
++  p_meals text[] default array['breakfast', 'lunch', 'dinner']::text[]
++)
++returns uuid
++language plpgsql
++security invoker
++set search_path = public
++as $$
++declare
++  v_user_id uuid := auth.uid();
++  v_menu_id uuid;
++  v_day integer;
++  v_meal text;
++  v_servings integer := coalesce(p_servings, 2);
++  v_input text[] := coalesce(p_meals, array[]::text[]);
++  v_allowed text[] := array['breakfast', 'second_breakfast', 'lunch', 'dinner'];
++  v_meals text[];
++begin
++  if v_user_id is null then
++    raise exception 'not authenticated';
++  end if;
++
++  if p_day_count not in (1, 2, 3, 4) then
++    raise exception 'invalid day_count';
++  end if;
++
++  if v_servings < 1 or v_servings > 20 then
++    raise exception 'invalid servings';
++  end if;
++
++  if exists (
++    select 1
++    from unnest(v_input) as m
++    where m <> all (v_allowed)
++  ) then
++    raise exception 'invalid meals';
++  end if;
++
++  -- Stable canonical order; dedupe by intersecting with allowed list.
++  select coalesce(array_agg(a), array[]::text[])
++  into v_meals
++  from unnest(v_allowed) as a
++  where a = any (v_input);
++
++  insert into public.menus (user_id, day_count, default_servings_per_meal)
++  values (v_user_id, p_day_count, v_servings)
++  returning id into v_menu_id;
++
++  if cardinality(v_meals) > 0 then
++    for v_day in 1..p_day_count loop
++      foreach v_meal in array v_meals loop
++        insert into public.menu_slots (menu_id, day_index, meal, recipe_id, servings)
++        values (v_menu_id, v_day, v_meal, null, v_servings);
++      end loop;
++    end loop;
++  end if;
++
++  return v_menu_id;
++end;
++$$;
++
++comment on function public.create_menu_skeleton(integer, integer, text[]) is
++  'Create Menu + empty slots for selected meals; p_servings = people count; empty p_meals allowed (snacks-only).';
++
++revoke all on function public.create_menu_skeleton(integer, integer, text[]) from public;
++revoke all on function public.create_menu_skeleton(integer, integer, text[]) from anon;
++grant execute on function public.create_menu_skeleton(integer, integer, text[]) to authenticated;
+diff --git a/supabase/migrations/20260720170000_afternoon_snack_and_late_dinner.sql b/supabase/migrations/20260720170000_afternoon_snack_and_late_dinner.sql
+new file mode 100644
+index 0000000..ebb4c1a
+--- /dev/null
++++ b/supabase/migrations/20260720170000_afternoon_snack_and_late_dinner.sql
+@@ -0,0 +1,89 @@
++-- Add afternoon_snack (полдник) and late_dinner (поздний ужин) meal slots.
++
++alter table public.menu_slots
++  drop constraint if exists menu_slots_meal_check;
++
++alter table public.menu_slots
++  add constraint menu_slots_meal_check
++  check (
++    meal in (
++      'breakfast',
++      'second_breakfast',
++      'lunch',
++      'afternoon_snack',
++      'dinner',
++      'late_dinner'
++    )
++  );
++
++comment on column public.menu_slots.meal is
++  'Meal slot: breakfast | second_breakfast | lunch | afternoon_snack | dinner | late_dinner. Which meals exist is chosen at create.';
++
++create or replace function public.create_menu_skeleton(
++  p_day_count integer,
++  p_servings integer default 2,
++  p_meals text[] default array['breakfast', 'lunch', 'dinner']::text[]
++)
++returns uuid
++language plpgsql
++security invoker
++set search_path = public
++as $$
++declare
++  v_user_id uuid := auth.uid();
++  v_menu_id uuid;
++  v_day integer;
++  v_meal text;
++  v_servings integer := coalesce(p_servings, 2);
++  v_input text[] := coalesce(p_meals, array[]::text[]);
++  v_allowed text[] := array[
++    'breakfast',
++    'second_breakfast',
++    'lunch',
++    'afternoon_snack',
++    'dinner',
++    'late_dinner'
++  ];
++  v_meals text[];
++begin
++  if v_user_id is null then
++    raise exception 'not authenticated';
++  end if;
++
++  if p_day_count not in (1, 2, 3, 4) then
++    raise exception 'invalid day_count';
++  end if;
++
++  if v_servings < 1 or v_servings > 20 then
++    raise exception 'invalid servings';
++  end if;
++
++  if exists (
++    select 1
++    from unnest(v_input) as m
++    where m <> all (v_allowed)
++  ) then
++    raise exception 'invalid meals';
++  end if;
++
++  select coalesce(array_agg(a), array[]::text[])
++  into v_meals
++  from unnest(v_allowed) as a
++  where a = any (v_input);
++
++  insert into public.menus (user_id, day_count, default_servings_per_meal)
++  values (v_user_id, p_day_count, v_servings)
++  returning id into v_menu_id;
++
++  if cardinality(v_meals) > 0 then
++    for v_day in 1..p_day_count loop
++      foreach v_meal in array v_meals loop
++        insert into public.menu_slots (menu_id, day_index, meal, recipe_id, servings)
++        values (v_menu_id, v_day, v_meal, null, v_servings);
++      end loop;
++    end loop;
++  end if;
++
++  return v_menu_id;
++end;
++$$;
+diff --git a/supabase/migrations/20260720180000_taste_preferences.sql b/supabase/migrations/20260720180000_taste_preferences.sql
+new file mode 100644
+index 0000000..7871326
+--- /dev/null
++++ b/supabase/migrations/20260720180000_taste_preferences.sql
+@@ -0,0 +1,48 @@
++-- Operator free-text taste preferences (bans / wishes), editable in Settings.
++-- Separate from recipe_refusals / ratings — not tied to a library recipe.
++
++create table if not exists public.taste_preferences (
++  id uuid primary key default gen_random_uuid(),
++  user_id uuid not null references auth.users (id) on delete cascade,
++  kind text not null check (kind in ('ban', 'wish')),
++  body text not null
++    check (
++      char_length(btrim(body)) >= 3
++      and char_length(body) <= 500
++    ),
++  created_at timestamptz not null default now()
++);
++
++comment on table public.taste_preferences is
++  'Free-text operator bans and wishes for AI menu generation. Managed in Settings.';
++
++comment on column public.taste_preferences.kind is
++  'ban = hard constraint (never); wish = soft preference (prefer when possible).';
++
++comment on column public.taste_preferences.body is
++  'Operator note in Russian, e.g. «без гречки» or «чаще рыбу».';
++
++create index if not exists taste_preferences_user_created_idx
++  on public.taste_preferences (user_id, created_at desc);
++
++alter table public.taste_preferences enable row level security;
++
++create policy "taste_preferences_select_own"
++  on public.taste_preferences for select to authenticated
++  using (user_id = auth.uid());
++
++create policy "taste_preferences_insert_own"
++  on public.taste_preferences for insert to authenticated
++  with check (user_id = auth.uid());
++
++create policy "taste_preferences_update_own"
++  on public.taste_preferences for update to authenticated
++  using (user_id = auth.uid())
++  with check (user_id = auth.uid());
++
++create policy "taste_preferences_delete_own"
++  on public.taste_preferences for delete to authenticated
++  using (user_id = auth.uid());
++
++revoke all on table public.taste_preferences from anon, public;
++grant select, insert, update, delete on table public.taste_preferences to authenticated;
+diff --git a/supabase/migrations/20260720180100_backfill_taste_preferences_from_feedback.sql b/supabase/migrations/20260720180100_backfill_taste_preferences_from_feedback.sql
+new file mode 100644
+index 0000000..6553f63
+--- /dev/null
++++ b/supabase/migrations/20260720180100_backfill_taste_preferences_from_feedback.sql
+@@ -0,0 +1,66 @@
++-- Copy existing refusal / dislike comments into taste_preferences (Settings bans).
++
++insert into public.taste_preferences (user_id, kind, body)
++select
++  src.user_id,
++  'ban',
++  src.body
++from (
++  select
++    r.user_id,
++    left(
++      case
++        when nullif(btrim(rec.name), '') is not null
++          then btrim(rec.name) || ': ' || btrim(r.comment)
++        else btrim(r.comment)
++      end,
++      500
++    ) as body
++  from public.recipe_refusals r
++  left join public.recipes rec on rec.id = r.recipe_id
++  where r.comment is not null
++    and char_length(btrim(r.comment)) >= 3
++
++  union all
++
++  select
++    rr.user_id,
++    left(
++      case
++        when nullif(btrim(rec.name), '') is not null
++          then btrim(rec.name) || ': ' || btrim(rr.reason)
++        else btrim(rr.reason)
++      end,
++      500
++    ) as body
++  from public.recipe_ratings rr
++  left join public.recipes rec on rec.id = rr.recipe_id
++  where rr.rating = 'dislike'
++    and rr.reason is not null
++    and char_length(btrim(rr.reason)) >= 3
++
++  union all
++
++  select
++    sr.user_id,
++    left(
++      case
++        when nullif(btrim(sr.label), '') is not null
++          then btrim(sr.label) || ': ' || btrim(sr.reason)
++        else btrim(sr.reason)
++      end,
++      500
++    ) as body
++  from public.snack_ratings sr
++  where sr.rating = 'dislike'
++    and sr.reason is not null
++    and char_length(btrim(sr.reason)) >= 3
++) src
++where char_length(btrim(src.body)) >= 3
++  and not exists (
++    select 1
++    from public.taste_preferences tp
++    where tp.user_id = src.user_id
++      and tp.kind = 'ban'
++      and tp.body = src.body
++  );
+diff --git a/supabase/migrations/20260720190000_menu_slots_companion_recipe.sql b/supabase/migrations/20260720190000_menu_slots_companion_recipe.sql
+new file mode 100644
+index 0000000..2f695fe
+--- /dev/null
++++ b/supabase/migrations/20260720190000_menu_slots_companion_recipe.sql
+@@ -0,0 +1,15 @@
++-- Optional second dish (side / protein) on lunch, dinner, late_dinner slots.
++-- Breakfast-family meals keep companion_recipe_id null (domain invariant).
++
++alter table public.menu_slots
++  add column if not exists companion_recipe_id uuid references public.recipes (id);
++
++alter table public.menu_slots
++  drop constraint if exists menu_slots_companion_ne_main;
++
++alter table public.menu_slots
++  add constraint menu_slots_companion_ne_main
++  check (companion_recipe_id is null or companion_recipe_id <> recipe_id);
++
++comment on column public.menu_slots.companion_recipe_id is
++  'Optional companion recipe (гарнир or protein). Used for lunch/dinner/late_dinner when main is incomplete; null for complete one-pot mains and breakfast-family meals.';
+diff --git a/supabase/migrations/20260720200000_recipes_price_nutrition.sql b/supabase/migrations/20260720200000_recipes_price_nutrition.sql
+new file mode 100644
+index 0000000..2421d8d
+--- /dev/null
++++ b/supabase/migrations/20260720200000_recipes_price_nutrition.sql
+@@ -0,0 +1,43 @@
++-- Per-serving price + KBJU on recipes (nullable; never fabricate in UI).
++
++alter table public.recipes
++  add column if not exists price_cents_per_serving integer null
++    check (price_cents_per_serving is null or price_cents_per_serving >= 0),
++  add column if not exists calories_kcal_per_serving integer null
++    check (calories_kcal_per_serving is null or calories_kcal_per_serving >= 0),
++  add column if not exists protein_g_per_serving numeric null
++    check (protein_g_per_serving is null or protein_g_per_serving >= 0),
++  add column if not exists fat_g_per_serving numeric null
++    check (fat_g_per_serving is null or fat_g_per_serving >= 0),
++  add column if not exists carbs_g_per_serving numeric null
++    check (carbs_g_per_serving is null or carbs_g_per_serving >= 0);
++
++comment on column public.recipes.price_cents_per_serving is
++  'Estimated ingredient cost per 1 adult serving in kopecks; null when unknown.';
++comment on column public.recipes.calories_kcal_per_serving is
++  'Estimated kcal per 1 adult serving; null when unknown.';
++comment on column public.recipes.protein_g_per_serving is
++  'Estimated protein grams per 1 adult serving; null when unknown.';
++comment on column public.recipes.fat_g_per_serving is
++  'Estimated fat grams per 1 adult serving; null when unknown.';
++comment on column public.recipes.carbs_g_per_serving is
++  'Estimated carbs grams per 1 adult serving; null when unknown.';
++
++-- Seed library recipes with realistic home-cooking estimates.
++update public.recipes
++set
++  price_cents_per_serving = 18000,
++  calories_kcal_per_serving = 450,
++  protein_g_per_serving = 35,
++  fat_g_per_serving = 15,
++  carbs_g_per_serving = 40
++where id = 'b2000000-0000-4000-8000-000000000001';
++
++update public.recipes
++set
++  price_cents_per_serving = 6000,
++  calories_kcal_per_serving = 220,
++  protein_g_per_serving = 14,
++  fat_g_per_serving = 16,
++  carbs_g_per_serving = 3
++where id = 'b2000000-0000-4000-8000-000000000002';
+diff --git a/supabase/migrations/20260720201000_fix_recipe_prices_rubles_as_kopecks.sql b/supabase/migrations/20260720201000_fix_recipe_prices_rubles_as_kopecks.sql
+new file mode 100644
+index 0000000..4c7b1e1
+--- /dev/null
++++ b/supabase/migrations/20260720201000_fix_recipe_prices_rubles_as_kopecks.sql
+@@ -0,0 +1,9 @@
++-- AI invent often wrote rubles into price_cents_per_serving (e.g. 200 → shown as 2 ₽).
++-- Values under 5000 cannot be realistic kopecks for a cooked serving (≥ ~50 ₽);
++-- treat them as rubles and convert to kopecks. Seeded rows (6000, 18000, …) stay.
++
++update public.recipes
++set price_cents_per_serving = price_cents_per_serving * 100
++where price_cents_per_serving is not null
++  and price_cents_per_serving > 0
++  and price_cents_per_serving < 5000;
+diff --git a/supabase/migrations/20260720202000_scale_down_inflated_recipe_prices.sql b/supabase/migrations/20260720202000_scale_down_inflated_recipe_prices.sql
+new file mode 100644
+index 0000000..2800649
+--- /dev/null
++++ b/supabase/migrations/20260720202000_scale_down_inflated_recipe_prices.sql
+@@ -0,0 +1,8 @@
++-- After rubles→kopecks backfill, AI restaurant-like estimates (600–2500 ₽/serving)
++-- remain absurd for home cooking. Scale those down 10× (900 ₽ → 90 ₽).
++-- Rows already in a sane band (< 500 ₽) and seeded kopecks are untouched.
++
++update public.recipes
++set price_cents_per_serving = price_cents_per_serving / 10
++where price_cents_per_serving is not null
++  and price_cents_per_serving >= 50000;
+diff --git a/supabase/migrations/20260720210000_menu_snacks_price_nutrition.sql b/supabase/migrations/20260720210000_menu_snacks_price_nutrition.sql
+new file mode 100644
+index 0000000..6f18402
+--- /dev/null
++++ b/supabase/migrations/20260720210000_menu_snacks_price_nutrition.sql
+@@ -0,0 +1,24 @@
++-- Per-serving price + KBJU on free-text snacks (nullable; omit in UI when unknown).
++
++alter table public.menu_snacks
++  add column if not exists price_cents_per_serving integer null
++    check (price_cents_per_serving is null or price_cents_per_serving >= 0),
++  add column if not exists calories_kcal_per_serving integer null
++    check (calories_kcal_per_serving is null or calories_kcal_per_serving >= 0),
++  add column if not exists protein_g_per_serving numeric null
++    check (protein_g_per_serving is null or protein_g_per_serving >= 0),
++  add column if not exists fat_g_per_serving numeric null
++    check (fat_g_per_serving is null or fat_g_per_serving >= 0),
++  add column if not exists carbs_g_per_serving numeric null
++    check (carbs_g_per_serving is null or carbs_g_per_serving >= 0);
++
++comment on column public.menu_snacks.price_cents_per_serving is
++  'Estimated grocery cost per 1 adult snack serving in kopecks; null when unknown.';
++comment on column public.menu_snacks.calories_kcal_per_serving is
++  'Estimated kcal per 1 adult snack serving; null when unknown.';
++comment on column public.menu_snacks.protein_g_per_serving is
++  'Estimated protein grams per 1 adult snack serving; null when unknown.';
++comment on column public.menu_snacks.fat_g_per_serving is
++  'Estimated fat grams per 1 adult snack serving; null when unknown.';
++comment on column public.menu_snacks.carbs_g_per_serving is
++  'Estimated carbs grams per 1 adult snack serving; null when unknown.';
+diff --git a/supabase/migrations/20260720220000_recipes_plate_role.sql b/supabase/migrations/20260720220000_recipes_plate_role.sql
+new file mode 100644
+index 0000000..e5365c5
+--- /dev/null
++++ b/supabase/migrations/20260720220000_recipes_plate_role.sql
+@@ -0,0 +1,7 @@
++-- Persist invent plate_role so create/resuggest can pair mains with companions.
++alter table public.recipes
++  add column if not exists plate_role text
++    check (plate_role is null or plate_role in ('main', 'companion'));
++
++comment on column public.recipes.plate_role is
++  'AI invent role: main (standalone) or companion (side/protein). Null for legacy/seed rows.';

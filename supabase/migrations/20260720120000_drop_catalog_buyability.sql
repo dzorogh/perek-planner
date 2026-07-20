@@ -275,11 +275,14 @@ drop table if exists public.stores cascade;
 
 -- ---------------------------------------------------------------------------
 -- 7. Allow authenticated to invent recipes into shared library
+-- (DROP IF EXISTS: invent migration may already have created insert policies.)
 -- ---------------------------------------------------------------------------
+drop policy if exists "recipes_insert_authenticated" on public.recipes;
 create policy "recipes_insert_authenticated"
   on public.recipes for insert to authenticated
   with check (true);
 
+drop policy if exists "recipes_update_authenticated" on public.recipes;
 create policy "recipes_update_authenticated"
   on public.recipes for update to authenticated
   using (true)
@@ -287,6 +290,8 @@ create policy "recipes_update_authenticated"
 
 grant insert, update on table public.recipes to authenticated;
 
+drop policy if exists "critical_ingredients_insert_authenticated"
+  on public.critical_ingredients;
 create policy "critical_ingredients_insert_authenticated"
   on public.critical_ingredients for insert to authenticated
   with check (true);
