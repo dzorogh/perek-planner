@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { FIXED_MENU_DAY_COUNT, MEAL_LABELS_RU } from "@/domain/menu/constants";
+import { DEFAULT_DAY_COUNT, MEAL_LABELS_RU } from "@/domain/menu/constants";
 import { normalizeRecipeBodyText } from "@/domain/recipes/format-body";
 import {
   parseInventRecipesJson,
@@ -38,7 +38,7 @@ Respond with a single JSON object:
 
 Rules:
 - One recipe object per input dish. key MUST match the input key exactly. name MUST match the locked name (same dish).
-- plate_role from input. fridge_keep_days integer 1..7, MUST be >= 4.
+- plate_role from input. fridge_keep_days integer 1..7, MUST be >= menuDayCount from the request.
 - body_text: SHORT Russian steps, each on its own line numbered "1. ", "2. ", … Main 3–5 steps, companion 2–4. Cooking/heating required.
 - HARD shopping-list completeness: every buyable food in name or body_text MUST be in critical_ingredients with amount+unit per 1 adult serving.
 - At least one kind=critical. Prefer 3–8 ingredients (companions 2–5).
@@ -53,6 +53,7 @@ export async function expandMenuRecipes(
   supabase: SupabaseClient,
   plan: PlannedDish[],
   context: {
+    menuDayCount: number;
     peoplePerMeal?: number;
     tasteNotes: TasteNote[];
     chat?: ChatCompletionsFn;
@@ -60,6 +61,7 @@ export async function expandMenuRecipes(
 ): Promise<ExpandMenuRecipesResult> {
   if (plan.length === 0) return { ok: true, dishes: [] };
 
+  const menuDayCount = context.menuDayCount;
   const chat = context.chat ?? openRouterChatCompletions;
   const locked = plan.map((d) => ({
     key: planKey(d),
@@ -73,10 +75,9 @@ export async function expandMenuRecipes(
 
   const userContent = JSON.stringify({
     dishes: locked,
-    menuDayCount: FIXED_MENU_DAY_COUNT,
+    menuDayCount,
     peoplePerMeal: context.peoplePerMeal ?? 2,
-    instruction:
-      "Write a full recipe for EVERY locked dish. Keep names exactly. key must match. fridge_keep_days>=4.",
+    instruction: `Write a full recipe for EVERY locked dish. Keep names exactly. key must match. fridge_keep_days>=${menuDayCount}.`,
     operatorTasteNotes: tasteNotesForPrompt(context.tasteNotes),
   });
 
@@ -113,8 +114,8 @@ export async function expandMenuRecipes(
     // Force locked name + role.
     draft.name = dish.name.slice(0, 120);
     draft.plateRole = dish.role;
-    if (draft.fridgeKeepDays < FIXED_MENU_DAY_COUNT) {
-      draft.fridgeKeepDays = FIXED_MENU_DAY_COUNT;
+    if (draft.fridgeKeepDays < menuDayCount) {
+      draft.fridgeKeepDays = menuDayCount;
     }
     draft.bodyText = normalizeRecipeBodyText(draft.bodyText);
 
@@ -202,7 +203,7 @@ function draftFromKeyedRow(
           name: dish.name,
           plate_role: dish.role,
           fridge_keep_days:
-            row.fridge_keep_days ?? row.fridgeKeepDays ?? FIXED_MENU_DAY_COUNT,
+            row.fridge_keep_days ?? row.fridgeKeepDays ?? DEFAULT_DAY_COUNT,
         },
       ],
     }),

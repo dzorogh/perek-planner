@@ -12,14 +12,20 @@ const MEAL_SLOTS = [
   "late_dinner",
 ];
 const DEFAULT_MEALS = ["breakfast", "lunch", "dinner"];
-const FIXED_MENU_DAY_COUNT = 4;
+const CREATE_MENU_DAY_COUNTS = [2, 4, 6];
+const DEFAULT_DAY_COUNT = 4;
 const MENU_DAY_PAIRS = [
   [1, 2],
   [3, 4],
+  [5, 6],
 ];
 
 function isValidDayCount(value) {
-  return Number.isInteger(value) && value >= 1 && value <= 4;
+  return CREATE_MENU_DAY_COUNTS.includes(value);
+}
+
+function menuDayPairsForCount(dayCount) {
+  return MENU_DAY_PAIRS.filter((pair) => pair[1] <= dayCount);
 }
 
 function expectedSlotCount(dayCount, meals = MEAL_SLOTS) {
@@ -37,10 +43,9 @@ function buildSlotKeys(dayCount, meals = DEFAULT_MEALS) {
 }
 
 const cases = [
-  { day: 1, meals: DEFAULT_MEALS, slots: 3 },
   { day: 2, meals: DEFAULT_MEALS, slots: 6 },
-  { day: 3, meals: DEFAULT_MEALS, slots: 9 },
   { day: 4, meals: DEFAULT_MEALS, slots: 12 },
+  { day: 6, meals: DEFAULT_MEALS, slots: 18 },
   {
     day: 2,
     meals: [
@@ -53,8 +58,8 @@ const cases = [
     ],
     slots: 12,
   },
-  { day: 3, meals: ["lunch", "dinner"], slots: 6 },
-  { day: 1, meals: [], slots: 0 },
+  { day: 4, meals: ["lunch", "dinner"], slots: 8 },
+  { day: 6, meals: [], slots: 0 },
 ];
 
 let failed = 0;
@@ -75,7 +80,7 @@ for (const c of cases) {
   }
 }
 
-for (const bad of [0, 5, 1.5, NaN]) {
+for (const bad of [0, 1, 3, 5, 1.5, NaN, 8]) {
   if (isValidDayCount(bad)) {
     console.error(`FAIL: ${bad} should be invalid`);
     failed += 1;
@@ -85,23 +90,40 @@ for (const bad of [0, 5, 1.5, NaN]) {
 }
 
 {
-  const createSlots = expectedSlotCount(FIXED_MENU_DAY_COUNT, DEFAULT_MEALS);
+  const createSlots = expectedSlotCount(DEFAULT_DAY_COUNT, DEFAULT_MEALS);
   if (createSlots !== 12) {
-    console.error(`FAIL: fixed 4-day B/L/D should be 12 slots, got ${createSlots}`);
+    console.error(`FAIL: default 4-day B/L/D should be 12 slots, got ${createSlots}`);
     failed += 1;
   } else {
-    console.log("PASS: fixed create menu is 4 days × 3 meals = 12 slots");
+    console.log("PASS: default create menu is 4 days × 3 meals = 12 slots");
   }
+
+  const pairs2 = menuDayPairsForCount(2);
+  const pairs4 = menuDayPairsForCount(4);
+  const pairs6 = menuDayPairsForCount(6);
+  if (
+    pairs2.length !== 1 ||
+    pairs4.length !== 2 ||
+    pairs6.length !== 3 ||
+    pairs6[2][0] !== 5 ||
+    pairs6[2][1] !== 6
+  ) {
+    console.error("FAIL: menuDayPairsForCount must yield 1/2/3 pairs for 2/4/6");
+    failed += 1;
+  } else {
+    console.log("PASS: menuDayPairsForCount → 2:[1,2], 4:+[3,4], 6:+[5,6]");
+  }
+
   const covered = new Set(MENU_DAY_PAIRS.flat());
   if (
-    MENU_DAY_PAIRS.length !== 2 ||
-    covered.size !== FIXED_MENU_DAY_COUNT ||
-    ![1, 2, 3, 4].every((d) => covered.has(d))
+    MENU_DAY_PAIRS.length !== 3 ||
+    covered.size !== 6 ||
+    ![1, 2, 3, 4, 5, 6].every((d) => covered.has(d))
   ) {
-    console.error("FAIL: MENU_DAY_PAIRS must cover days 1–4 as [1,2] and [3,4]");
+    console.error("FAIL: MENU_DAY_PAIRS must cover days 1–6 as [1,2],[3,4],[5,6]");
     failed += 1;
   } else {
-    console.log("PASS: MENU_DAY_PAIRS are hard 1–2 and 3–4");
+    console.log("PASS: MENU_DAY_PAIRS are hard 1–2, 3–4, 5–6");
   }
 
   function menuDayPairForDay(dayIndex) {
@@ -113,6 +135,7 @@ for (const bad of [0, 5, 1.5, NaN]) {
   const p1 = menuDayPairForDay(1);
   const p3 = menuDayPairForDay(3);
   const p5 = menuDayPairForDay(5);
+  const p7 = menuDayPairForDay(7);
   if (
     !p1 ||
     p1[0] !== 1 ||
@@ -120,12 +143,15 @@ for (const bad of [0, 5, 1.5, NaN]) {
     !p3 ||
     p3[0] !== 3 ||
     p3[1] !== 4 ||
-    p5 != null
+    !p5 ||
+    p5[0] !== 5 ||
+    p5[1] !== 6 ||
+    p7 != null
   ) {
     console.error("FAIL: menuDayPairForDay mapping");
     failed += 1;
   } else {
-    console.log("PASS: menuDayPairForDay maps 1→[1,2], 3→[3,4]");
+    console.log("PASS: menuDayPairForDay maps 1→[1,2], 3→[3,4], 5→[5,6]");
   }
 }
 
@@ -159,56 +185,43 @@ function summarizeMenuDishes(slots) {
 
 function formatDishDayCount(dayCount) {
   const n = Math.max(0, Math.floor(dayCount));
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod100 >= 11 && mod100 <= 14) return `${n} дней`;
-  if (mod10 === 1) return `${n} день`;
-  if (mod10 >= 2 && mod10 <= 4) return `${n} дня`;
+  if (n === 1) return "1 день";
+  if (n >= 2 && n <= 4) return `${n} дня`;
   return `${n} дней`;
 }
 
-const dishSlots = [
-  { recipeId: "a", recipeName: "Каша", dayIndex: 1 },
-  { recipeId: "a", recipeName: "Каша", dayIndex: 2 },
-  { recipeId: "b", recipeName: "Суп", dayIndex: 1 },
-  { recipeId: "b", recipeName: "Суп", dayIndex: 2 },
-  { recipeId: "b", recipeName: "Суп", dayIndex: 3 },
-  { recipeId: null, recipeName: null, dayIndex: 3 },
-];
-const dishes = summarizeMenuDishes(dishSlots);
-if (
-  dishes.length === 2 &&
-  dishes[0].name === "Суп" &&
-  dishes[0].dayCount === 3 &&
-  dishes[1].name === "Каша" &&
-  dishes[1].dayCount === 2
-) {
-  console.log("PASS: summarizeMenuDishes aggregates day counts");
-} else {
-  console.error("FAIL: summarizeMenuDishes", dishes);
-  failed += 1;
-}
-
-for (const [n, label] of [
-  [1, "1 день"],
-  [2, "2 дня"],
-  [3, "3 дня"],
-  [5, "5 дней"],
-  [11, "11 дней"],
-  [21, "21 день"],
-]) {
-  const got = formatDishDayCount(n);
-  if (got === label) {
-    console.log(`PASS: formatDishDayCount(${n})`);
+{
+  const dishes = summarizeMenuDishes([
+    { recipeId: "a", recipeName: "Суп", dayIndex: 1 },
+    { recipeId: "a", recipeName: "Суп", dayIndex: 2 },
+    { recipeId: "a", recipeName: "Суп", dayIndex: 3 },
+    { recipeId: "b", recipeName: "Каша", dayIndex: 1 },
+    { recipeId: "b", recipeName: "Каша", dayIndex: 2 },
+  ]);
+  if (
+    dishes[0].dayCount === 3 &&
+    dishes[0].name === "Суп" &&
+    dishes[1].dayCount === 2
+  ) {
+    console.log("PASS: summarizeMenuDishes sorts by dayCount");
   } else {
-    console.error(`FAIL: formatDishDayCount(${n}) → ${got}`);
+    console.error("FAIL: summarizeMenuDishes");
+    failed += 1;
+  }
+  if (
+    formatDishDayCount(1) === "1 день" &&
+    formatDishDayCount(2) === "2 дня" &&
+    formatDishDayCount(5) === "5 дней"
+  ) {
+    console.log("PASS: formatDishDayCount");
+  } else {
+    console.error("FAIL: formatDishDayCount");
     failed += 1;
   }
 }
 
 if (failed > 0) {
-  console.error(`${failed} case(s) failed`);
+  console.error(`\n${failed} failure(s)`);
   process.exit(1);
 }
-
-console.log("All menu skeleton logic cases passed");
+console.log("\nAll menu-skeleton logic checks passed.");

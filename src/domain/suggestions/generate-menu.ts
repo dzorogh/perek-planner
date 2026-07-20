@@ -3,8 +3,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   DEFAULT_INCLUDE_SNACKS,
   expectedSlotCount,
-  FIXED_MENU_DAY_COUNT,
   isMealSlot,
+  isValidDayCount,
   mealAllowsCompanion,
   type MealSlot,
 } from "@/domain/menu/constants";
@@ -61,15 +61,18 @@ export type GenerateMenuOptions = {
 
 /**
  * Create Menu skeleton + name-plan → variety audit → expand recipes → assign.
- * Fixed 4-day pairs. On failure: delete Menu (orphan rollback).
+ * Day length 2 / 4 / 6 with hard pairs. On failure: delete Menu (orphan rollback).
  */
 export async function generateBuyableMenuForUser(
   supabase: SupabaseClient,
   userId: string,
-  _dayCount: number,
+  dayCount: number,
   options: GenerateMenuOptions = {},
 ): Promise<GenerateMenuResult> {
-  const dayCount = FIXED_MENU_DAY_COUNT;
+  if (!isValidDayCount(dayCount)) {
+    return { ok: false, error: "Выберите длину меню: 2, 4 или 6 дней." };
+  }
+
   const meals = options.meals ?? (["breakfast", "lunch", "dinner"] as const);
   const includeSnacks = options.includeSnacks ?? DEFAULT_INCLUDE_SNACKS;
 
@@ -190,6 +193,7 @@ async function fillCookableSlots(
 
   // 1) Names only — cheap plan for the whole menu.
   const planned = await proposeMenuNamePlan(options.meals, {
+    dayCount,
     previousMenusDishes,
     avoidNames: previousMenusDishes,
     peoplePerMeal: options.peopleCount,
@@ -216,6 +220,7 @@ async function fillCookableSlots(
 
   if (audit.ok && audit.replace.length > 0) {
     const repaired = await repairMenuNamePlan(plan, audit.replace, {
+      dayCount,
       tasteNotes,
       chat: options.chat,
     });
@@ -226,6 +231,7 @@ async function fillCookableSlots(
 
   // 3) Expand locked names → full recipes (one batched AI call) + persist.
   const expanded = await expandMenuRecipes(supabase, plan, {
+    menuDayCount: dayCount,
     peoplePerMeal: options.peopleCount,
     tasteNotes,
     chat: options.chat,

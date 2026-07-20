@@ -10,7 +10,7 @@ Auth: Supabase session cookies (`@supabase/ssr`). OpenRouter only from server mo
 
 | Action | File | Behavior |
 |--------|------|----------|
-| `createMenuSkeletonAction` | `src/domain/menu/create-menu-actions.ts` | Validate day/people/meals → `generateBuyableMenuForUser` → redirect to `/plan/menu`; form idempotency key; rollback deletes menu on AI failure |
+| `createMenuSkeletonAction` | `src/domain/menu/create-menu-actions.ts` | Validate day (2/4/6)/people/meals → `generateBuyableMenuForUser` → redirect to `/plan/menu`; form idempotency key; rollback deletes menu on AI failure |
 | `resuggestSlotAction` | `src/domain/menu/slot-actions.ts` | Fill empty cookable slot (day-pair invent); UI: «Предложить» |
 | `resuggestRecipeAcrossMenuAction` | same | Replace dish in every menu slot where it appears; UI: «Заменить» |
 | `refuseSlotAction` | same | Insert refusal + replace; may ban taste |

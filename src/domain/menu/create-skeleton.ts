@@ -35,7 +35,7 @@ export async function createMenuSkeletonForUser(
   const meals = options.meals ?? (["breakfast", "lunch", "dinner"] as const);
 
   if (!isValidDayCount(dayCount)) {
-    return { ok: false, error: "Выберите длину меню от 1 до 4 дней." };
+    return { ok: false, error: "Выберите длину меню: 2, 4 или 6 дней." };
   }
   if (!isValidPeopleCount(peopleCount)) {
     return { ok: false, error: "Укажите число человек от 1 до 8." };

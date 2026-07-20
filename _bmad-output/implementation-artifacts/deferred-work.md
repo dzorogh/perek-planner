@@ -72,6 +72,4 @@ All previously open items were closed in the deferred-work sweep. Strikethrough 
 
 - ~~Resuggest still uses batch invent~~ — **Resolved:** `resuggest-slot.ts` + snack resuggest use position-pair invent (meal×pair×role).
 
-- source_spec: `_bmad-output/implementation-artifacts/spec-position-pair-menu-planning.md`
-  summary: Unused DayLengthPicker component left in tree after create-form removal.
-  evidence: No imports remain from create-menu-form; safe delete later.
+- ~~Unused DayLengthPicker after create-form removal~~ — **Resolved:** picker restored for pair lengths 2 / 4 / 6.

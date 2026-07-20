@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
-  FIXED_MENU_DAY_COUNT,
+  DEFAULT_DAY_COUNT,
   MEAL_LABELS_RU,
   mealAllowsCompanion,
   type MealSlot,
@@ -64,6 +64,8 @@ export type InventPositionContext = {
   previousMenusDishes?: string[];
   /** Short reason from variety analyzer when reinventing a flagged slot. */
   repairReason?: string;
+  /** Full menu length — fridge_keep must cover it. */
+  menuDayCount?: number;
   peoplePerMeal?: number;
   chat?: ChatCompletionsFn;
   userId: string;
@@ -78,7 +80,7 @@ Rules:
 - HARD: never invent a near-duplicate of currentMenuDishes / avoidNames / previousMenusDishes (culinary form+base; topping swaps and word-order swaps are duplicates).
   Too close (FORBIDDEN): куриные рулеты с сыром и шпинатом ≈ куриные рулетики с шпинатом и сыром; котлеты из курицы ≈ куриные котлеты.
 - HARD: if currentMenuDishes already has lunch/dinner mains for the SAME dayPair, invent a clearly DIFFERENT culinary form (not another рулет/котлета/запеканка of the same family).
-- fridge_keep_days: integer 1..7, MUST be >= 4 (covers the full 4-day menu).
+- fridge_keep_days: integer 1..7, MUST be >= menuDayCount from the request (covers the full menu).
 - body_text: SHORT Russian steps, each on its own line numbered "1. ", "2. ", … (3–5 steps). Cooking/heating required.
 - HARD shopping-list completeness: every buyable food in name or body_text MUST appear in critical_ingredients with amount+unit per 1 adult serving.
 - At least one kind=critical ingredient. Prefer 3–8 ingredients.
@@ -101,7 +103,7 @@ Rules:
 - Name the dish itself («Картофельное пюре», «Грибной соус») — NEVER «к пасте» / «к мясу» / «под курицу».
 - When the main already has meat/fish, invent a carb/veg/sauce side — NOT a second meat/fish dish.
 - When the main is vegetable/carb-only, invent a simple protein add-on (chicken, fish, eggs, mushrooms) OR a fitting side — your judgment.
-- fridge_keep_days >= 4. body_text: 2–4 short numbered Russian cooking steps.
+- fridge_keep_days >= menuDayCount. body_text: 2–4 short numbered Russian cooking steps.
 - HARD shopping-list completeness for name+steps. Amounts per 1 adult serving.
 - Never invent snacks. Honor operatorTasteNotes (constraint PRIMARY).
 - HARD: never near-duplicate of avoidNames / previousMenusDishes / the main dish.`;
@@ -158,6 +160,7 @@ async function proposePositionRecipe(
   const system =
     context.role === "companion" ? POSITION_COMPANION_SYSTEM : POSITION_MAIN_SYSTEM;
 
+  const menuDayCount = context.menuDayCount ?? DEFAULT_DAY_COUNT;
   const userContent = JSON.stringify({
     meal: context.meal,
     mealLabelRu: mealRu,
@@ -165,7 +168,7 @@ async function proposePositionRecipe(
     daysLabel,
     role: context.role,
     mainDishName: context.mainDishName ?? null,
-    menuDayCount: FIXED_MENU_DAY_COUNT,
+    menuDayCount,
     peoplePerMeal: context.peoplePerMeal ?? 2,
     previousMenusDishes: uniqueExactNames(context.previousMenusDishes ?? []).slice(
       0,
@@ -190,13 +193,13 @@ async function proposePositionRecipe(
     temperature: 0.85,
   });
 
-  return parsePositionInventJson(content, context);
+  return parsePositionInventJson(content, { ...context, menuDayCount });
 }
 
 /** Pure parser for single-recipe position invent JSON. */
 export function parsePositionInventJson(
   content: string,
-  context: Pick<InventPositionContext, "role" | "meal">,
+  context: Pick<InventPositionContext, "role" | "meal" | "menuDayCount">,
 ): { draft: InventRecipeDraft; plateKind: PositionPlateKind | null } | null {
   let parsed: unknown;
   try {
@@ -228,6 +231,7 @@ export function parsePositionInventJson(
               : row.plate_role ?? row.plateRole ?? "main",
           fridge_keep_days: coerceFridgeKeep(
             row.fridge_keep_days ?? row.fridgeKeepDays,
+            context.menuDayCount,
           ),
         },
       ],
@@ -238,8 +242,9 @@ export function parsePositionInventJson(
 
   // Force role from position context.
   draft.plateRole = context.role;
-  if (draft.fridgeKeepDays < FIXED_MENU_DAY_COUNT) {
-    draft.fridgeKeepDays = FIXED_MENU_DAY_COUNT;
+  const minFridge = context.menuDayCount ?? DEFAULT_DAY_COUNT;
+  if (draft.fridgeKeepDays < minFridge) {
+    draft.fridgeKeepDays = minFridge;
   }
 
   let plateKind: PositionPlateKind | null = null;
@@ -258,10 +263,11 @@ export function parsePositionInventJson(
   return { draft, plateKind };
 }
 
-function coerceFridgeKeep(raw: unknown): number {
+function coerceFridgeKeep(raw: unknown, menuDayCount?: number): number {
+  const min = menuDayCount ?? DEFAULT_DAY_COUNT;
   const n = typeof raw === "number" ? raw : Number(raw);
-  if (!Number.isFinite(n)) return FIXED_MENU_DAY_COUNT;
-  return Math.min(7, Math.max(FIXED_MENU_DAY_COUNT, Math.trunc(n)));
+  if (!Number.isFinite(n)) return min;
+  return Math.min(7, Math.max(min, Math.trunc(n)));
 }
 
 function positionInventInstruction(

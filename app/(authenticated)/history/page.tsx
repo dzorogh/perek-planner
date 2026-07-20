@@ -82,7 +82,11 @@ export default async function HistoryPage() {
                   <div className="min-w-0">
                     <h2 className="text-sm font-semibold text-accent">
                       Меню · {menu.dayCount}{" "}
-                      {menu.dayCount === 1 ? "день" : "дня"}
+                      {menu.dayCount === 1
+                        ? "день"
+                        : menu.dayCount >= 2 && menu.dayCount <= 4
+                          ? "дня"
+                          : "дней"}
                     </h2>
                     <p className="text-xs text-muted-foreground">{label}</p>
                     <Link

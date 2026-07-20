@@ -146,17 +146,23 @@ async function loadMenuPlanDishes(
   return [...byKey.values()];
 }
 
-async function loadPeoplePerMeal(
+async function loadMenuMeta(
   supabase: SupabaseClient,
   menuId: string,
-): Promise<number | undefined> {
+): Promise<{ peoplePerMeal?: number; dayCount: number } | null> {
   const { data } = await supabase
     .from("menus")
-    .select("default_servings_per_meal")
+    .select("default_servings_per_meal, day_count")
     .eq("id", menuId)
     .maybeSingle();
+  const dayCount = data?.day_count;
+  if (typeof dayCount !== "number" || dayCount < 1) return null;
   const n = data?.default_servings_per_meal;
-  return typeof n === "number" && n >= 1 ? Math.trunc(n) : undefined;
+  return {
+    dayCount: Math.trunc(dayCount),
+    peoplePerMeal:
+      typeof n === "number" && n >= 1 ? Math.trunc(n) : undefined,
+  };
 }
 
 async function loadPairSlots(
@@ -242,7 +248,7 @@ async function inventPositionViaNamePlan(
     avoidNames: string[];
     previousMenusDishes: string[];
   },
-  options: ResuggestOptions & { peoplePerMeal?: number },
+  options: ResuggestOptions & { peoplePerMeal?: number; menuDayCount: number },
 ): Promise<
   | { ok: true; dishes: ExpandedDish[]; inventedIds: string[] }
   | { ok: false; error: string }
@@ -290,6 +296,7 @@ async function inventPositionViaNamePlan(
   }
 
   const expanded = await expandMenuRecipes(supabase, plan, {
+    menuDayCount: options.menuDayCount,
     peoplePerMeal: options.peoplePerMeal,
     tasteNotes,
     chat: options.chat,
@@ -431,7 +438,8 @@ async function resuggestMainForPair(
   const ctx = await resuggestNameContext(supabase, userId, menuId, excludeIds);
   if (!ctx) return planFail("query");
 
-  const peoplePerMeal = await loadPeoplePerMeal(supabase, menuId);
+  const menuMeta = await loadMenuMeta(supabase, menuId);
+  if (!menuMeta) return planFail("query");
   const inventedIds: string[] = [];
 
   try {
@@ -440,7 +448,11 @@ async function resuggestMainForPair(
       userId,
       { meal, dayPair, role: "main" },
       ctx,
-      { ...options, peoplePerMeal },
+      {
+        ...options,
+        peoplePerMeal: menuMeta.peoplePerMeal,
+        menuDayCount: menuMeta.dayCount,
+      },
     );
     if (!invented.ok) return invented;
     inventedIds.push(...invented.inventedIds);
@@ -545,7 +557,8 @@ async function resuggestCompanionForPair(
   );
   if (!ctx) return planFail("query");
 
-  const peoplePerMeal = await loadPeoplePerMeal(supabase, menuId);
+  const menuMeta = await loadMenuMeta(supabase, menuId);
+  if (!menuMeta) return planFail("query");
   const inventedIds: string[] = [];
 
   try {
@@ -562,7 +575,11 @@ async function resuggestCompanionForPair(
         ...ctx,
         avoidNames: [...ctx.avoidNames, mainDishName],
       },
-      { ...options, peoplePerMeal },
+      {
+        ...options,
+        peoplePerMeal: menuMeta.peoplePerMeal,
+        menuDayCount: menuMeta.dayCount,
+      },
     );
     if (!invented.ok) return invented;
     inventedIds.push(...invented.inventedIds);

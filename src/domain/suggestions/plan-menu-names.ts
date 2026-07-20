@@ -1,7 +1,7 @@
 import {
   MEAL_LABELS_RU,
-  MENU_DAY_PAIRS,
   mealAllowsCompanion,
+  menuDayPairsForCount,
   type MealSlot,
   type MenuDayPair,
 } from "@/domain/menu/constants";
@@ -40,9 +40,9 @@ export type PlanMenuNamesResult =
   | { ok: false; reason: "openrouter" | "parse" };
 
 const PLAN_SYSTEM = `You design a Russian household batch-cook MENU as dish NAMES only (no recipes yet).
-Fixed structure: 4 days as pairs [1,2] and [3,4]. Each dish is cooked once and eaten on both days of its pair.
+Structure: menu days are hard pairs from the request (e.g. [1,2], [3,4], [5,6]). Each dish is cooked once and eaten on both days of its pair.
 Respond with a single JSON object:
-{"dishes":[{"meal":"breakfast"|"lunch"|"dinner"|...,"dayPair":[1,2]|[3,4],"role":"main"|"companion","name":"...","plate_kind":"complete"|"needs_companion"|null}]}.
+{"dishes":[{"meal":"breakfast"|"lunch"|"dinner"|...,"dayPair":[1,2]|[3,4]|[5,6],"role":"main"|"companion","name":"...","plate_kind":"complete"|"needs_companion"|null}]}.
 
 Rules:
 - Include exactly the requested positions. For each meal×dayPair: one main. For lunch/dinner/late_dinner mains also set plate_kind.
@@ -63,6 +63,7 @@ Rules:
 export async function proposeMenuNamePlan(
   meals: readonly MealSlot[],
   context: {
+    dayCount: number;
     previousMenusDishes?: string[];
     avoidNames?: string[];
     peoplePerMeal?: number;
@@ -70,12 +71,14 @@ export async function proposeMenuNamePlan(
     chat?: ChatCompletionsFn;
   },
 ): Promise<PlanMenuNamesResult> {
-  const positions = describePositions(meals);
+  const dayPairs = menuDayPairsForCount(context.dayCount);
+  const positions = describePositions(meals, dayPairs);
   const chat = context.chat ?? openRouterChatCompletions;
 
   const userContent = JSON.stringify({
     meals: [...meals],
-    dayPairs: MENU_DAY_PAIRS.map((p) => [...p]),
+    dayCount: context.dayCount,
+    dayPairs: dayPairs.map((p) => [...p]),
     positions,
     previousMenusDishes: uniqueExactNames(context.previousMenusDishes ?? []).slice(
       0,
@@ -105,7 +108,7 @@ export async function proposeMenuNamePlan(
     throw err;
   }
 
-  const plan = parseMenuNamePlanJson(content, meals);
+  const plan = parseMenuNamePlanJson(content, meals, dayPairs);
   if (!plan) return { ok: false, reason: "parse" };
   return { ok: true, plan };
 }
@@ -204,12 +207,14 @@ export async function repairMenuNamePlan(
     reason: string;
   }>,
   context: {
+    dayCount: number;
     tasteNotes: TasteNote[];
     chat?: ChatCompletionsFn;
   },
 ): Promise<PlanMenuNamesResult> {
   if (replace.length === 0) return { ok: true, plan };
 
+  const dayPairs = menuDayPairsForCount(context.dayCount);
   const chat = context.chat ?? openRouterChatCompletions;
   const keep = plan.filter(
     (d) =>
@@ -223,6 +228,8 @@ export async function repairMenuNamePlan(
   );
 
   const userContent = JSON.stringify({
+    dayCount: context.dayCount,
+    dayPairs: dayPairs.map((p) => [...p]),
     keepDishes: keep.map((d) => ({
       meal: d.meal,
       dayPair: [...d.dayPair],
@@ -254,7 +261,7 @@ export async function repairMenuNamePlan(
   }
 
   const meals = uniqueMeals(plan);
-  const next = parseMenuNamePlanJson(content, meals);
+  const next = parseMenuNamePlanJson(content, meals, dayPairs);
   if (!next) return { ok: false, reason: "parse" };
   return { ok: true, plan: next };
 }
@@ -262,10 +269,11 @@ export async function repairMenuNamePlan(
 export function parseMenuNamePlanJson(
   content: string,
   meals: readonly MealSlot[],
+  dayPairs: readonly MenuDayPair[],
 ): PlannedDish[] | null {
-  const out = parsePlannedDishesArray(content, meals);
+  const out = parsePlannedDishesArray(content, meals, dayPairs);
   if (!out) return null;
-  return planLooksComplete(out, meals) ? out : null;
+  return planLooksComplete(out, meals, dayPairs) ? out : null;
 }
 
 /** Parser for single-position resuggest plans (main±companion or companion only). */
@@ -278,7 +286,9 @@ export function parsePositionNamePlanJson(
     mainName?: string;
   },
 ): PlannedDish[] | null {
-  const out = parsePlannedDishesArray(content, [position.meal]);
+  const out = parsePlannedDishesArray(content, [position.meal], [
+    position.dayPair,
+  ]);
   if (!out) return null;
 
   const atPosition = out.filter(
@@ -317,6 +327,7 @@ export function parsePositionNamePlanJson(
 function parsePlannedDishesArray(
   content: string,
   meals: readonly MealSlot[],
+  dayPairs: readonly MenuDayPair[],
 ): PlannedDish[] | null {
   let parsed: unknown;
   try {
@@ -330,7 +341,7 @@ function parsePlannedDishesArray(
 
   const out: PlannedDish[] = [];
   for (const item of root.dishes) {
-    const dish = parsePlannedDishRow(item, meals);
+    const dish = parsePlannedDishRow(item, meals, dayPairs);
     if (dish) out.push(dish);
   }
   return out;
@@ -339,12 +350,13 @@ function parsePlannedDishesArray(
 function parsePlannedDishRow(
   item: unknown,
   meals: readonly MealSlot[],
+  dayPairs: readonly MenuDayPair[],
 ): PlannedDish | null {
   if (!item || typeof item !== "object") return null;
   const row = item as Record<string, unknown>;
   const meal = typeof row.meal === "string" ? row.meal : "";
   if (!meals.includes(meal as MealSlot)) return null;
-  const dayPair = parseDayPair(row.dayPair);
+  const dayPair = parseDayPair(row.dayPair ?? row.day_pair, dayPairs);
   if (!dayPair) return null;
   const rawName = typeof row.name === "string" ? row.name.trim() : "";
   const name = rawName ? stripHardcodedPairing(rawName).slice(0, 120) : "";
@@ -376,14 +388,17 @@ function parsePlannedMainRow(
   return { meal, dayPair, role: "main", name, plateKind };
 }
 
-function describePositions(meals: readonly MealSlot[]) {
+function describePositions(
+  meals: readonly MealSlot[],
+  dayPairs: readonly MenuDayPair[],
+) {
   const positions: Array<{
     meal: MealSlot;
     mealLabelRu: string;
     dayPair: number[];
     needsPlateKind: boolean;
   }> = [];
-  for (const dayPair of MENU_DAY_PAIRS) {
+  for (const dayPair of dayPairs) {
     for (const meal of meals) {
       positions.push({
         meal,
@@ -399,8 +414,9 @@ function describePositions(meals: readonly MealSlot[]) {
 function planLooksComplete(
   plan: PlannedDish[],
   meals: readonly MealSlot[],
+  dayPairs: readonly MenuDayPair[],
 ): boolean {
-  for (const dayPair of MENU_DAY_PAIRS) {
+  for (const dayPair of dayPairs) {
     for (const meal of meals) {
       const main = plan.find(
         (d) =>
@@ -425,12 +441,16 @@ function planLooksComplete(
   return true;
 }
 
-function parseDayPair(raw: unknown): MenuDayPair | null {
+function parseDayPair(
+  raw: unknown,
+  allowed: readonly MenuDayPair[],
+): MenuDayPair | null {
   if (!Array.isArray(raw) || raw.length !== 2) return null;
   const a = Number(raw[0]);
   const b = Number(raw[1]);
-  if (a === 1 && b === 2) return [1, 2];
-  if (a === 3 && b === 4) return [3, 4];
+  for (const pair of allowed) {
+    if (a === pair[0] && b === pair[1]) return pair;
+  }
   return null;
 }
 

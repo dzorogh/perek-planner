@@ -37,6 +37,7 @@ test.describe("Planning happy path (authenticated)", () => {
     await page.getByRole("button", { name: "Создать меню", exact: true }).click();
     const createDialog = page.locator('[data-component="create-menu-dialog"]');
     await expect(createDialog).toBeVisible();
+    await createDialog.getByRole("radio", { name: "4 дня" }).click();
     await createDialog.getByRole("radio", { name: "2 чел." }).click();
     await createDialog.getByRole("button", { name: "Сгенерировать" }).click();
 

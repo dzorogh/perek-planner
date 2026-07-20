@@ -1856,12 +1856,21 @@ check(
   );
 }
 
-// Position-pair planning: same recipe on hard pairs 1–2 and 3–4.
+// Position-pair planning: same recipe on hard pairs (2/4/6 → 1–3 pairs).
 {
   const MENU_DAY_PAIRS = [
     [1, 2],
     [3, 4],
+    [5, 6],
   ];
+  function pairsFor(dayCount) {
+    return MENU_DAY_PAIRS.filter((p) => p[1] <= dayCount);
+  }
+  check("2 days → one pair", pairsFor(2).length === 1);
+  check("4 days → two pairs", pairsFor(4).length === 2);
+  check("6 days → three pairs", pairsFor(6).length === 3);
+
+  const dayPairs = pairsFor(4);
   const slots = [];
   for (const day of [1, 2, 3, 4]) {
     for (const meal of ["breakfast", "lunch", "dinner"]) {
@@ -1892,7 +1901,7 @@ check(
   };
   const proposals = [];
   for (const meal of ["breakfast", "lunch", "dinner"]) {
-    for (const pair of MENU_DAY_PAIRS) {
+    for (const pair of dayPairs) {
       const key = `${meal}:${pair[0]}-${pair[1]}`;
       const recipeId = mains[key];
       const companionRecipeId = companions[key] ?? null;

@@ -1,17 +1,26 @@
-export const MIN_DAY_COUNT = 1;
-export const MAX_DAY_COUNT = 4;
-/** Create Menu always plans this many days (pairs 1–2 and 3–4). */
-export const FIXED_MENU_DAY_COUNT = 4 as const;
-export const DEFAULT_DAY_COUNT = FIXED_MENU_DAY_COUNT;
+export const MIN_DAY_COUNT = 2;
+export const MAX_DAY_COUNT = 6;
+/** Create Menu default length (one pair batch of two days × 2). */
+export const DEFAULT_DAY_COUNT = 4;
 export const DEFAULT_SERVINGS_PER_MEAL = 2;
 
-/** Hard cook/snack batches within a 4-day menu. */
+/** Allowed create-menu lengths: hard 2-day cook batches. */
+export const CREATE_MENU_DAY_COUNTS = [2, 4, 6] as const;
+export type CreateMenuDayCount = (typeof CREATE_MENU_DAY_COUNTS)[number];
+
+/** All hard cook/snack batches (subset used by menuDayPairsForCount). */
 export const MENU_DAY_PAIRS = [
   [1, 2],
   [3, 4],
+  [5, 6],
 ] as const;
 
 export type MenuDayPair = (typeof MENU_DAY_PAIRS)[number];
+
+/** Pairs that fit inside a menu of `dayCount` days (2 → one pair, 4 → two, 6 → three). */
+export function menuDayPairsForCount(dayCount: number): MenuDayPair[] {
+  return MENU_DAY_PAIRS.filter((pair) => pair[1] <= dayCount);
+}
 
 /** Resolve the hard 2-day batch that contains `dayIndex`, or null if out of range. */
 export function menuDayPairForDay(dayIndex: number): MenuDayPair | null {
@@ -75,18 +84,13 @@ export const DEFAULT_MEAL_SELECTION: Record<MealSlot, boolean> = {
 export const DEFAULT_INCLUDE_SNACKS = true;
 
 export const DAY_OPTION_LABELS = [
-  { value: 1, label: "день" },
   { value: 2, label: "дня" },
-  { value: 3, label: "дня" },
   { value: 4, label: "дня" },
+  { value: 6, label: "дней" },
 ] as const;
 
-export function isValidDayCount(value: number): value is 1 | 2 | 3 | 4 {
-  return (
-    Number.isInteger(value) &&
-    value >= MIN_DAY_COUNT &&
-    value <= MAX_DAY_COUNT
-  );
+export function isValidDayCount(value: number): value is CreateMenuDayCount {
+  return (CREATE_MENU_DAY_COUNTS as readonly number[]).includes(value);
 }
 
 export function isMealSlot(value: string): value is MealSlot {

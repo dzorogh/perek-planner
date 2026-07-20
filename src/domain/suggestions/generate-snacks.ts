@@ -5,9 +5,9 @@ import {
   normalizeFeedbackComment,
 } from "@/domain/history/constants";
 import {
-  FIXED_MENU_DAY_COUNT,
-  MENU_DAY_PAIRS,
+  isValidDayCount,
   menuDayPairForDay,
+  menuDayPairsForCount,
 } from "@/domain/menu/constants";
 import { inventPriceToKopecks } from "@/domain/suggestions/invent-recipes";
 import {
@@ -248,8 +248,8 @@ function extractJsonObject(text: string): string {
 }
 
 /**
- * Generate one snack per day-pair (1–2 and 3–4) and write the same label
- * to both days in the pair.
+ * Generate one snack per day-pair and write the same label to both days
+ * in the pair (2 → [1,2]; 4 → +[3,4]; 6 → +[5,6]).
  */
 export async function generateSnacksForMenu(
   supabase: SupabaseClient,
@@ -258,7 +258,7 @@ export async function generateSnacksForMenu(
   dayCount: number,
   options: { chat?: ChatCompletionsFn } = {},
 ): Promise<GenerateSnacksResult> {
-  if (dayCount !== FIXED_MENU_DAY_COUNT) {
+  if (!isValidDayCount(dayCount)) {
     return { ok: false, error: "Некорректная длина меню." };
   }
 
@@ -279,7 +279,8 @@ export async function generateSnacksForMenu(
     return { ok: false, error: SUGGESTIONS_RU.tasteNotesFail };
   }
   const chat = options.chat ?? openRouterChatCompletions;
-  const pairCount = MENU_DAY_PAIRS.length;
+  const dayPairs = menuDayPairsForCount(dayCount);
+  const pairCount = dayPairs.length;
 
   let drafts: SnackDraft[];
   try {
@@ -303,7 +304,7 @@ export async function generateSnacksForMenu(
   const pairDrafts = drafts.slice(0, pairCount);
   await supabase.from("menu_snacks").delete().eq("menu_id", menuId);
 
-  const rows = MENU_DAY_PAIRS.flatMap((pair, pairIndex) => {
+  const rows = dayPairs.flatMap((pair, pairIndex) => {
     const draft = pairDrafts[pairIndex]!;
     return pair.map((dayIndex) => ({
       menu_id: menuId,

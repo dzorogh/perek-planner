@@ -60,7 +60,12 @@ export default async function PlanMenuPage({ searchParams }: PlanMenuPageProps) 
         <h1 className="page-title">Меню</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           Меню на {menu.dayCount}{" "}
-          {menu.dayCount === 1 ? "день" : "дня"},{" "}
+          {menu.dayCount === 1
+            ? "день"
+            : menu.dayCount >= 2 && menu.dayCount <= 4
+              ? "дня"
+              : "дней"}
+          ,{" "}
           {menu.slots[0]?.servings ?? 2} чел. на приём — проверьте слоты, при
           необходимости замените.
         </p>

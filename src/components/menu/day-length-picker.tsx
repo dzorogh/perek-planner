@@ -31,6 +31,7 @@ export function DayLengthPicker({
             type="button"
             role="radio"
             aria-checked={selected}
+            aria-label={`${option.value} ${option.label}`}
             disabled={disabled}
             onClick={() => onChange(option.value)}
             className={cn(
