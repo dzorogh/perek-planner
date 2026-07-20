@@ -24,6 +24,7 @@ type TastePreferencesPanelProps = {
 
 export function TastePreferencesPanel({ items }: TastePreferencesPanelProps) {
   const [kind, setKind] = useState<TastePreferenceKind>("ban");
+  const [body, setBody] = useState("");
   const formRef = useRef<HTMLFormElement>(null);
 
   const [addState, addAction, addPending] = useActionState<
@@ -35,8 +36,14 @@ export function TastePreferencesPanel({ items }: TastePreferencesPanelProps) {
     if (addState?.ok) {
       formRef.current?.reset();
       setKind("ban");
+      setBody("");
     }
   }, [addState]);
+
+  const canSubmit =
+    body.trim().length >= MIN_FEEDBACK_COMMENT_LENGTH &&
+    body.trim().length <= MAX_FEEDBACK_COMMENT_LENGTH &&
+    !addPending;
 
   return (
     <section
@@ -67,6 +74,8 @@ export function TastePreferencesPanel({ items }: TastePreferencesPanelProps) {
           name="body"
           rows={2}
           maxLength={MAX_FEEDBACK_COMMENT_LENGTH}
+          value={body}
+          onChange={(event) => setBody(event.target.value)}
           placeholder={
             kind === "ban"
               ? "Например: без гречки и капусты"
@@ -87,7 +96,7 @@ export function TastePreferencesPanel({ items }: TastePreferencesPanelProps) {
           <Button
             type="submit"
             className="rounded-sm"
-            disabled={addPending}
+            disabled={!canSubmit}
             aria-busy={addPending}
           >
             {addPending ? "Сохраняем…" : "Добавить"}

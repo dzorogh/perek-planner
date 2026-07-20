@@ -57,7 +57,7 @@ test.describe("App shell (bypass auth)", () => {
     ).toHaveCount(0);
 
     await page.goto("/plan/shopping-list");
-    await expect(page.getByRole("heading", { name: "Shopping list" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Список покупок" })).toBeVisible();
     await expect(
       page.getByRole("navigation", { name: "Шаги планирования" }),
     ).toBeVisible();

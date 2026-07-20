@@ -40,6 +40,7 @@ export function DeleteMenuButton({ menuId }: DeleteMenuButtonProps) {
         type="button"
         variant="ghost"
         size="sm"
+        data-component="delete-menu"
         className="h-auto px-0 text-xs font-medium text-muted-foreground hover:bg-transparent hover:text-warning-fg"
         disabled={pending}
         aria-busy={pending}

@@ -57,7 +57,7 @@ function formatShoppingListCopy(list) {
     parts.push("", "Базовые продукты:", ...sections.pantry);
   }
   if (sections.snack.length) {
-    parts.push("", "Snacks:", ...sections.snack);
+    parts.push("", "Перекусы:", ...sections.snack);
   }
   return parts.join("\n");
 }

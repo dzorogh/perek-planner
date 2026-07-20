@@ -60,7 +60,7 @@ test.describe("Planning happy path (authenticated)", () => {
       timeout: 20_000,
     });
     await expect(
-      page.getByRole("heading", { name: "Shopping list" }),
+      page.getByRole("heading", { name: "Список покупок" }),
     ).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Копировать список" }),
@@ -69,7 +69,7 @@ test.describe("Planning happy path (authenticated)", () => {
     await expect(page.getByText(/\d+\s*(г|мл|шт)/).first()).toBeVisible({
       timeout: 10_000,
     });
-    await expect(page.getByRole("heading", { name: "Snacks" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Перекусы" })).toBeVisible();
 
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
     await page.getByRole("button", { name: "Копировать список" }).click();

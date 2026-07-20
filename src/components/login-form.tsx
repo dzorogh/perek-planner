@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -51,11 +52,11 @@ export function LoginForm({
 
   const handleLogin = async (event: React.FormEvent) => {
     event.preventDefault();
-    const supabase = createClient();
     setIsLoading(true);
     setError(null);
 
     try {
+      const supabase = createClient();
       const { error: signInError } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -71,7 +72,11 @@ export function LoginForm({
   };
 
   return (
-    <div className={cn("flex flex-col gap-6", className)} {...props}>
+    <div
+      className={cn("flex flex-col gap-6", className)}
+      data-component="login-form"
+      {...props}
+    >
       <Card className="border-border bg-surface shadow-none">
         <CardHeader>
           <CardTitle className="page-title">Вход</CardTitle>
@@ -94,7 +99,15 @@ export function LoginForm({
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="password">Пароль</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="password">Пароль</Label>
+                <Link
+                  href="/auth/forgot-password"
+                  className="text-xs font-medium text-primary underline-offset-4 hover:underline"
+                >
+                  Забыли пароль?
+                </Link>
+              </div>
               <Input
                 id="password"
                 type="password"

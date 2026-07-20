@@ -62,6 +62,10 @@ export function SnackSlotCard({
     if (refuseState?.ok) setRefuseOpen(false);
   }, [refuseState]);
 
+  useEffect(() => {
+    if (!snack && refuseOpen) setRefuseOpen(false);
+  }, [snack, refuseOpen]);
+
   const busy = resuggestPending || suggestPending || refusePending;
   const empty = !snack;
 
