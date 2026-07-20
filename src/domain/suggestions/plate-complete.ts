@@ -88,7 +88,8 @@ export function normalizePlateAssignments(
     }
 
     const day = dayBySlot.get(proposal.slotId);
-    const dayUsed = day != null ? (usedOnDay.get(day) ?? new Set()) : new Set();
+    const dayUsed =
+      day != null ? (usedOnDay.get(day) ?? new Set<string>()) : new Set<string>();
     const avoidAsCompanion = new Set<string>([
       ...breakfastMains,
       ...dayUsed,
