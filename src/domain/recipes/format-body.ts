@@ -3,12 +3,20 @@ export function stripStepNumber(step: string): string {
   return step.replace(/^\d{1,2}[.)]:?\s*/, "").trim();
 }
 
+/** Turn literal `\n` / `\r\n` escapes (common in AI body_text) into real newlines. */
+function unescapeRecipeNewlines(bodyText: string): string {
+  return bodyText
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\r\n/g, "\n");
+}
+
 /**
  * Split recipe body into cooking steps.
  * Prefers newline-separated lines; falls back to "1. … 2. …" in one paragraph.
  */
 export function splitRecipeSteps(bodyText: string): string[] {
-  const trimmed = bodyText.trim();
+  const trimmed = unescapeRecipeNewlines(bodyText).trim();
   if (!trimmed) return [];
 
   const byLine = trimmed

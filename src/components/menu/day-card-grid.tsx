@@ -1,4 +1,7 @@
+"use client";
+
 import { SlotCardActions } from "@/components/menu/slot-card-actions";
+import { MenuSlotBusyProvider } from "@/components/menu/menu-slot-busy";
 import { SnackSlotCard } from "@/components/menu/snack-slot-card";
 import { RecipeTextPanel } from "@/components/recipes/recipe-text-panel";
 import { RecipeValueLine } from "@/components/recipes/recipe-value-line";
@@ -78,6 +81,7 @@ function DishLine({
         menuId={menuId}
         slotId={slotId}
         hasRecipe
+        recipeId={recipeId}
         target={target}
         canClear={canClear}
         canAddCompanion={canAddCompanion}
@@ -182,106 +186,108 @@ export function DayCardGrid({
   } as const;
 
   return (
-    <div
-      data-component="meal-lane-grid"
-      className="rounded-lg border border-border bg-surface px-5 py-5 md:px-6 md:py-6"
-    >
+    <MenuSlotBusyProvider>
       <div
-        className="mb-1 grid gap-4 border-b border-border pb-2.5"
-        style={gridStyle}
-        aria-hidden="true"
+        data-component="meal-lane-grid"
+        className="rounded-lg border border-border bg-surface px-5 py-5 md:px-6 md:py-6"
       >
-        <div />
-        {days.map((dayIndex) => (
+        <div
+          className="mb-1 grid gap-4 border-b border-border pb-2.5"
+          style={gridStyle}
+          aria-hidden="true"
+        >
+          <div />
+          {days.map((dayIndex) => (
+            <div
+              key={dayIndex}
+              className="text-center text-[13px] font-semibold text-accent"
+            >
+              День {dayIndex}
+            </div>
+          ))}
+        </div>
+
+        {meals.map((meal) => (
           <div
-            key={dayIndex}
-            className="text-center text-[13px] font-semibold text-accent"
+            key={meal}
+            data-component="meal-lane"
+            data-meal={meal}
+            className="grid gap-4 border-b border-[#F1F5F9] py-4 last:border-b-0"
+            style={gridStyle}
           >
-            День {dayIndex}
+            <div className="pt-3 text-[11px] font-semibold uppercase tracking-[0.04em] text-slot-label">
+              {MEAL_LABELS_RU[meal]}
+            </div>
+            {days.map((dayIndex) => {
+              const slot = slotFor(slots, dayIndex, meal);
+              if (!slot) {
+                return <div key={`${meal}-${dayIndex}`} className="min-h-14" />;
+              }
+              return (
+                <SlotCell
+                  key={slot.id}
+                  menuId={menuId}
+                  slot={slot}
+                  allSlots={slots}
+                />
+              );
+            })}
           </div>
         ))}
-      </div>
 
-      {meals.map((meal) => (
-        <div
-          key={meal}
-          data-component="meal-lane"
-          data-meal={meal}
-          className="grid gap-4 border-b border-[#F1F5F9] py-4 last:border-b-0"
-          style={gridStyle}
-        >
-          <div className="pt-3 text-[11px] font-semibold uppercase tracking-[0.04em] text-slot-label">
-            {MEAL_LABELS_RU[meal]}
-          </div>
-          {days.map((dayIndex) => {
-            const slot = slotFor(slots, dayIndex, meal);
-            if (!slot) {
-              return <div key={`${meal}-${dayIndex}`} className="min-h-14" />;
-            }
-            return (
-              <SlotCell
-                key={slot.id}
-                menuId={menuId}
-                slot={slot}
-                allSlots={slots}
-              />
-            );
-          })}
-        </div>
-      ))}
-
-      {menuHasSnacks ? (
-        <div
-          data-component="meal-lane"
-          data-meal="snack"
-          className="grid gap-4 border-b border-[#F1F5F9] py-4"
-          style={gridStyle}
-        >
-          <div className="pt-3 text-[11px] font-semibold uppercase tracking-[0.04em] text-slot-label">
-            Перекус
-          </div>
-          {days.map((dayIndex) => {
-            const daySnack =
-              snacks.find((s) => s.dayIndex === dayIndex) ?? null;
-            return (
-              <SnackSlotCard
-                key={`snack-${dayIndex}`}
-                menuId={menuId}
-                dayIndex={dayIndex}
-                snack={daySnack}
-                servings={snackServings}
-              />
-            );
-          })}
-        </div>
-      ) : null}
-
-      <div
-        data-component="day-totals"
-        className="grid gap-4 border-t border-border pt-4"
-        style={gridStyle}
-      >
-        <div className="pt-0.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-slot-label">
-          Итого
-        </div>
-        {days.map((dayIndex) => {
-          const line = formatCompactValueLine(
-            sumDayTotals(slots, dayIndex, {
-              snacks,
-              snackServings,
-            }),
-          );
-          return (
-            <div
-              key={`day-total-${dayIndex}`}
-              data-day-index={dayIndex}
-              className="text-sm font-semibold tabular-nums text-foreground"
-            >
-              {line ?? "—"}
+        {menuHasSnacks ? (
+          <div
+            data-component="meal-lane"
+            data-meal="snack"
+            className="grid gap-4 border-b border-[#F1F5F9] py-4"
+            style={gridStyle}
+          >
+            <div className="pt-3 text-[11px] font-semibold uppercase tracking-[0.04em] text-slot-label">
+              Перекус
             </div>
-          );
-        })}
+            {days.map((dayIndex) => {
+              const daySnack =
+                snacks.find((s) => s.dayIndex === dayIndex) ?? null;
+              return (
+                <SnackSlotCard
+                  key={`snack-${dayIndex}`}
+                  menuId={menuId}
+                  dayIndex={dayIndex}
+                  snack={daySnack}
+                  servings={snackServings}
+                />
+              );
+            })}
+          </div>
+        ) : null}
+
+        <div
+          data-component="day-totals"
+          className="grid gap-4 border-t border-border pt-4"
+          style={gridStyle}
+        >
+          <div className="pt-0.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-slot-label">
+            Итого
+          </div>
+          {days.map((dayIndex) => {
+            const line = formatCompactValueLine(
+              sumDayTotals(slots, dayIndex, {
+                snacks,
+                snackServings,
+              }),
+            );
+            return (
+              <div
+                key={`day-total-${dayIndex}`}
+                data-day-index={dayIndex}
+                className="text-sm font-semibold tabular-nums text-foreground"
+              >
+                {line ?? "—"}
+              </div>
+            );
+          })}
+        </div>
       </div>
-    </div>
+    </MenuSlotBusyProvider>
   );
 }

@@ -1,9 +1,15 @@
 "use client";
 
 import { MoreHorizontal } from "lucide-react";
-import { startTransition, useActionState, useState } from "react";
+import {
+  startTransition,
+  useActionState,
+  useLayoutEffect,
+  useState,
+} from "react";
 
 import { CommentDialog } from "@/components/feedback/comment-dialog";
+import { useMenuSlotBusy } from "@/components/menu/menu-slot-busy";
 import { SlotGeneratingOverlay } from "@/components/menu/slot-generating-overlay";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,6 +51,7 @@ export function SnackSlotCard({
   snack,
   servings = 1,
 }: SnackSlotCardProps) {
+  const { snackBusyLabel, setSnackBusy } = useMenuSlotBusy();
   const [refuseOpen, setRefuseOpen] = useState(false);
   const [resuggestState, resuggestAction, resuggestPending] = useActionState<
     SnackActionState,
@@ -59,11 +66,23 @@ export function SnackSlotCard({
     FormData
   >(refuseSnackAction, null);
 
-  const busy = resuggestPending || suggestPending || refusePending;
-  const generating = busy;
+  const snackLabel = snack?.label ?? "";
+  const acrossMenuPending = resuggestPending || refusePending;
+  const sharedBusyLabel = snackLabel ? snackBusyLabel(snackLabel) : null;
+
+  useLayoutEffect(() => {
+    if (!snackLabel || !acrossMenuPending) return;
+    setSnackBusy(snackLabel, "Заменяем…");
+    return () => setSnackBusy(snackLabel, null);
+  }, [snackLabel, acrossMenuPending, setSnackBusy]);
+
+  const localBusy = resuggestPending || suggestPending || refusePending;
+  const busy = localBusy || Boolean(sharedBusyLabel);
+  const localGenerating = localBusy;
+  const generating = localGenerating || Boolean(sharedBusyLabel);
   const generatingLabel = suggestPending
     ? "Подбираем…"
-    : "Заменяем…";
+    : (sharedBusyLabel ?? "Заменяем…");
   const empty = !snack;
 
   function runAction(
@@ -145,7 +164,9 @@ export function SnackSlotCard({
                     })
                   }
                 >
-                  {resuggestPending ? "Заменяем…" : "Заменить"}
+                  {resuggestPending || sharedBusyLabel
+                    ? "Заменяем…"
+                    : "Заменить"}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   disabled={busy}

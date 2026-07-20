@@ -1,9 +1,15 @@
 "use client";
 
 import { MoreHorizontal } from "lucide-react";
-import { startTransition, useActionState, useState } from "react";
+import {
+  startTransition,
+  useActionState,
+  useLayoutEffect,
+  useState,
+} from "react";
 
 import { CommentDialog } from "@/components/feedback/comment-dialog";
+import { useMenuSlotBusy } from "@/components/menu/menu-slot-busy";
 import { SlotGeneratingOverlay } from "@/components/menu/slot-generating-overlay";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,6 +35,8 @@ type SlotCardActionsProps = {
   menuId: string;
   slotId: string;
   hasRecipe: boolean;
+  /** When set, across-menu replace/modify/refuse animates every card with this dish. */
+  recipeId?: string | null;
   target?: SlotDishTarget;
   /** Show «Убрать» for companion dishes. */
   canClear?: boolean;
@@ -191,10 +199,12 @@ export function SlotCardActions({
   menuId,
   slotId,
   hasRecipe,
+  recipeId = null,
   target = "main",
   canClear = false,
   canAddCompanion = false,
 }: SlotCardActionsProps) {
+  const { recipeBusyLabel, setRecipeBusy } = useMenuSlotBusy();
   const [refuseOpen, setRefuseOpen] = useState(false);
   const [modifyOpen, setModifyOpen] = useState(false);
   const [suggestState, suggestFormAction, suggestPending] = useActionState<
@@ -221,19 +231,39 @@ export function SlotCardActions({
     FormData
   >(clearCompanionAction, null);
 
-  const busy =
+  const acrossMenuPending =
+    resuggestPending || modifyPending || refusePending;
+  const acrossMenuLabel = modifyPending ? "Изменяем…" : "Заменяем…";
+  const sharedBusyLabel = recipeId ? recipeBusyLabel(recipeId) : null;
+
+  useLayoutEffect(() => {
+    if (!recipeId || !acrossMenuPending) return;
+    setRecipeBusy(recipeId, acrossMenuLabel);
+    return () => setRecipeBusy(recipeId, null);
+  }, [recipeId, acrossMenuPending, acrossMenuLabel, setRecipeBusy]);
+
+  const localBusy =
     suggestPending ||
     addCompanionPending ||
     resuggestPending ||
     modifyPending ||
     refusePending ||
     clearPending;
-  const generating =
+  const busy = localBusy || Boolean(sharedBusyLabel);
+  const localGenerating =
     suggestPending ||
     addCompanionPending ||
     resuggestPending ||
     modifyPending ||
     refusePending;
+  const generating = localGenerating || Boolean(sharedBusyLabel);
+  const overlayLabel = localGenerating
+    ? generatingOverlayLabel({
+      suggestPending,
+      addCompanionPending,
+      modifyPending,
+    })
+    : (sharedBusyLabel ?? "Заменяем…");
 
   function runAction(
     action: (payload: FormData) => void,
@@ -255,15 +285,7 @@ export function SlotCardActions({
 
   return (
     <div data-component="slot-actions" data-target={target} className="contents">
-      {generating ? (
-        <SlotGeneratingOverlay
-          label={generatingOverlayLabel({
-            suggestPending,
-            addCompanionPending,
-            modifyPending,
-          })}
-        />
-      ) : null}
+      {generating ? <SlotGeneratingOverlay label={overlayLabel} /> : null}
       <div className="absolute right-2 top-2 z-10">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
