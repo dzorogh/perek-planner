@@ -4,11 +4,7 @@ import {
   type MealSlot,
 } from "@/domain/menu/constants";
 import type { SuggestionCandidate } from "@/domain/suggestions/candidates";
-import {
-  isBreakfastMeal,
-  looksLikeCompanionOnly,
-  looksLikeProteinDish,
-} from "@/domain/suggestions/meal-fit";
+import { isBreakfastMeal } from "@/domain/suggestions/meal-fit";
 import type {
   ProposedAssignment,
   SlotPrompt,
@@ -21,10 +17,11 @@ export type PlateAssignment = ProposedAssignment & {
 };
 
 /**
- * Ensure lunch/dinner/late_dinner plates are never "bare" and never protein-less:
- * - plateKind=complete only if the main itself looks like it has protein
- * - otherwise companion is filled; if main lacks protein, companion must supply it
- * - a recipe must not reappear as companion on a day where it is already used
+ * Apply AI plateKind to lunch/dinner/late_dinner:
+ * - complete → no companion (trust the model; strip accidental companion ids)
+ * - needs_companion → keep AI companion when valid; fill only if missing
+ * - no plateKind and no companion → leave alone (do not invent a side)
+ * Structural only: same-day / breakfast-main reuse for companions.
  * Breakfast-family: companion always cleared.
  */
 export function normalizePlateAssignments(
@@ -34,7 +31,6 @@ export function normalizePlateAssignments(
 ): ProposedAssignment[] {
   const mealBySlot = new Map(slots.map((s) => [s.slotId, s.meal]));
   const dayBySlot = new Map(slots.map((s) => [s.slotId, s.dayIndex]));
-  const nameById = new Map(candidates.map((c) => [c.recipeId, c.name]));
 
   const usedCompanionIds = new Set<string>();
   for (const p of proposals) {
@@ -80,16 +76,7 @@ export function normalizePlateAssignments(
       continue;
     }
 
-    const day = dayBySlot.get(proposal.slotId);
-    const dayUsed = day != null ? (usedOnDay.get(day) ?? new Set()) : new Set();
-    const avoidAsCompanion = new Set<string>([
-      ...breakfastMains,
-      ...dayUsed,
-    ]);
-
-    const mainName = nameById.get(proposal.recipeId) ?? "";
-    const mainHasProtein = looksLikeProteinDish(mainName);
-    const kind = resolvePlateKind(proposal, mainHasProtein);
+    const kind = resolvePlateKind(proposal);
 
     if (kind === "complete") {
       outBySlot.set(proposal.slotId, {
@@ -100,6 +87,13 @@ export function normalizePlateAssignments(
       continue;
     }
 
+    const day = dayBySlot.get(proposal.slotId);
+    const dayUsed = day != null ? (usedOnDay.get(day) ?? new Set()) : new Set();
+    const avoidAsCompanion = new Set<string>([
+      ...breakfastMains,
+      ...dayUsed,
+    ]);
+
     let companion =
       proposal.companionRecipeId &&
         proposal.companionRecipeId !== proposal.recipeId &&
@@ -108,22 +102,12 @@ export function normalizePlateAssignments(
         ? proposal.companionRecipeId
         : null;
 
-    // Veg/carb main + veg/carb side (carrot cutlets + potatoes) is invalid.
-    if (
-      companion &&
-      !mainHasProtein &&
-      !looksLikeProteinDish(nameById.get(companion) ?? "")
-    ) {
-      companion = null;
-    }
-
     if (!companion) {
       companion = pickCompanionCandidate(
         candidates,
         proposal.recipeId,
         usedCompanionIds,
         avoidAsCompanion,
-        { requireProtein: !mainHasProtein },
       );
     }
 
@@ -160,34 +144,26 @@ function mealOrderIndex(meal: MealSlot | undefined): number {
   return idx >= 0 ? idx : 99;
 }
 
-function resolvePlateKind(
-  proposal: PlateAssignment,
-  mainHasProtein: boolean,
-): PlateKind {
-  // Protein-less "complete" (овощные котлеты, картофель alone) is not a meal.
-  if (proposal.plateKind === "complete" && mainHasProtein) return "complete";
+/** Culinary judgment is the model's — code only applies the declared plateKind. */
+function resolvePlateKind(proposal: PlateAssignment): PlateKind {
+  if (proposal.plateKind === "complete") return "complete";
   if (proposal.plateKind === "needs_companion") return "needs_companion";
+  // Explicit companion without plateKind → honor the pairing.
   if (proposal.companionRecipeId) return "needs_companion";
-  return "needs_companion";
+  // No AI signal → do not invent a side dish.
+  return "complete";
 }
 
-export type PickCompanionOptions = {
-  /** When true, prefer (and require when possible) a protein add-on. */
-  requireProtein?: boolean;
-};
-
 /**
- * Prefer side/sauce-looking candidates, then unused ones.
- * When requireProtein, prefer protein dishes and never pick a non-protein side
- * if a protein candidate exists.
- * Never the main recipe itself; avoid breakfast mains / same-day dishes when provided.
+ * Structural fallback when the model asked for a companion but omitted the id.
+ * Prefer unused candidates; never the main; avoid same-day / breakfast mains.
+ * No name-keyword culinary filters — pairing judgment stays with the AI.
  */
 export function pickCompanionCandidate(
   candidates: SuggestionCandidate[],
   mainRecipeId: string,
   alreadyUsed: ReadonlySet<string> = new Set(),
   avoidIds: ReadonlySet<string> = new Set(),
-  options: PickCompanionOptions = {},
 ): string | null {
   const others = candidates.filter(
     (c) => c.recipeId !== mainRecipeId && !avoidIds.has(c.recipeId),
@@ -198,20 +174,8 @@ export function pickCompanionCandidate(
       : candidates.filter((c) => c.recipeId !== mainRecipeId);
   if (pool.length === 0) return null;
 
-  const prefer = (list: SuggestionCandidate[]) => {
-    if (list.length === 0) return null;
-    const unused = list.find((c) => !alreadyUsed.has(c.recipeId));
-    return unused ?? list[0] ?? null;
-  };
-
-  if (options.requireProtein) {
-    const proteins = pool.filter((c) => looksLikeProteinDish(c.name));
-    const picked = prefer(proteins) ?? prefer(pool);
-    return picked?.recipeId ?? null;
-  }
-
-  const sides = pool.filter((c) => looksLikeCompanionOnly(c.name));
-  return (prefer(sides) ?? prefer(pool))!.recipeId;
+  const unused = pool.find((c) => !alreadyUsed.has(c.recipeId));
+  return (unused ?? pool[0])?.recipeId ?? null;
 }
 
 export function parsePlateKind(raw: unknown): PlateKind | null {

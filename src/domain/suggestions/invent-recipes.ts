@@ -9,7 +9,6 @@ import {
 } from "@/domain/suggestions/dish-similarity";
 import {
   isBreakfastMeal,
-  looksLikeCompanionOnly,
   looksLikeLunchDinnerOnlyMain,
   looksLikeNoCookSnack,
   stripHardcodedPairing,
@@ -98,8 +97,8 @@ Rules:
 - When currentMenuDishes is non-empty (slot replace): invent a clearly different form for that meal — do not echo what is already on the menu.
 - Include breakfast-suitable and lunch/dinner recipes as needed by meals. When breakfast is in meals, at least ~1/3 of mains must be true morning food.
 - Breakfast = cooked morning food ONLY (каша, яичница, омлет, сырники, оладьи, творожная запеканка, тосты с яйцом, etc.) with real cooking steps. NEVER invent roast/fried chicken, soups/broths, plov, cutlets, steaks, pasta mains, or other lunch/dinner plates as breakfast — those belong to lunch/dinner only. suitable_meals for a roast chicken must NOT include "breakfast".
-- plate_role=main: a dish that can be the primary item of a meal (including complete one-pot meals like плов). Prefer lunch/dinner mains that already include protein (мясо/птица/рыба/яйца/бобовые). Vegetable cutlets (морковные/капустные/…) are allowed as mains but are NOT complete meals — they need a protein companion later. Breakfast mains must be standalone morning food (каша, яичница, сырники, оладьи, творожная запеканка) — never a sauce, dressing, bare garnish, or dinner main.
-- plate_role=companion: a SIMPLE side (гарнир: крупа, картофель, овощи) OR a simple protein add-on (курица/рыба/яйца/грибы) OR a simple sauce — not a second complex main. At least 30–40% of the batch should be companions when lunch/dinner meals are requested; include several protein add-ons so veg mains can be paired. Sauces/подливы/заправки are ALWAYS companion, never breakfast mains.
+- plate_role=main: a dish that can be the primary item of a meal. Prefer lunch/dinner mains that already include protein (мясо/птица/рыба/яйца/бобовые). Complete one-pots (плов, лазанья, голубцы, пельмени, манты, паста with protein) MUST be plate_role=main — they are full meals and must NOT also be invented as a companion/гарнир for themselves. Vegetable cutlets (морковные/капустные/…) are allowed as mains but are NOT complete meals — the assign step will pair a protein companion. Breakfast mains must be standalone morning food (каша, яичница, сырники, оладьи, творожная запеканка) — never a sauce, dressing, bare garnish, or dinner main.
+- plate_role=companion: a SIMPLE side (гарнир: крупа, картофель, овощи) OR a simple protein add-on (курица/рыба/яйца/грибы) OR a simple sauce — not a second complex main and NEVER a one-pot like плов. At least 30–40% of the batch should be companions when lunch/dinner meals are requested; include several protein add-ons so veg mains can be paired. Sauces/подливы/заправки are ALWAYS companion, never breakfast mains.
 - Name companions by the dish itself («Грибной соус», «Картофельное пюре»). NEVER hardcode a pairing in the name («к пасте», «к мясу», «под курицу») — the app pairs companions with mains later.
 - NEVER invent snacks / перекусы / no-cook ready-to-eat plates. Snacks are generated in a separate pipeline and must not appear as recipes. Do not use the word «перекус» in a recipe name.
 - body_text: SHORT cooking steps in Russian. EACH step on its OWN line, numbered "1. ", "2. ", etc. Separate steps with \\n. Main: 3–5 short steps. Companion: 2–4 short steps. Include time/heat briefly where useful. Every recipe must require cooking or heating — not just plating. Be concise — no long paragraphs.
@@ -418,9 +417,7 @@ export function parseInventRecipesJson(content: string): InventRecipeDraft[] {
 
     const roleRaw = row.plate_role ?? row.plateRole;
     const plateRole: InventPlateRole =
-      roleRaw === "companion" || looksLikeCompanionOnly(name)
-        ? "companion"
-        : "main";
+      roleRaw === "companion" ? "companion" : "main";
 
     const priceCentsPerServing = inventPriceToKopecks(row);
 

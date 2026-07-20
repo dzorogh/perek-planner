@@ -271,46 +271,16 @@ function isBreakfastMeal(meal) {
   return meal === "breakfast" || meal === "second_breakfast";
 }
 
-function looksLikeProteinDish(name) {
-  const n = normalizeDishName(name);
-  if (!n) return false;
-  if (
-    /(^|\s)(морковн|капустн|картофельн|овощн|свекольн|кабачков|тыквенн|баклажанн|рисов)[а-я]*\s+котлет/.test(
-      n,
-    ) ||
-    /(^|\s)котлет[а-я]*\s+из\s+(морков|капуст|картофел|овощ|свекл|кабачк|тыкв|баклажан|риса)/.test(
-      n,
-    )
-  ) {
-    return false;
-  }
-  if (
-    /(^|\s)(мяс|говяд|свинин|барани|телятин|куриц|курин|индейк|утин|утка|гусин|грудк|окороч|филе|фарш|стейк|шашлык|гуляш|бефстроган|люля|тефтел|фрикадель|зразы|отбивн|шницел|бифштекс|колбас|сосиск|ветчин|бекон|печень|печенк|язык)/.test(
-      n,
-    )
-  ) {
-    return true;
-  }
-  if (
-    /(^|\s)(рыб|лосос|форел|треск|минтай|хек|скумбр|сельд|тунец|креветк|кальмар|миди)/.test(
-      n,
-    )
-  ) {
-    return true;
-  }
-  if (/(^|\s)(яйц|яичниц|омлет)/.test(n)) return true;
-  if (/(^|\s)(творог|сырник)/.test(n)) return true;
-  if (/(^|\s)(фасол|чечевиц|нут|горохов)/.test(n)) return true;
-  if (/(^|\s)гриб/.test(n)) return true;
-  if (/(^|\s)котлет/.test(n)) return true;
-  if (/(^|\s)(плов|лазань|гуляш)/.test(n)) return true;
-  return false;
+function resolvePlateKind(proposal) {
+  if (proposal.plateKind === "complete") return "complete";
+  if (proposal.plateKind === "needs_companion") return "needs_companion";
+  if (proposal.companionRecipeId) return "needs_companion";
+  return "complete";
 }
 
 function normalizePlateAssignments(slots, proposals, candidates) {
   const mealBySlot = new Map(slots.map((s) => [s.slotId, s.meal]));
   const dayBySlot = new Map(slots.map((s) => [s.slotId, s.dayIndex]));
-  const nameById = new Map(candidates.map((c) => [c.recipeId, c.name]));
   const used = new Set();
   for (const p of proposals) {
     if (p.companionRecipeId) used.add(p.companionRecipeId);
@@ -348,13 +318,8 @@ function normalizePlateAssignments(slots, proposals, candidates) {
       });
       continue;
     }
-    const day = dayBySlot.get(proposal.slotId);
-    const dayUsed = day != null ? (usedOnDay.get(day) ?? new Set()) : new Set();
-    const avoidAsCompanion = new Set([...breakfastMains, ...dayUsed]);
-    const mainHasProtein = looksLikeProteinDish(
-      nameById.get(proposal.recipeId) ?? "",
-    );
-    if (proposal.plateKind === "complete" && mainHasProtein) {
+    const kind = resolvePlateKind(proposal);
+    if (kind === "complete") {
       outBySlot.set(proposal.slotId, {
         slotId: proposal.slotId,
         recipeId: proposal.recipeId,
@@ -362,6 +327,9 @@ function normalizePlateAssignments(slots, proposals, candidates) {
       });
       continue;
     }
+    const day = dayBySlot.get(proposal.slotId);
+    const dayUsed = day != null ? (usedOnDay.get(day) ?? new Set()) : new Set();
+    const avoidAsCompanion = new Set([...breakfastMains, ...dayUsed]);
     let companion =
       proposal.companionRecipeId &&
       proposal.companionRecipeId !== proposal.recipeId &&
@@ -369,20 +337,12 @@ function normalizePlateAssignments(slots, proposals, candidates) {
       candidates.some((c) => c.recipeId === proposal.companionRecipeId)
         ? proposal.companionRecipeId
         : null;
-    if (
-      companion &&
-      !mainHasProtein &&
-      !looksLikeProteinDish(nameById.get(companion) ?? "")
-    ) {
-      companion = null;
-    }
     if (!companion) {
       companion = pickCompanionCandidate(
         candidates,
         proposal.recipeId,
         used,
         avoidAsCompanion,
-        { requireProtein: !mainHasProtein },
       );
     }
     if (companion) {
@@ -421,57 +381,51 @@ const plateCands = [
 const filledBare = normalizePlateAssignments(
   plateSlots,
   [
-    { slotId: "s1", recipeId: "main-a", companionRecipeId: null },
+    {
+      slotId: "s1",
+      recipeId: "main-a",
+      companionRecipeId: null,
+      plateKind: "needs_companion",
+    },
     {
       slotId: "s2",
       recipeId: "plov",
-      companionRecipeId: null,
+      companionRecipeId: "side-a",
       plateKind: "complete",
     },
   ],
   plateCands,
 );
 check(
-  "normalize fills bare lunch with companion",
+  "normalize fills needs_companion lunch when AI omitted companion id",
   filledBare.find((a) => a.slotId === "s1")?.companionRecipeId === "side-a",
 );
 check(
-  "normalize keeps complete dinner without companion",
+  "normalize trusts plateKind=complete and strips companion",
   filledBare.find((a) => a.slotId === "s2")?.companionRecipeId == null,
 );
-
 check(
-  "protein: vegetable cutlets are not protein",
-  !looksLikeProteinDish("Морковные котлеты с горошком"),
+  "normalize does not invent companion without AI plateKind/companion",
+  normalizePlateAssignments(
+    [{ slotId: "d1", dayIndex: 1, meal: "dinner" }],
+    [{ slotId: "d1", recipeId: "plov", companionRecipeId: null }],
+    plateCands,
+  ).find((a) => a.slotId === "d1")?.companionRecipeId == null,
 );
 check(
-  "protein: chicken is protein",
-  looksLikeProteinDish("Запечённая куриная грудка с лимоном"),
-);
-check(
-  "protein: potatoes are not protein",
-  !looksLikeProteinDish("Картофель с укропом"),
-);
-
-const proteinPlate = normalizePlateAssignments(
-  [{ slotId: "d1", dayIndex: 1, meal: "dinner" }],
-  [
-    {
-      slotId: "d1",
-      recipeId: "carrot",
-      companionRecipeId: "potato",
-      plateKind: "needs_companion",
-    },
-  ],
-  [
-    { recipeId: "carrot", name: "Морковные котлеты с горошком" },
-    { recipeId: "potato", name: "Картофель с укропом" },
-    { recipeId: "chicken", name: "Куриная грудка" },
-  ],
-);
-check(
-  "normalize replaces veg+potato with protein companion",
-  proteinPlate.find((a) => a.slotId === "d1")?.companionRecipeId === "chicken",
+  "normalize honors AI needs_companion pairing (no keyword override)",
+  normalizePlateAssignments(
+    [{ slotId: "d3", dayIndex: 3, meal: "dinner" }],
+    [
+      {
+        slotId: "d3",
+        recipeId: "plov",
+        companionRecipeId: "side-a",
+        plateKind: "needs_companion",
+      },
+    ],
+    plateCands,
+  ).find((a) => a.slotId === "d3")?.companionRecipeId === "side-a",
 );
 
 function groupSlotsByMeal(slots) {
@@ -824,7 +778,6 @@ function pickCompanionCandidate(
   mainRecipeId,
   alreadyUsed = new Set(),
   avoidIds = new Set(),
-  options = {},
 ) {
   const others = candidates.filter(
     (c) => c.recipeId !== mainRecipeId && !avoidIds.has(c.recipeId),
@@ -834,17 +787,8 @@ function pickCompanionCandidate(
       ? others
       : candidates.filter((c) => c.recipeId !== mainRecipeId);
   if (pool.length === 0) return null;
-  const prefer = (list) => {
-    if (list.length === 0) return null;
-    const unused = list.find((c) => !alreadyUsed.has(c.recipeId));
-    return unused ?? list[0] ?? null;
-  };
-  if (options.requireProtein) {
-    const proteins = pool.filter((c) => looksLikeProteinDish(c.name));
-    return (prefer(proteins) ?? prefer(pool))?.recipeId ?? null;
-  }
-  const sides = pool.filter((c) => looksLikeCompanionOnly(c.name));
-  return (prefer(sides) ?? prefer(pool))?.recipeId ?? null;
+  const unused = pool.find((c) => !alreadyUsed.has(c.recipeId));
+  return (unused ?? pool[0])?.recipeId ?? null;
 }
 
 function assignWithBatchVariety(slots, candidates) {
@@ -1207,14 +1151,18 @@ check(
     mixSlots,
     mains.map((p) =>
       p.slotId === "l1"
-        ? { ...p, plateKind: "needs_companion", companionRecipeId: null }
+        ? {
+            ...p,
+            plateKind: "needs_companion",
+            companionRecipeId: "sauce",
+          }
         : p,
     ),
     mixCands,
   );
   const lunchCompanion = plated.find((a) => a.slotId === "l1")?.companionRecipeId;
   check(
-    "normalize prefers sauce as lunch companion, not breakfast main",
+    "normalize keeps AI sauce companion and clears breakfast companion",
     lunchCompanion === "sauce" &&
       plated.find((a) => a.slotId === "b1")?.companionRecipeId == null,
   );

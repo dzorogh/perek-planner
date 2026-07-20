@@ -199,11 +199,11 @@ export function enforceDayVariety(
         !hasDuplicateDayMenus(slots, fallback) &&
         !hasSameDayMainReuse(slots, fallback)
       ) {
-        // Needs normalizePlateAssignments afterward to attach companions.
+        // Mains only — plate pairing stays with the AI assign step.
         return fallback.map((p) => ({
           ...p,
           companionRecipeId: null,
-          plateKind: "needs_companion" as const,
+          plateKind: "complete" as const,
         }));
       }
     }
@@ -218,7 +218,7 @@ export function enforceDayVariety(
       companion && companion !== p.recipeId ? companion : null;
     const plateKind = mainUnchanged
       ? (plateKinds.get(p.slotId) ?? null)
-      : ("needs_companion" as const);
+      : ("complete" as const);
     return { ...p, companionRecipeId, plateKind };
   });
 }

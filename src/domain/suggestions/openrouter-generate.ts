@@ -51,14 +51,24 @@ Hard rules when dayCount >= 2 and candidates allow:
 - Avoid rebuilding previousMenusDishes — consecutive menus must not feel identical.
 - Breakfast / second_breakfast / afternoon_snack: choose cooked morning dishes ONLY (каша, яичница, омлет, сырники, оладьи, творожная запеканка). Never assign roast/fried chicken, soups, plov, cutlets, steaks, pasta mains, or other lunch/dinner plates to breakfast. Never assign snacks / перекусы / no-cook ready-to-eat plates to cookable slots. Never assign sauces, dressings, or bare garnishes as breakfast mains. Never set companionRecipeId or plateKind for these meals.
 
-For lunch, dinner, late_dinner EVERY assignment MUST include plateKind:
+For lunch, dinner, late_dinner YOU alone judge the plate. EVERY assignment MUST include plateKind.
+Code does not classify dishes by keywords — your plateKind is authoritative.
+
 - HARD RULE: every lunch/dinner plate MUST include a real protein (мясо/птица/рыба/яйца/бобовые/грибы as add-on). Never serve two carb/veg dishes together (e.g. морковные котлеты + картофель, капустные котлеты + гречка).
-- plateKind="complete": a full one-pot / self-contained plate that ALREADY contains protein (плов, лазанья, паста with protein, запеканка with protein+veg, рагу with meat+grain/veg). Omit companionRecipeId. Vegetable cutlets / plain potato / plain grain alone are NEVER complete.
+
+- plateKind="complete": the main is already a full meal by itself. Omit companionRecipeId entirely.
+  Use complete when the dish already combines protein with its carb/veg (or is a stuffed/dumpling/pasta one-pot).
+  Textbook examples: плов (rice is inside — NEVER add картофель/рис/гречка), лазанья, голубцы, пельмени, манты, паста with protein, рагу/жаркое that already has meat+veg/grain, hearty soup as the whole dinner.
+  Wrong: плов + картофельные дольки. Wrong: лазанья + рис. Wrong: пельмени + гречка.
+
 - plateKind="needs_companion": the main alone is NOT a full meal — you MUST also set companionRecipeId.
-  Examples that NEED a companion: котлеты, зразы, отбивные, куриное/рыбное филе or грудка (even with marinade/spices), жареная курица without a side, овощное соте, vegetable cutlets, «голый» стейк.
-  Companion = simple гарнир (крупа/картофель/овощи) if the main already has protein; OR simple protein add-on (курица/рыба/яйца/грибы) if the main is veg/carb-only. Never a second complex main. Never a second non-protein side when the main lacks protein.
+  Examples: котлеты, зразы, отбивные, куриное/рыбное филе or грудка (even with marinade/spices), жареная курица without a side, овощное соте, vegetable cutlets, «голый» стейк.
+  Companion = simple гарнир (крупа/картофель/овощи) if the main already has protein; OR simple protein add-on (курица/рыба/яйца/грибы) if the main is veg/carb-only.
+  Never a second complex main. Never a second non-protein side when the main lacks protein.
   Prefer pairing a sauce/side with a main that needs it; do not reuse a breakfast main as a lunch/dinner companion.
-- NEVER leave lunch/dinner as a bare simple main without companion. NEVER assign a companion-only plate as recipeId with empty main.
+
+- NEVER mark a self-contained one-pot as needs_companion. NEVER leave a needs_companion slot without companionRecipeId.
+- NEVER assign a companion-only plate as recipeId.
 - companionRecipeId must differ from recipeId and must come from the candidate list.
 
 You MUST only use recipe ids from the provided candidate list.
@@ -99,7 +109,7 @@ export async function proposeAssignmentsViaOpenRouter(
 
   const userContent = JSON.stringify({
     instruction:
-      "Fill meal slots. Prefer freshlyInvented=true, then recentlyUsed=false. Honor operatorTasteNotes. Batch across days (>=50% multi-day reuse of the *exact same* recipe id) without cloning full day signatures. HARD variety: never assign a different recipe that is a culinary near-variant of currentMenuDishes or of another distinct recipe already used in this plan (topping swaps forbidden: творожная запеканка с ягодами ≈ с изюмом; оладьи≈панкейки). When currentMenuDishes is set (slot replace), pick a clearly different form. Never reuse the same recipe twice within one calendar day (main or companion; no lunch/dinner swaps of the same pair). Breakfast-family: cooked dishes only, no plateKind/companion. For lunch/dinner/late_dinner: ALWAYS set plateKind and ALWAYS include protein on the plate (in main or companion). If main is veg/carb-only (морковные котлеты, картофель, овощное соте), companion MUST be protein — never another side. If plateKind=needs_companion set companionRecipeId. If plateKind=complete omit companion (only when main already has protein). Marinated/spiced fillet or cutlets alone are needs_companion — not complete.",
+      "Fill meal slots. Prefer freshlyInvented=true, then recentlyUsed=false. Honor operatorTasteNotes. Batch across days (>=50% multi-day reuse of the *exact same* recipe id) without cloning full day signatures. HARD variety: never assign a different recipe that is a culinary near-variant of currentMenuDishes or of another distinct recipe already used in this plan (topping swaps forbidden: творожная запеканка с ягодами ≈ с изюмом; оладьи≈панкейки). When currentMenuDishes is set (slot replace), pick a clearly different form. Never reuse the same recipe twice within one calendar day (main or companion; no lunch/dinner swaps of the same pair). Breakfast-family: cooked dishes only, no plateKind/companion. For lunch/dinner/late_dinner: YOU judge plateKind — code trusts it. ALWAYS set plateKind. ALWAYS include protein on the plate (in main or companion). plateKind=complete → omit companion (плов/лазанья/голубцы/пельмени and other self-contained one-pots — NEVER add a гарнир). plateKind=needs_companion → MUST set companionRecipeId (котлеты/филе/стейк need a side; veg/carb-only mains need a protein companion, never another side). Wrong example to avoid: плов + картофельные дольки.",
     slots: slotPayload,
     candidates: candidatePayload,
     previousMenusDishes: previousMenusDishes.slice(0, 60),
@@ -203,7 +213,7 @@ function extractJsonObject(text: string): string {
 
 /**
  * Deterministic batch fill when LLM returns nothing usable but candidates exist.
- * Companion meals get a second candidate as companion when possible.
+ * Leaves companions empty — plate pairing is AI-owned; do not invent sides in code.
  */
 export function deterministicAssignments(
   slots: SlotPrompt[],
@@ -215,7 +225,7 @@ export function deterministicAssignments(
     plateKind: mealAllowsCompanion(
       slots.find((s) => s.slotId === p.slotId)?.meal ?? "breakfast",
     )
-      ? ("needs_companion" as const)
+      ? ("complete" as const)
       : null,
   }));
   return normalizePlateAssignments(slots, base, candidates);

@@ -672,7 +672,7 @@ async function replaceRecipeIdAcrossMenu(
   let chosenPlateKind: ProposedAssignment["plateKind"] = mealAllowsCompanion(
     contextMeal,
   )
-    ? "needs_companion"
+    ? "complete"
     : null;
 
   if (asMain.length > 0) {
