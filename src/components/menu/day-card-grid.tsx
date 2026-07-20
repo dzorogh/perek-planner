@@ -2,7 +2,12 @@ import { SlotCardActions } from "@/components/menu/slot-card-actions";
 import { SnackSlotCard } from "@/components/menu/snack-slot-card";
 import { RecipeTextPanel } from "@/components/recipes/recipe-text-panel";
 import { RecipeValueLine } from "@/components/recipes/recipe-value-line";
-import { MEAL_LABELS_RU, MEAL_SLOTS, type MealSlot } from "@/domain/menu/constants";
+import {
+  MEAL_LABELS_RU,
+  MEAL_SLOTS,
+  mealAllowsCompanion,
+  type MealSlot,
+} from "@/domain/menu/constants";
 import type { MenuSlotView, MenuSnackView } from "@/domain/menu/load-menu";
 import {
   recipeBatchScale,
@@ -30,6 +35,7 @@ function DishLine({
   batch,
   target,
   canClear,
+  canAddCompanion,
 }: {
   menuId: string;
   slotId: string;
@@ -42,6 +48,7 @@ function DishLine({
   batch: RecipeBatchScale;
   target: "main" | "companion";
   canClear?: boolean;
+  canAddCompanion?: boolean;
 }) {
   return (
     <div
@@ -69,6 +76,7 @@ function DishLine({
         hasRecipe
         target={target}
         canClear={canClear}
+        canAddCompanion={canAddCompanion}
       />
     </div>
   );
@@ -117,6 +125,9 @@ function SlotCell({
           slotServings={slot.servings}
           batch={recipeBatchScale(allSlots, slot.recipeId)}
           target="main"
+          canAddCompanion={
+            mealAllowsCompanion(slot.meal) && !slot.companionRecipeId
+          }
         />
       ) : null}
       {slot.companionRecipeId ? (

@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dish dialog header options · Keplo</title>
+<style>
+  /* Soft Workshop tokens from DESIGN.md — layout options only; spines win */
+  :root {
+    --bg: #EEF2FF;
+    --surface: #FFFFFF;
+    --fg: #1E293B;
+    --muted: #64748B;
+    --primary: #4338CA;
+    --accent: #312E81;
+    --border: #E0E7FF;
+    --empty: #F8FAFC;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.45;
+    padding: 28px 32px 56px;
+  }
+  h1.doc {
+    font-size: 22px; font-weight: 700; color: var(--accent);
+    letter-spacing: -0.02em;
+  }
+  .lede { margin: 8px 0 24px; color: var(--muted); font-size: 14px; max-width: 760px; }
+  .rules {
+    margin-bottom: 28px; padding: 12px 14px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 12px; font-size: 13px; color: var(--muted);
+    max-width: 760px;
+  }
+  .rules strong { color: var(--fg); font-weight: 600; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(280px, 1fr));
+    gap: 22px;
+    max-width: 980px;
+  }
+  @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+
+  .card-wrap { display: flex; flex-direction: column; gap: 8px; }
+  .code {
+    font-size: 12px; font-weight: 700; color: var(--primary);
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .caption { font-size: 13px; color: var(--muted); max-width: 420px; }
+
+  .dialog {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: 0 16px 40px rgba(49, 46, 129, 0.1);
+    padding: 20px 20px 18px;
+    position: relative;
+    max-width: 420px;
+  }
+  .close {
+    position: absolute; top: 14px; right: 14px;
+    width: 28px; height: 28px; border-radius: 9999px;
+    border: 1.5px solid #A5B4FC; color: #6366F1;
+    display: grid; place-items: center; font-size: 14px; line-height: 1;
+  }
+  .title {
+    font-size: 18px; font-weight: 700; color: var(--accent);
+    letter-spacing: -0.02em; line-height: 1.25;
+    padding-right: 36px; margin-bottom: 10px;
+  }
+  .section-label {
+    margin-top: 16px; margin-bottom: 8px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--accent);
+  }
+  .ing { font-size: 13px; color: var(--muted); }
+  .ing li { margin: 4px 0; list-style: none; }
+  .ing li::before { content: "• "; color: var(--muted); }
+  .fade {
+    margin-top: 8px; height: 28px;
+    background: linear-gradient(180deg, transparent, var(--surface));
+    color: var(--muted); font-size: 12px; padding-top: 6px;
+  }
+
+  /* Shared demoted value block */
+  .value-secondary {
+    margin-top: 14px; padding-top: 12px;
+    border-top: 1px solid var(--border);
+    font-size: 12px; color: var(--muted); tabular-nums: true;
+    font-variant-numeric: tabular-nums;
+  }
+  .value-secondary .row { display: flex; gap: 16px; flex-wrap: wrap; }
+  .value-secondary .k { font-weight: 600; color: var(--fg); margin-right: 4px; }
+
+  /* A — compact single line */
+  .A-meta {
+    font-size: 13px; color: var(--muted);
+  }
+
+  /* B — two soft chips */
+  .B-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip {
+    display: inline-flex; align-items: baseline; gap: 6px;
+    padding: 6px 10px; border-radius: 10px;
+    background: var(--empty); border: 1px solid var(--border);
+    font-size: 13px; color: var(--fg);
+  }
+  .chip .n { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .chip .l { color: var(--muted); font-size: 12px; }
+
+  /* C — number-forward stats */
+  .C-stats { display: flex; gap: 20px; }
+  .stat .n {
+    font-size: 22px; font-weight: 700; color: var(--accent);
+    letter-spacing: -0.03em; font-variant-numeric: tabular-nums; line-height: 1.1;
+  }
+  .stat .l { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  /* D — chips + value tucked as tiny caption under chips (still demoted vs before) */
+  .D-caption {
+    margin-top: 8px; font-size: 12px; color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+</style>
+</head>
+<body>
+  <h1 class="doc">Шапка диалога блюда — варианты</h1>
+  <p class="lede">
+    Общие правила из intake: первый кадр = порции + дни → быстрее до ингредиентов.
+    Цена и КБЖУ остаются, но вторично (не герой шапки). «Люди» в первом кадре не обязательны.
+  </p>
+  <div class="rules">
+    <strong>Выбери код визуала yield (A–D).</strong>
+    Отдельно скажи, куда цена/КБЖУ: <strong>под ингредиентами</strong> (как в A–C)
+    или <strong>тонкой строкой сразу под meta</strong> (как в D).
+  </div>
+
+  <div class="grid">
+    <!-- A -->
+    <div class="card-wrap">
+      <div class="code">A · Одна строка</div>
+      <p class="caption">Минимум хрома. «4 порции · 2 дня» — как сейчас по смыслу, без людей и без цены в шапке.</p>
+      <div class="dialog">
+        <div class="close" aria-hidden="true">×</div>
+        <div class="title">Картофельные дольки с розмарином</div>
+        <p class="A-meta">4 порции · 2 дня</p>
+        <div class="section-label">Ингредиенты</div>
+        <ul class="ing">
+          <li>Картофель — 1200 г</li>
+          <li>Розмарин — 8 г</li>
+          <li>Оливковое масло — 40 мл</li>
+        </ul>
+        <div class="value-secondary">
+          <div class="row">
+            <span><span class="k">600 ₽</span> на 4</span>
+            <span><span class="k">1000 ккал</span> · Б 16 · Ж 40 · У 160</span>
+          </div>
+        </div>
+        <div class="fade">… способ приготовления</div>
+      </div>
+    </div>
+
+    <!-- B -->
+    <div class="card-wrap">
+      <div class="code">B · Два чипа</div>
+      <p class="caption">Порции и дни читаются как два равных факта — меньше «кривой» длинной строки.</p>
+      <div class="dialog">
+        <div class="close" aria-hidden="true">×</div>
+        <div class="title">Картофельные дольки с розмарином</div>
+        <div class="B-chips">
+          <span class="chip"><span class="n">4</span><span class="l">порции</span></span>
+          <span class="chip"><span class="n">2</span><span class="l">дня</span></span>
+        </div>
+        <div class="section-label">Ингредиенты</div>
+        <ul class="ing">
+          <li>Картофель — 1200 г</li>
+          <li>Розмарин — 8 г</li>
+          <li>Оливковое масло — 40 мл</li>
+        </ul>
+        <div class="value-secondary">
+          <div class="row">
+            <span><span class="k">600 ₽</span> на 4</span>
+            <span><span class="k">1000 ккал</span> · Б 16 · Ж 40 · У 160</span>
+          </div>
+        </div>
+        <div class="fade">… способ приготовления</div>
+      </div>
+    </div>
+
+    <!-- C -->
+    <div class="card-wrap">
+      <div class="code">C · Крупные цифры</div>
+      <p class="caption">Числа — герой meta. Подходит, если при открытии важнее масштаб партии, чем формулировка.</p>
+      <div class="dialog">
+        <div class="close" aria-hidden="true">×</div>
+        <div class="title">Картофельные дольки с розмарином</div>
+        <div class="C-stats">
+          <div class="stat"><div class="n">4</div><div class="l">порции</div></div>
+          <div class="stat"><div class="n">2</div><div class="l">дня</div></div>
+        </div>
+        <div class="section-label">Ингредиенты</div>
+        <ul class="ing">
+          <li>Картофель — 1200 г</li>
+          <li>Розмарин — 8 г</li>
+          <li>Оливковое масло — 40 мл</li>
+        </ul>
+        <div class="value-secondary">
+          <div class="row">
+            <span><span class="k">600 ₽</span> на 4</span>
+            <span><span class="k">1000 ккал</span> · Б 16 · Ж 40 · У 160</span>
+          </div>
+        </div>
+        <div class="fade">… способ приготовления</div>
+      </div>
+    </div>
+
+    <!-- D -->
+    <div class="card-wrap">
+      <div class="code">D · Чипы + цена у meta</div>
+      <p class="caption">Тот же визуал, что B, но цена/КБЖУ — тихая строка сразу под чипами (всё ещё не секция «КБЖУ»). Ингредиенты чуть ниже.</p>
+      <div class="dialog">
+        <div class="close" aria-hidden="true">×</div>
+        <div class="title">Картофельные дольки с розмарином</div>
+        <div class="B-chips">
+          <span class="chip"><span class="n">4</span><span class="l">порции</span></span>
+          <span class="chip"><span class="n">2</span><span class="l">дня</span></span>
+        </div>
+        <p class="D-caption">600 ₽ на 4 · 1000 ккал · Б 16 · Ж 40 · У 160</p>
+        <div class="section-label">Ингредиенты</div>
+        <ul class="ing">
+          <li>Картофель — 1200 г</li>
+          <li>Розмарин — 8 г</li>
+          <li>Оливковое масло — 40 мл</li>
+        </ul>
+        <div class="fade">… способ приготовления</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

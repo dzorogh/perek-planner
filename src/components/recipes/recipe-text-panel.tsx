@@ -9,7 +9,8 @@ import {
 } from "@/components/ui/dialog";
 import { RecipeValueDetail } from "@/components/recipes/recipe-value-line";
 import {
-  formatRecipeYieldLabel,
+  dayUnitWord,
+  portionUnitWord,
   splitRecipeSteps,
 } from "@/domain/recipes/format-body";
 import type { RecipeIngredientView } from "@/domain/recipes/load-recipe";
@@ -30,9 +31,9 @@ type RecipeTextPanelProps = {
    * (people × meal occurrences / days). Defaults to 1.
    */
   totalServings?: number;
-  /** People per meal; used in the yield subtitle. */
+  /** Kept for callers; yield chips show portions + days only. */
   peoplePerMeal?: number;
-  /** Distinct days this recipe appears; used in the yield subtitle. */
+  /** Distinct days this recipe appears; used in the yield chips. */
   dayCount?: number;
   triggerClassName?: string;
 };
@@ -43,7 +44,6 @@ export function RecipeTextPanel({
   ingredients = [],
   value = EMPTY_PER_SERVING,
   totalServings = 1,
-  peoplePerMeal = 1,
   dayCount = 1,
   triggerClassName,
 }: RecipeTextPanelProps) {
@@ -52,10 +52,6 @@ export function RecipeTextPanel({
   const portionCount =
     Number.isFinite(totalServings) && totalServings >= 1
       ? Math.trunc(totalServings)
-      : 1;
-  const people =
-    Number.isFinite(peoplePerMeal) && peoplePerMeal >= 1
-      ? Math.trunc(peoplePerMeal)
       : 1;
   const days =
     Number.isFinite(dayCount) && dayCount >= 1 ? Math.trunc(dayCount) : 1;
@@ -78,16 +74,27 @@ export function RecipeTextPanel({
         data-component="recipe-text-panel"
         className="w-[min(100%,32rem)]"
       >
-        <DialogHeader>
+        <DialogHeader className="space-y-2.5">
           <DialogTitle>{recipeName}</DialogTitle>
-          <p className="text-sm text-muted-foreground">
-            {formatRecipeYieldLabel({
-              totalServings: portionCount,
-              peoplePerMeal: people,
-              dayCount: days,
-            })}
-          </p>
-          <RecipeValueDetail value={value} totalServings={portionCount} />
+          <div
+            className="flex flex-wrap gap-2"
+            aria-label="Выход"
+            data-component="recipe-yield-chips"
+          >
+            <span className="inline-flex items-baseline gap-1.5 rounded-[10px] border border-border bg-empty-slot px-2.5 py-1.5 text-sm text-foreground">
+              <span className="font-semibold tabular-nums">{portionCount}</span>
+              <span className="text-xs text-muted-foreground">
+                {portionUnitWord(portionCount)}
+              </span>
+            </span>
+            <span className="inline-flex items-baseline gap-1.5 rounded-[10px] border border-border bg-empty-slot px-2.5 py-1.5 text-sm text-foreground">
+              <span className="font-semibold tabular-nums">{days}</span>
+              <span className="text-xs text-muted-foreground">
+                {dayUnitWord(days)}
+              </span>
+            </span>
+          </div>
+          <RecipeValueDetail value={value} />
         </DialogHeader>
 
         <div className="max-h-[60vh] space-y-5 overflow-y-auto text-sm leading-relaxed text-foreground">

@@ -1,6 +1,7 @@
 import {
   formatCompactValueLine,
   formatKbjuLine,
+  formatPerServingDetailLine,
   formatPriceRub,
   scalePerServing,
   type RecipePerServingValue,
@@ -28,48 +29,14 @@ export function RecipeValueLine({
 
 type RecipeValueDetailProps = {
   value: RecipePerServingValue;
-  totalServings: number;
 };
 
-/** Yield-adjacent detail: per-serving + batch price/KBJU. */
-export function RecipeValueDetail({
-  value,
-  totalServings,
-}: RecipeValueDetailProps) {
-  const perServing = scalePerServing(value, 1);
-  const batch = scalePerServing(value, totalServings);
-  const pricePer = formatPriceRub(perServing.priceCents);
-  const priceBatch = formatPriceRub(batch.priceCents);
-  const kbjuPer = formatKbjuLine(perServing);
-  const kbjuBatch = formatKbjuLine(batch);
-
-  let priceLine: string | null = null;
-  if (pricePer) {
-    priceLine = `${pricePer} на порцию`;
-    if (priceBatch && totalServings > 1) {
-      priceLine = `${priceLine} · ${priceBatch} на ${totalServings}`;
-    }
-  }
-
-  if (!priceLine && !kbjuPer) return null;
-
+/** Quiet per-serving price + KBJU under dish-dialog yield chips. */
+export function RecipeValueDetail({ value }: RecipeValueDetailProps) {
+  const line = formatPerServingDetailLine(value);
+  if (!line) return null;
   return (
-    <div className="space-y-1 text-sm text-muted-foreground">
-      {priceLine ? <p className="tabular-nums">{priceLine}</p> : null}
-      {kbjuPer ? (
-        <div>
-          <p className="mb-1 text-xs font-semibold uppercase tracking-[0.04em] text-accent">
-            КБЖУ
-          </p>
-          <p className="tabular-nums">
-            {kbjuPer}
-            {kbjuBatch && totalServings > 1
-              ? ` · на ${totalServings}: ${kbjuBatch}`
-              : ""}
-          </p>
-        </div>
-      ) : null}
-    </div>
+    <p className="text-xs tabular-nums text-muted-foreground">{line}</p>
   );
 }
 

@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Value line under D · Keplo</title>
+<style>
+  :root {
+    --bg: #EEF2FF;
+    --surface: #FFFFFF;
+    --fg: #1E293B;
+    --muted: #64748B;
+    --primary: #4338CA;
+    --accent: #312E81;
+    --border: #E0E7FF;
+    --empty: #F8FAFC;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.45;
+    padding: 28px 32px 56px;
+  }
+  h1.doc {
+    font-size: 22px; font-weight: 700; color: var(--accent);
+    letter-spacing: -0.02em;
+  }
+  .lede { margin: 8px 0 24px; color: var(--muted); font-size: 14px; max-width: 720px; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(280px, 1fr));
+    gap: 22px;
+    max-width: 980px;
+  }
+  @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+
+  .card-wrap { display: flex; flex-direction: column; gap: 8px; }
+  .code {
+    font-size: 12px; font-weight: 700; color: var(--primary);
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .caption { font-size: 13px; color: var(--muted); max-width: 420px; }
+
+  .dialog {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: 0 16px 40px rgba(49, 46, 129, 0.1);
+    padding: 20px;
+    position: relative;
+    max-width: 420px;
+  }
+  .close {
+    position: absolute; top: 14px; right: 14px;
+    width: 28px; height: 28px; border-radius: 9999px;
+    border: 1.5px solid #A5B4FC; color: #6366F1;
+    display: grid; place-items: center; font-size: 14px;
+  }
+  .title {
+    font-size: 18px; font-weight: 700; color: var(--accent);
+    letter-spacing: -0.02em; line-height: 1.25;
+    padding-right: 36px; margin-bottom: 10px;
+  }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .chip {
+    display: inline-flex; align-items: baseline; gap: 6px;
+    padding: 6px 10px; border-radius: 10px;
+    background: var(--empty); border: 1px solid var(--border);
+    font-size: 13px; color: var(--fg);
+  }
+  .chip .n { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .chip .l { color: var(--muted); font-size: 12px; }
+
+  .section-label {
+    margin-top: 14px; margin-bottom: 8px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--accent);
+  }
+  .ing { font-size: 13px; color: var(--muted); }
+  .ing li { margin: 4px 0; list-style: none; }
+  .ing li::before { content: "• "; }
+
+  .v { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; }
+  .v strong { color: var(--fg); font-weight: 600; }
+
+  /* V1 — two short lines */
+  .V1 .line { display: block; }
+  .V1 .line + .line { margin-top: 2px; }
+
+  /* V2 — price only under chips; KBJU later */
+  .V2-kbju {
+    margin-top: 12px; padding-top: 10px;
+    border-top: 1px solid var(--border);
+    font-size: 12px; color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* V3 — split columns */
+  .V3 {
+    display: flex; gap: 20px; flex-wrap: wrap;
+    font-size: 12px; color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .V3 .block .n { display: block; font-size: 14px; font-weight: 700; color: var(--fg); }
+  .V3 .block .l { font-size: 11px; }
+
+  /* V4 — calories only + price; drop БЖУ from first frame */
+  .V4 { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+  <h1 class="doc">Вторичная строка ценности — варианты (каркас D)</h1>
+  <p class="lede">
+    Чипы порции/дни уже выбраны. Ниже — только как показать цену и КБЖУ без длинной каши
+    «600 ₽ на 4 · 1000 ккал · Б 16 · Ж 40 · У 160».
+  </p>
+
+  <div class="grid">
+    <div class="card-wrap">
+      <div class="code">V1 · Две короткие строки</div>
+      <p class="caption">Цена и калории разделены. Макросы (Б/Ж/У) не в первом кадре.</p>
+      <div class="dialog">
+        <div class="close">×</div>
+        <div class="title">Картофельные дольки с розмарином</div>
+        <div class="chips">
+          <span class="chip"><span class="n">4</span><span class="l">порции</span></span>
+          <span class="chip"><span class="n">2</span><span class="l">дня</span></span>
+        </div>
+        <div class="v V1">
+          <span class="line"><strong>600 ₽</strong> за партию</span>
+          <span class="line"><strong>1000 ккал</strong> суммарно</span>
+        </div>
+        <div class="section-label">Ингредиенты</div>
+        <ul class="ing"><li>Картофель — 1200 г</li><li>Розмарин — 8 г</li></ul>
+      </div>
+    </div>
+
+    <div class="card-wrap">
+      <div class="code">V2 · Только цена у meta</div>
+      <p class="caption">Под чипами — одна цена. КБЖУ уезжает вниз, после ингредиентов.</p>
+      <div class="dialog">
+        <div class="close">×</div>
+        <div class="title">Картофельные дольки с розмарином</div>
+        <div class="chips">
+          <span class="chip"><span class="n">4</span><span class="l">порции</span></span>
+          <span class="chip"><span class="n">2</span><span class="l">дня</span></span>
+        </div>
+        <div class="v"><strong>600 ₽</strong> за партию</div>
+        <div class="section-label">Ингредиенты</div>
+        <ul class="ing"><li>Картофель — 1200 г</li><li>Розмарин — 8 г</li></ul>
+        <div class="V2-kbju"><strong>1000 ккал</strong> · белки 16 · жиры 40 · углеводы 160</div>
+      </div>
+    </div>
+
+    <div class="card-wrap">
+      <div class="code">V3 · Два блока</div>
+      <p class="caption">Цена и калории как два мини-блока. Без Б/Ж/У в шапке.</p>
+      <div class="dialog">
+        <div class="close">×</div>
+        <div class="title">Картофельные дольки с розмарином</div>
+        <div class="chips">
+          <span class="chip"><span class="n">4</span><span class="l">порции</span></span>
+          <span class="chip"><span class="n">2</span><span class="l">дня</span></span>
+        </div>
+        <div class="V3">
+          <div class="block"><span class="n">600 ₽</span><span class="l">партия</span></div>
+          <div class="block"><span class="n">1000 ккал</span><span class="l">суммарно</span></div>
+        </div>
+        <div class="section-label">Ингредиенты</div>
+        <ul class="ing"><li>Картофель — 1200 г</li><li>Розмарин — 8 г</li></ul>
+      </div>
+    </div>
+
+    <div class="card-wrap">
+      <div class="code">V4 · Одна короткая пара</div>
+      <p class="caption">Только цена + ккал в одной короткой строке. Без «на 4» и без Б/Ж/У.</p>
+      <div class="dialog">
+        <div class="close">×</div>
+        <div class="title">Картофельные дольки с розмарином</div>
+        <div class="chips">
+          <span class="chip"><span class="n">4</span><span class="l">порции</span></span>
+          <span class="chip"><span class="n">2</span><span class="l">дня</span></span>
+        </div>
+        <div class="V4"><strong>600 ₽</strong> · <strong>1000 ккал</strong></div>
+        <div class="section-label">Ингредиенты</div>
+        <ul class="ing"><li>Картофель — 1200 г</li><li>Розмарин — 8 г</li></ul>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

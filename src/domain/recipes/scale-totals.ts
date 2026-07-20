@@ -161,6 +161,21 @@ export function formatCompactValueLine(totals: ScaledRecipeTotals): string | nul
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
+/**
+ * Dish-dialog secondary line: per-serving price + KBJU.
+ * «150 ₽ · 250 ккал · Б 4 · Ж 10 · У 40 на порцию»
+ */
+export function formatPerServingDetailLine(
+  value: RecipePerServingValue,
+): string | null {
+  const perServing = scalePerServing(value, 1);
+  const price = formatPriceRub(perServing.priceCents);
+  const kbju = formatKbjuLine(perServing);
+  if (!price && !kbju) return null;
+  const core = [price, kbju].filter(Boolean).join(" · ");
+  return `${core} на порцию`;
+}
+
 export function parseNonNegInt(raw: unknown): number | null {
   const n = coerceNumber(raw);
   if (!Number.isFinite(n) || n < 0) return null;

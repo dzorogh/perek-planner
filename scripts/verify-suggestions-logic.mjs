@@ -1941,6 +1941,34 @@ check(
   void slots;
 }
 
+// Position name-plan: coerce meal when model puts dish name in meal field.
+{
+  const MEALS = [
+    "breakfast",
+    "lunch",
+    "dinner",
+    "late_dinner",
+    "afternoon_snack",
+  ];
+  const coercePositionMeal = (rawMeal, lockedMeal) =>
+    typeof rawMeal === "string" && MEALS.includes(rawMeal)
+      ? rawMeal
+      : lockedMeal;
+  check(
+    "coerce meal: dish name in meal → locked lunch",
+    coercePositionMeal("Куриные котлеты из домашнего фарша", "lunch") ===
+      "lunch",
+  );
+  check(
+    "coerce meal: valid enum kept",
+    coercePositionMeal("dinner", "lunch") === "dinner",
+  );
+  check(
+    "coerce meal: Russian label → locked",
+    coercePositionMeal("Обед", "lunch") === "lunch",
+  );
+}
+
 if (failed > 0) {
   console.log(`${failed} case(s) failed`);
   process.exit(1);

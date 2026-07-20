@@ -7,6 +7,7 @@ import { withMenuMutationLock } from "@/domain/menu/menu-mutation-lock";
 import { markSlotEditPassed } from "@/domain/menu/uj1-gate";
 import {
   clearCompanionForSlot,
+  modifyRecipeAcrossMenu,
   refuseAndReplaceRecipeAcrossMenu,
   resuggestRecipeAcrossMenu,
   resuggestSlotForUser,
@@ -67,6 +68,32 @@ export async function resuggestSlotAction(
   return { ok: true };
 }
 
+/** Invent a companion (гарнир) for a main that has none — day-pair. */
+export async function suggestCompanionAction(
+  _prev: SlotActionState,
+  formData: FormData,
+): Promise<SlotActionState> {
+  const menuId = String(formData.get("menuId") ?? "");
+  const slotId = String(formData.get("slotId") ?? "");
+  if (!menuId || !slotId) {
+    return { ok: false, error: "Некорректный слот." };
+  }
+
+  const { supabase, user, error } = await requireUser();
+  if (!user) return { ok: false, error: error! };
+
+  const result = await withMenuMutationLock(menuId, () =>
+    resuggestSlotForUser(supabase, user.id, menuId, slotId, {
+      target: "companion",
+    }),
+  );
+  if (!result.ok) return result;
+
+  revalidatePath("/plan/menu");
+  revalidatePath("/plan/shopping-list");
+  return { ok: true };
+}
+
 /** Soft-replace this dish in every slot of the menu where it appears. */
 export async function resuggestRecipeAcrossMenuAction(
   _prev: SlotActionState,
@@ -84,6 +111,35 @@ export async function resuggestRecipeAcrossMenuAction(
 
   const result = await withMenuMutationLock(menuId, () =>
     resuggestRecipeAcrossMenu(supabase, user.id, menuId, slotId, { target }),
+  );
+  if (!result.ok) return result;
+
+  revalidatePath("/plan/menu");
+  revalidatePath("/plan/shopping-list");
+  return { ok: true };
+}
+
+/** Variant of this dish from a user wish; applied to every matching slot. */
+export async function modifyRecipeAcrossMenuAction(
+  _prev: SlotActionState,
+  formData: FormData,
+): Promise<SlotActionState> {
+  const menuId = String(formData.get("menuId") ?? "");
+  const slotId = String(formData.get("slotId") ?? "");
+  const comment = String(formData.get("comment") ?? "");
+  const target = parseTarget(formData.get("target"));
+  if (!menuId || !slotId) {
+    return { ok: false, error: "Некорректный слот." };
+  }
+
+  const { supabase, user, error } = await requireUser();
+  if (!user) return { ok: false, error: error! };
+
+  const result = await withMenuMutationLock(menuId, () =>
+    modifyRecipeAcrossMenu(supabase, user.id, menuId, slotId, {
+      comment,
+      target,
+    }),
   );
   if (!result.ok) return result;
 

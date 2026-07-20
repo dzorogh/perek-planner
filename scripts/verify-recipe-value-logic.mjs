@@ -62,15 +62,36 @@ function formatPriceRub(priceCents) {
   return `${rub.toLocaleString("ru-RU")} ₽`;
 }
 
+function formatMacroG(value) {
+  if (value == null || !Number.isFinite(value) || value < 0) return null;
+  const rounded =
+    value >= 10 ? Math.round(value) : Math.round(value * 10) / 10;
+  const label = Number.isInteger(rounded)
+    ? String(rounded)
+    : String(rounded).replace(".", ",");
+  return label;
+}
+
 function formatKbjuLine(totals) {
   const parts = [];
   if (totals.caloriesKcal != null && Number.isFinite(totals.caloriesKcal)) {
     parts.push(`${Math.round(totals.caloriesKcal)} ккал`);
   }
-  if (totals.proteinG != null) parts.push(`Б ${Math.round(totals.proteinG)}`);
-  if (totals.fatG != null) parts.push(`Ж ${Math.round(totals.fatG)}`);
-  if (totals.carbsG != null) parts.push(`У ${Math.round(totals.carbsG)}`);
+  const p = formatMacroG(totals.proteinG);
+  const f = formatMacroG(totals.fatG);
+  const c = formatMacroG(totals.carbsG);
+  if (p != null) parts.push(`Б ${p}`);
+  if (f != null) parts.push(`Ж ${f}`);
+  if (c != null) parts.push(`У ${c}`);
   return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+function formatPerServingDetailLine(value) {
+  const perServing = scalePerServing(value, 1);
+  const price = formatPriceRub(perServing.priceCents);
+  const kbju = formatKbjuLine(perServing);
+  if (!price && !kbju) return null;
+  return `${[price, kbju].filter(Boolean).join(" · ")} на порцию`;
 }
 
 let failed = 0;
@@ -227,6 +248,26 @@ assert(
     proteinG: null,
     fatG: null,
     carbsG: null,
+  }) === null,
+);
+assert(
+  "per-serving detail line",
+  formatPerServingDetailLine({
+    priceCentsPerServing: 15000,
+    caloriesKcalPerServing: 250,
+    proteinGPerServing: 4,
+    fatGPerServing: 10,
+    carbsGPerServing: 40,
+  }) === "150 ₽ · 250 ккал · Б 4 · Ж 10 · У 40 на порцию",
+);
+assert(
+  "per-serving detail omits empty",
+  formatPerServingDetailLine({
+    priceCentsPerServing: null,
+    caloriesKcalPerServing: null,
+    proteinGPerServing: null,
+    fatGPerServing: null,
+    carbsGPerServing: null,
   }) === null,
 );
 

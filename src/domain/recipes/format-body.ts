@@ -39,28 +39,40 @@ export function normalizeRecipeBodyText(bodyText: string): string {
   return steps.map((step, i) => `${i + 1}. ${step}`).join("\n");
 }
 
-/** Russian plural for «порция». */
-export function formatPortionsLabel(count: number): string {
+/** Russian unit word for «порция» (without the number). */
+export function portionUnitWord(count: number): string {
   const n = Math.trunc(count);
   const mod10 = n % 10;
   const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return `${n} порция`;
+  if (mod10 === 1 && mod100 !== 11) return "порция";
   if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) {
-    return `${n} порции`;
+    return "порции";
   }
-  return `${n} порций`;
+  return "порций";
+}
+
+/** Russian plural for «порция». */
+export function formatPortionsLabel(count: number): string {
+  const n = Math.trunc(count);
+  return `${n} ${portionUnitWord(n)}`;
+}
+
+/** Russian unit word for «день» (without the number). */
+export function dayUnitWord(count: number): string {
+  const n = Math.trunc(count);
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return "день";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) {
+    return "дня";
+  }
+  return "дней";
 }
 
 /** Russian plural for «день». */
 export function formatDaysLabel(count: number): string {
   const n = Math.trunc(count);
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return `${n} день`;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) {
-    return `${n} дня`;
-  }
-  return `${n} дней`;
+  return `${n} ${dayUnitWord(n)}`;
 }
 
 /** Russian plural for «человек» after a number. */

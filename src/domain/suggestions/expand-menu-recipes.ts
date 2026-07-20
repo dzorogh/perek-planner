@@ -44,7 +44,13 @@ Rules:
 - At least one kind=critical. Prefer 3–8 ingredients (companions 2–5).
 - price_rub_per_serving: integer RUBLES, never above 400; omit if uncertain (no zeros).
 - nutrition_per_serving: realistic; omit if uncertain.
-- Honor operatorTasteNotes for ingredients/technique when relevant, but keep the locked name.`;
+- Honor operatorTasteNotes for ingredients/technique when relevant, but keep the locked name.
+- When modificationWish is set: adapt ingredients/technique to the wish; prefer adapting sourceRecipe when provided; still keep each locked name.`;
+
+export type ExpandModificationContext = {
+  wish: string;
+  sourceRecipe?: { name: string; bodyText: string };
+};
 
 /**
  * Expand locked menu names into full persisted recipes (batched AI call).
@@ -57,6 +63,7 @@ export async function expandMenuRecipes(
     peoplePerMeal?: number;
     tasteNotes: TasteNote[];
     chat?: ChatCompletionsFn;
+    modification?: ExpandModificationContext;
   },
 ): Promise<ExpandMenuRecipesResult> {
   if (plan.length === 0) return { ok: true, dishes: [] };
@@ -73,11 +80,22 @@ export async function expandMenuRecipes(
     plate_role: d.role,
   }));
 
+  const wish = context.modification?.wish.trim();
+  const sourceRecipe = context.modification?.sourceRecipe;
   const userContent = JSON.stringify({
     dishes: locked,
     menuDayCount,
     peoplePerMeal: context.peoplePerMeal ?? 2,
-    instruction: `Write a full recipe for EVERY locked dish. Keep names exactly. key must match. fridge_keep_days>=${menuDayCount}.`,
+    instruction: wish
+      ? `Write a full recipe for EVERY locked dish. Keep names exactly. key must match. fridge_keep_days>=${menuDayCount}. Apply modificationWish to ingredients/technique (PRIMARY). Prefer adapting sourceRecipe when provided.`
+      : `Write a full recipe for EVERY locked dish. Keep names exactly. key must match. fridge_keep_days>=${menuDayCount}.`,
+    modificationWish: wish || undefined,
+    sourceRecipe: sourceRecipe
+      ? {
+        name: sourceRecipe.name,
+        body_text: sourceRecipe.bodyText.slice(0, 1200),
+      }
+      : undefined,
     operatorTasteNotes: tasteNotesForPrompt(context.tasteNotes),
   });
 

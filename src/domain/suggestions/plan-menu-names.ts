@@ -1,5 +1,6 @@
 import {
   MEAL_LABELS_RU,
+  isMealSlot,
   mealAllowsCompanion,
   menuDayPairsForCount,
   type MealSlot,
@@ -65,15 +66,35 @@ const POSITION_REPLACE_SYSTEM = `You invent dish NAME(s) for ONE replace slot on
 Days are hard pairs ([1,2], [3,4], [5,6]); the dish is eaten on both days of replacePosition.dayPair.
 
 Respond with a single JSON object. dishes MUST contain ONLY the new dish(es) for replacePosition — never copy keepDishes, never list other meals/pairs.
-{"dishes":[{"meal":"...","dayPair":[3,4],"role":"main"|"companion","name":"...","plate_kind":"complete"|"needs_companion"|null}]}
+{"dishes":[{"meal":"lunch","dayPair":[3,4],"role":"main"|"companion","name":"...","plate_kind":"complete"|"needs_companion"|null}]}
 
 Rules:
+- meal MUST equal replacePosition.meal exactly (English enum: breakfast|lunch|dinner|…). NEVER put the dish name or Russian label in meal.
 - If replacePosition.role="companion": return exactly ONE dish (role=companion, plate_kind=null) for that meal×dayPair. Do not invent a main.
 - If replacePosition.role="main": return one main; for lunch/dinner/late_dinner also set plate_kind. If plate_kind="needs_companion", ALSO include one companion for the same meal×dayPair. If "complete", no companion.
 - NEW name(s) MUST NOT match or near-duplicate any string in avoidNames or keepDishes (exact and word-order/topping swaps are FORBIDDEN).
 - Companion: simple side/sauce/protein add-on for mainName; NEVER «к пасте»/«к мясу»; never a second meat/fish main.
 - Lunch/dinner mains: savory; never morning forms (сырники, оладьи, каша, омлет as L/D main).
 - Names in Russian, sentence case. Honor operatorTasteNotes (constraint PRIMARY).
+- Never invent snacks / перекусы.`;
+
+/** Variant of an existing dish — keep culinary identity; honor userWish. */
+const POSITION_MODIFY_SYSTEM = `You invent a VARIANT dish NAME for ONE modify slot on a Russian batch-cook menu (names only, no recipes).
+Days are hard pairs ([1,2], [3,4], [5,6]); the dish is eaten on both days of modifyPosition.dayPair.
+
+Respond with a single JSON object. dishes MUST contain ONLY the modified dish(es) for modifyPosition — never copy keepDishes, never list other meals/pairs.
+{"dishes":[{"meal":"lunch","dayPair":[3,4],"role":"main"|"companion","name":"...","plate_kind":"complete"|"needs_companion"|null}]}
+
+Rules:
+- meal MUST equal modifyPosition.meal exactly (English enum: breakfast|lunch|dinner|…). NEVER put the dish name or Russian label in meal — name goes ONLY in "name".
+- Start from sourceDish: keep the same culinary form/base (борщ stays борщ-family; оладьи stay pancake-family). Apply userWish (ingredients, technique, simplicity, exclusions).
+- Name may stay the same as sourceDish.name OR shift lightly to reflect the wish (e.g. «Борщ» → «Борщ без сметаны»). Do NOT invent an unrelated dish.
+- If modifyPosition.role="companion": return exactly ONE dish (role=companion, plate_kind=null). Do not invent a main.
+- If modifyPosition.role="main" AND keepExistingCompanion=true: return EXACTLY one main; set plate_kind="needs_companion"; do NOT invent a companion (side stays on the menu).
+- If modifyPosition.role="main" AND keepExistingCompanion is not true: return one main; for lunch/dinner/late_dinner also set plate_kind. If plate_kind="needs_companion", ALSO include one companion for the same meal×dayPair. If "complete", no companion.
+- MUST NOT match or near-duplicate avoidNames or keepDishes (other menu dishes). Matching sourceDish.name is ALLOWED.
+- Companion: simple side/sauce/protein add-on for mainName; NEVER «к пасте»/«к мясу»; never a second meat/fish main.
+- Names in Russian, sentence case. Honor operatorTasteNotes (constraint PRIMARY) and userWish (PRIMARY for this slot).
 - Never invent snacks / перекусы.`;
 
 /**
@@ -177,6 +198,73 @@ export async function proposePositionNamePlan(
       context.previousMenusDishes ?? [],
     ).slice(0, 60),
     avoidNames: uniqueExactNames(context.avoidNames ?? []).slice(0, 50),
+    peoplePerMeal: context.peoplePerMeal ?? 2,
+    tasteNotes: tasteNotesForPrompt(context.tasteNotes),
+  });
+}
+
+export type PositionModifySource = {
+  name: string;
+  bodyText?: string;
+};
+
+/**
+ * Names-only VARIANT for one meal×dayPair guided by sourceDish + userWish.
+ * Source name is allowed; other keepDishes / avoidNames stay forbidden.
+ */
+export async function proposePositionModifyPlan(
+  position: PositionReplaceTarget,
+  context: {
+    sourceDish: PositionModifySource;
+    userWish: string;
+    /** When true, invent main only — existing side stays. */
+    keepExistingCompanion?: boolean;
+    keepDishes?: Array<{
+      meal: MealSlot;
+      dayPair: MenuDayPair;
+      role: "main" | "companion";
+      name: string;
+    }>;
+    previousMenusDishes?: string[];
+    avoidNames?: string[];
+    peoplePerMeal?: number;
+    tasteNotes: TasteNote[];
+    chat?: ChatCompletionsFn;
+  },
+): Promise<PlanMenuNamesResult> {
+  if (position.role === "companion" && !position.mainName?.trim()) {
+    return { ok: false, reason: "parse" };
+  }
+  const sourceName = context.sourceDish.name.trim();
+  const userWish = context.userWish.trim();
+  if (!sourceName || !userWish) return { ok: false, reason: "parse" };
+
+  // Source label may appear in history/avoid — still allowed for a variant.
+  const avoidNames = uniqueExactNames(context.avoidNames ?? [])
+    .filter((n) => !namesEqual(n, sourceName))
+    .slice(0, 50);
+
+  return runPositionModifyAttempts(position, {
+    chat: context.chat ?? openRouterChatCompletions,
+    sourceDish: {
+      name: sourceName.slice(0, 120),
+      bodyText: context.sourceDish.bodyText?.trim().slice(0, 1200) || undefined,
+    },
+    userWish: userWish.slice(0, 500),
+    keepExistingCompanion: Boolean(context.keepExistingCompanion),
+    keepDishes: (context.keepDishes ?? []).map((d) => ({
+      meal: d.meal,
+      dayPair: [...d.dayPair] as number[],
+      role: d.role,
+      name: d.name,
+    })),
+    keepNames: (context.keepDishes ?? [])
+      .map((d) => d.name)
+      .filter((n) => !namesEqual(n, sourceName)),
+    previousMenusDishes: uniqueExactNames(
+      context.previousMenusDishes ?? [],
+    ).slice(0, 60),
+    avoidNames,
     peoplePerMeal: context.peoplePerMeal ?? 2,
     tasteNotes: tasteNotesForPrompt(context.tasteNotes),
   });
@@ -287,6 +375,135 @@ async function requestPositionReplacePlan(
   return { ok: true, plan };
 }
 
+function modifyNameInstruction(
+  role: "main" | "companion",
+  keepExistingCompanion: boolean,
+): string {
+  if (role === "companion") {
+    return "Return dishes with EXACTLY one VARIANT companion name for modifyPosition based on sourceDish + userWish. Same culinary form as source. Matching sourceDish.name is OK. Forbidden: avoidNames and keepDishes only. plate_kind=null.";
+  }
+  if (keepExistingCompanion) {
+    return "Return dishes with EXACTLY one VARIANT main for modifyPosition. keepExistingCompanion=true: plate_kind MUST be needs_companion; do NOT invent a companion. Matching source name is OK.";
+  }
+  return "Return dishes with ONLY modifyPosition: one VARIANT main (+ companion if needs_companion) from sourceDish + userWish. Same culinary form as source. Matching source name is OK. Forbidden: avoidNames and keepDishes only.";
+}
+
+async function runPositionModifyAttempts(
+  position: PositionReplaceTarget,
+  args: {
+    chat: ChatCompletionsFn;
+    sourceDish: PositionModifySource;
+    userWish: string;
+    keepExistingCompanion: boolean;
+    keepDishes: Array<{
+      meal: MealSlot;
+      dayPair: number[];
+      role: "main" | "companion";
+      name: string;
+    }>;
+    keepNames: string[];
+    previousMenusDishes: string[];
+    avoidNames: string[];
+    peoplePerMeal: number;
+    tasteNotes: ReturnType<typeof tasteNotesForPrompt>;
+  },
+): Promise<PlanMenuNamesResult> {
+  let avoidNames = args.avoidNames;
+  const baseInstruction = modifyNameInstruction(
+    position.role,
+    args.keepExistingCompanion,
+  );
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = await requestPositionModifyPlan(
+      position,
+      { ...args, avoidNames },
+      attempt === 0
+        ? baseInstruction
+        : `${baseInstruction} Previous answer collided with another menu dish — keep the variant of sourceDish but use a name that avoids avoidNames/keepDishes.`,
+    );
+    if (!result.ok) {
+      if (result.reason === "openrouter") return result;
+      continue;
+    }
+    const collisions = result.plan.filter((d) =>
+      [...avoidNames, ...args.keepNames].some((b) => namesEqual(b, d.name)),
+    );
+    if (collisions.length === 0) return result;
+    avoidNames = uniqueExactNames([
+      ...avoidNames,
+      ...collisions.map((d) => d.name),
+    ]).slice(0, 50);
+  }
+  return { ok: false, reason: "parse" };
+}
+
+async function requestPositionModifyPlan(
+  position: PositionReplaceTarget,
+  args: {
+    chat: ChatCompletionsFn;
+    sourceDish: PositionModifySource;
+    userWish: string;
+    keepExistingCompanion: boolean;
+    keepDishes: Array<{
+      meal: MealSlot;
+      dayPair: number[];
+      role: "main" | "companion";
+      name: string;
+    }>;
+    previousMenusDishes: string[];
+    avoidNames: string[];
+    peoplePerMeal: number;
+    tasteNotes: ReturnType<typeof tasteNotesForPrompt>;
+  },
+  instruction: string,
+): Promise<PlanMenuNamesResult> {
+  let content: string;
+  try {
+    content = await args.chat({
+      messages: [
+        { role: "system", content: POSITION_MODIFY_SYSTEM },
+        {
+          role: "user",
+          content: JSON.stringify({
+            modifyPosition: {
+              meal: position.meal,
+              mealLabelRu: MEAL_LABELS_RU[position.meal],
+              dayPair: [...position.dayPair],
+              role: position.role,
+              needsPlateKind:
+                position.role === "main" && mealAllowsCompanion(position.meal),
+              mainName: position.mainName?.trim() || undefined,
+            },
+            keepExistingCompanion: args.keepExistingCompanion || undefined,
+            sourceDish: args.sourceDish,
+            userWish: args.userWish,
+            keepDishes: args.keepDishes,
+            previousMenusDishes: args.previousMenusDishes,
+            avoidNames: args.avoidNames,
+            peoplePerMeal: args.peoplePerMeal,
+            instruction,
+            operatorTasteNotes: args.tasteNotes,
+          }),
+        },
+      ],
+      responseFormatJson: true,
+      temperature: 0.55,
+    });
+  } catch (err) {
+    if (err instanceof OpenRouterError) {
+      return { ok: false, reason: "openrouter" };
+    }
+    throw err;
+  }
+
+  const plan = parsePositionNamePlanJson(content, position, {
+    allowMissingCompanion: args.keepExistingCompanion,
+  });
+  if (!plan) return { ok: false, reason: "parse" };
+  return { ok: true, plan };
+}
+
 /**
  * Repair flagged name positions in one AI call (names only).
  */
@@ -368,7 +585,7 @@ export function parseMenuNamePlanJson(
   return planLooksComplete(out, meals, dayPairs) ? out : null;
 }
 
-/** Parser for single-position resuggest plans (main±companion or companion only). */
+/** Parser for single-position resuggest/modify plans (main±companion or companion only). */
 export function parsePositionNamePlanJson(
   content: string,
   position: {
@@ -377,10 +594,10 @@ export function parsePositionNamePlanJson(
     role: "main" | "companion";
     mainName?: string;
   },
+  options: { allowMissingCompanion?: boolean } = {},
 ): PlannedDish[] | null {
-  const out = parsePlannedDishesArray(content, [position.meal], [
-    position.dayPair,
-  ]);
+  // Coerce meal/dayPair from locked position — models often put the dish name in meal.
+  const out = parsePositionPlannedDishes(content, position);
   if (!out) return null;
 
   const atPosition = out.filter(
@@ -405,15 +622,92 @@ export function parsePositionNamePlanJson(
 
   const main = atPosition.find((d) => d.role === "main");
   if (!main) return null;
-  if (
-    mealAllowsCompanion(position.meal) &&
-    main.plateKind === "needs_companion"
-  ) {
+  return finalizePositionMainPlan(main, atPosition, position.meal, options);
+}
+
+function finalizePositionMainPlan(
+  main: PlannedDish,
+  atPosition: PlannedDish[],
+  meal: MealSlot,
+  options: { allowMissingCompanion?: boolean },
+): PlannedDish[] | null {
+  if (!mealAllowsCompanion(meal)) {
+    return [{ ...main, plateKind: null }];
+  }
+  if (options.allowMissingCompanion) {
+    return [{ ...main, plateKind: "needs_companion" }];
+  }
+  if (main.plateKind === "needs_companion") {
     const companion = atPosition.find((d) => d.role === "companion");
     if (!companion) return null;
     return [main, { ...companion, mainName: main.name, plateKind: null }];
   }
-  return [{ ...main, plateKind: mealAllowsCompanion(position.meal) ? main.plateKind ?? "complete" : null }];
+  return [{ ...main, plateKind: main.plateKind ?? "complete" }];
+}
+
+/**
+ * Pure: coerce invalid meal/dayPair to the locked position (model puts name in meal).
+ * Exported for logic verify.
+ */
+export function coercePositionMeal(
+  rawMeal: unknown,
+  lockedMeal: MealSlot,
+): MealSlot {
+  if (typeof rawMeal === "string" && isMealSlot(rawMeal)) return rawMeal;
+  return lockedMeal;
+}
+
+function parsePositionPlannedDishes(
+  content: string,
+  position: {
+    meal: MealSlot;
+    dayPair: MenuDayPair;
+    role: "main" | "companion";
+  },
+): PlannedDish[] | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(extractJsonObject(content));
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const root = parsed as { dishes?: unknown };
+  if (!Array.isArray(root.dishes)) return null;
+
+  const out: PlannedDish[] = [];
+  for (const item of root.dishes) {
+    const dish = parsePositionDishRow(item, position);
+    if (dish) out.push(dish);
+  }
+  return out.length > 0 ? out : null;
+}
+
+function parsePositionDishRow(
+  item: unknown,
+  position: {
+    meal: MealSlot;
+    dayPair: MenuDayPair;
+  },
+): PlannedDish | null {
+  if (!item || typeof item !== "object") return null;
+  const row = item as Record<string, unknown>;
+  const meal = coercePositionMeal(row.meal, position.meal);
+  const dayPair =
+    parseDayPair(row.dayPair ?? row.day_pair, [position.dayPair]) ??
+    position.dayPair;
+  const rawName = typeof row.name === "string" ? row.name.trim() : "";
+  const name = rawName ? stripHardcodedPairing(rawName).slice(0, 120) : "";
+  if (!name || looksLikeNoCookSnack(name)) return null;
+
+  if (row.role === "companion") {
+    if (!mealAllowsCompanion(meal)) return null;
+    return { meal, dayPair, role: "companion", name, plateKind: null };
+  }
+
+  // Default role=main when model omits role on a main replace/modify.
+  if (row.role != null && row.role !== "main") return null;
+  return parsePlannedMainRow(meal, dayPair, name, row);
 }
 
 function parsePlannedDishesArray(

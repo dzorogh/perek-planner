@@ -19,10 +19,12 @@ export {
   parsePositionInventJson,
 } from "@/domain/suggestions/invent-for-position";
 export {
+  coercePositionMeal,
   parseMenuNamePlanJson,
   parsePositionNamePlanJson,
   planKey,
   proposeMenuNamePlan,
+  proposePositionModifyPlan,
   proposePositionNamePlan,
   repairMenuNamePlan,
 } from "@/domain/suggestions/plan-menu-names";
@@ -36,6 +38,7 @@ export {
 } from "@/domain/suggestions/expand-menu-recipes";
 export {
   clearCompanionForSlot,
+  modifyRecipeAcrossMenu,
   refuseAndReplaceRecipeAcrossMenu,
   resuggestRecipeAcrossMenu,
   resuggestSlotForUser,

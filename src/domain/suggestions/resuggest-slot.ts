@@ -30,7 +30,9 @@ import {
 import type { ProposedAssignment } from "@/domain/suggestions/openrouter-generate";
 import {
   planKey,
+  proposePositionModifyPlan,
   proposePositionNamePlan,
+  type PositionModifySource,
 } from "@/domain/suggestions/plan-menu-names";
 import { loadSuppressSets } from "@/domain/suggestions/suppress";
 import { loadTasteNotes } from "@/domain/suggestions/taste-notes";
@@ -230,6 +232,50 @@ async function resuggestNameContext(
   };
 }
 
+/** Like resuggest context, but source recipe names stay allowed (variant path). */
+async function modifyNameContext(
+  supabase: SupabaseClient,
+  userId: string,
+  menuId: string,
+  excludeRecipeIds: ReadonlySet<string>,
+): Promise<{
+  keepDishes: MenuPlanDish[];
+  avoidNames: string[];
+  previousMenusDishes: string[];
+} | null> {
+  const previousMenusDishes =
+    (await loadRecentMenuDishNames(supabase, userId, {
+      excludeMenuId: menuId,
+    })) ?? null;
+  if (!previousMenusDishes) return null;
+  const keepDishes = await loadMenuPlanDishes(supabase, menuId, {
+    excludeRecipeIds,
+  });
+  if (!keepDishes) return null;
+  return {
+    keepDishes,
+    previousMenusDishes,
+    avoidNames: [...previousMenusDishes, ...keepDishes.map((d) => d.name)],
+  };
+}
+
+async function loadRecipeSource(
+  supabase: SupabaseClient,
+  recipeId: string,
+): Promise<PositionModifySource | null> {
+  const { data, error } = await supabase
+    .from("recipes")
+    .select("name, body_text")
+    .eq("id", recipeId)
+    .maybeSingle();
+  if (error || !data?.name?.trim()) return null;
+  return {
+    name: data.name.trim(),
+    bodyText:
+      typeof data.body_text === "string" ? data.body_text.trim() : undefined,
+  };
+}
+
 type InventNamePlanErr = { ok: false; error: string };
 
 function planFail(
@@ -334,6 +380,77 @@ async function inventPositionViaNamePlan(
     peoplePerMeal: options.peoplePerMeal,
     tasteNotes,
     chat: options.chat,
+  });
+  if (!expanded.ok) return planFail(expanded.reason);
+
+  return {
+    ok: true,
+    dishes: expanded.dishes,
+    inventedIds: expanded.dishes.map((d) => d.recipeId),
+  };
+}
+
+/**
+ * Variant path: names from source+wish → expand with wish (no harsh variety replace).
+ */
+async function inventPositionViaModifyPlan(
+  supabase: SupabaseClient,
+  userId: string,
+  position: {
+    meal: MealSlot;
+    dayPair: MenuDayPair;
+    role: "main" | "companion";
+    mainName?: string;
+  },
+  ctx: {
+    keepDishes: MenuPlanDish[];
+    avoidNames: string[];
+    previousMenusDishes: string[];
+    sourceDish: PositionModifySource;
+    userWish: string;
+    keepExistingCompanion?: boolean;
+  },
+  options: ResuggestOptions & { peoplePerMeal?: number; menuDayCount: number },
+): Promise<
+  | { ok: true; dishes: ExpandedDish[]; inventedIds: string[] }
+  | { ok: false; error: string }
+> {
+  const tasteNotes = await loadTasteNotes(supabase, userId);
+  if (!tasteNotes) return planFail("query");
+
+  const planned = await proposePositionModifyPlan(position, {
+    sourceDish: ctx.sourceDish,
+    userWish: ctx.userWish,
+    keepExistingCompanion: ctx.keepExistingCompanion,
+    keepDishes: ctx.keepDishes,
+    previousMenusDishes: ctx.previousMenusDishes,
+    avoidNames: ctx.avoidNames,
+    peoplePerMeal: options.peoplePerMeal,
+    tasteNotes,
+    chat: options.chat,
+  });
+  if (!planned.ok) return planFail(planned.reason);
+
+  const plan = planned.plan;
+  const hitsOtherMenu = plan.some((d) =>
+    ctx.avoidNames.some(
+      (a) =>
+        namesEqual(a, d.name) && !namesEqual(a, ctx.sourceDish.name),
+    ),
+  );
+  if (hitsOtherMenu) return planFail("parse");
+
+  const expanded = await expandMenuRecipes(supabase, plan, {
+    menuDayCount: options.menuDayCount,
+    peoplePerMeal: options.peoplePerMeal,
+    tasteNotes,
+    chat: options.chat,
+    modification: {
+      wish: ctx.userWish,
+      sourceRecipe: ctx.sourceDish.bodyText
+        ? { name: ctx.sourceDish.name, bodyText: ctx.sourceDish.bodyText }
+        : undefined,
+    },
   });
   if (!expanded.ok) return planFail(expanded.reason);
 
@@ -745,6 +862,65 @@ export async function resuggestRecipeAcrossMenu(
 }
 
 /**
+ * Invent a variant of the recipe in `slotId` from a user wish, then apply it to
+ * every menu occurrence of that recipe (same role as target).
+ */
+export async function modifyRecipeAcrossMenu(
+  supabase: SupabaseClient,
+  userId: string,
+  menuId: string,
+  slotId: string,
+  options: ResuggestOptions & {
+    comment?: string;
+    target?: SlotDishTarget;
+  } = {},
+): Promise<ResuggestSlotResult> {
+  const keyError = requireOpenRouter(options.chat);
+  if (keyError) return keyError;
+
+  const comment = normalizeFeedbackComment(options.comment ?? "");
+  if (!isValidFeedbackComment(comment)) {
+    return {
+      ok: false,
+      error: "Напишите пожелание — без него изменение не запускаем.",
+    };
+  }
+
+  const target: SlotDishTarget = options.target ?? "main";
+  const { data: slot, error: slotError } = await supabase
+    .from("menu_slots")
+    .select("id, day_index, meal, recipe_id, companion_recipe_id")
+    .eq("id", slotId)
+    .eq("menu_id", menuId)
+    .maybeSingle();
+
+  if (slotError || !slot) {
+    return { ok: false, error: "Слот не найден." };
+  }
+
+  const recipeId = selectedRecipeId(slot, target);
+  if (!recipeId) {
+    return { ok: false, error: missingTargetMessage(target) };
+  }
+
+  const sourceDish = await loadRecipeSource(supabase, recipeId);
+  if (!sourceDish) {
+    return { ok: false, error: SUGGESTION_FAIL_RU.query };
+  }
+
+  return modifyRecipeIdAcrossMenu(
+    supabase,
+    userId,
+    menuId,
+    recipeId,
+    target,
+    sourceDish,
+    comment,
+    options,
+  );
+}
+
+/**
  * Hard-refuse a recipe, then replace it (names → audit → expand) on every
  * occurrence on this Menu (as main and/or companion).
  */
@@ -899,6 +1075,390 @@ async function replaceRecipeIdAcrossMenu(
     if (!result.ok) return result;
   }
   return { ok: true };
+}
+
+async function modifyRecipeIdAcrossMenu(
+  supabase: SupabaseClient,
+  userId: string,
+  menuId: string,
+  recipeId: string,
+  preferredTarget: SlotDishTarget,
+  sourceDish: PositionModifySource,
+  userWish: string,
+  options: ResuggestOptions = {},
+): Promise<ResuggestSlotResult> {
+  const { data: allSlots, error: slotsError } = await supabase
+    .from("menu_slots")
+    .select("id, day_index, meal, recipe_id, companion_recipe_id")
+    .eq("menu_id", menuId);
+
+  if (slotsError || !allSlots?.length) {
+    return { ok: false, error: "Не удалось найти слоты с этим блюдом." };
+  }
+
+  const jobs = collectPairReplaceJobs(
+    allSlots as SlotRow[],
+    recipeId,
+    preferredTarget,
+  );
+  if (jobs.length === 0) {
+    return { ok: false, error: "Не удалось найти слоты с этим блюдом." };
+  }
+
+  const modifyOpts: ResuggestOptions = {
+    ...options,
+    forceSuppressIds: [...(options.forceSuppressIds ?? []), recipeId],
+  };
+
+  // One invent per meal×role — same variant recipe ids applied to every pair.
+  for (const group of groupModifyJobsByMealRole(jobs)) {
+    const result =
+      group.role === "companion"
+        ? await modifyCompanionGroup(
+          supabase,
+          userId,
+          menuId,
+          recipeId,
+          group.jobs,
+          sourceDish,
+          userWish,
+          modifyOpts,
+        )
+        : await modifyMainGroup(
+          supabase,
+          userId,
+          menuId,
+          recipeId,
+          group.jobs,
+          sourceDish,
+          userWish,
+          modifyOpts,
+        );
+    if (!result.ok) return result;
+  }
+  return { ok: true };
+}
+
+function groupModifyJobsByMealRole(
+  jobs: PairReplaceJob[],
+): Array<{ meal: MealSlot; role: SlotDishTarget; jobs: PairReplaceJob[] }> {
+  const groups = new Map<
+    string,
+    { meal: MealSlot; role: SlotDishTarget; jobs: PairReplaceJob[] }
+  >();
+  for (const job of jobs) {
+    const key = `${job.meal}:${job.role}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.jobs.push(job);
+      continue;
+    }
+    groups.set(key, { meal: job.meal, role: job.role, jobs: [job] });
+  }
+  return [...groups.values()];
+}
+
+function pairSlotsMatchSource(
+  pairSlots: SlotRow[],
+  sourceRecipeId: string,
+  role: SlotDishTarget,
+): boolean {
+  if (role === "companion") {
+    return pairSlots.every((s) => s.companion_recipe_id === sourceRecipeId);
+  }
+  return pairSlots.every((s) => s.recipe_id === sourceRecipeId);
+}
+
+function collectCompanionIds(
+  jobs: PairReplaceJob[],
+  sourceRecipeId: string,
+): Set<string> {
+  const ids = new Set<string>([sourceRecipeId]);
+  for (const job of jobs) {
+    for (const s of job.slots) {
+      if (s.companion_recipe_id) ids.add(s.companion_recipe_id);
+    }
+  }
+  return ids;
+}
+
+async function loadValidatedPairSlots(
+  supabase: SupabaseClient,
+  menuId: string,
+  meal: MealSlot,
+  dayPair: MenuDayPair,
+  sourceRecipeId: string,
+  role: SlotDishTarget,
+): Promise<{ ok: true; slots: SlotRow[] } | { ok: false; error: string }> {
+  const pairSlots = await loadPairSlots(supabase, menuId, meal, dayPair);
+  if (!pairSlots?.length) {
+    return { ok: false, error: "Слот не найден." };
+  }
+  if (!pairSlotsMatchSource(pairSlots, sourceRecipeId, role)) {
+    return {
+      ok: false,
+      error:
+        role === "companion"
+          ? "Пара дней должна иметь один компаньон."
+          : "Пара дней должна иметь одно основное блюдо.",
+    };
+  }
+  return { ok: true, slots: pairSlots };
+}
+
+async function assignModifiedDishesToJobs(
+  supabase: SupabaseClient,
+  userId: string,
+  menuId: string,
+  meal: MealSlot,
+  jobs: PairReplaceJob[],
+  sourceRecipeId: string,
+  role: SlotDishTarget,
+  buildProposals: (pairSlots: SlotRow[]) => ProposedAssignment[] | null,
+  inventedIds: string[],
+  forceSuppressIds: string[] | undefined,
+): Promise<ResuggestSlotResult> {
+  for (const job of jobs) {
+    const loaded = await loadValidatedPairSlots(
+      supabase,
+      menuId,
+      meal,
+      job.dayPair,
+      sourceRecipeId,
+      role,
+    );
+    if (!loaded.ok) {
+      await cleanupRecipes(supabase, inventedIds);
+      return loaded;
+    }
+    const proposals = buildProposals(loaded.slots);
+    if (!proposals?.length) {
+      await cleanupRecipes(supabase, inventedIds);
+      return {
+        ok: false,
+        error: "Пара дней должна иметь одно основное блюдо.",
+      };
+    }
+    const poolIds = new Set(inventedIds);
+    for (const p of proposals) {
+      poolIds.add(p.recipeId);
+      if (p.companionRecipeId) poolIds.add(p.companionRecipeId);
+    }
+    const assigned = await assignPairProposals(
+      supabase,
+      userId,
+      menuId,
+      proposals,
+      [...poolIds],
+      forceSuppressIds,
+    );
+    if (!assigned.ok) {
+      await cleanupRecipes(supabase, inventedIds);
+      return assigned;
+    }
+  }
+  return { ok: true };
+}
+
+function jobsHaveCompanion(jobs: PairReplaceJob[]): boolean {
+  return jobs.some((job) =>
+    job.slots.some((s) => typeof s.companion_recipe_id === "string"),
+  );
+}
+
+async function modifyMainGroup(
+  supabase: SupabaseClient,
+  userId: string,
+  menuId: string,
+  sourceRecipeId: string,
+  jobs: PairReplaceJob[],
+  sourceDish: PositionModifySource,
+  userWish: string,
+  options: ResuggestOptions,
+): Promise<ResuggestSlotResult> {
+  const anchor = jobs[0];
+  if (!anchor) return { ok: false, error: "Слот не найден." };
+  const meal = anchor.meal;
+  const keepExistingCompanion = jobsHaveCompanion(jobs);
+
+  // When keeping the side, leave companion recipes in keepDishes (name context).
+  const excludeIds = keepExistingCompanion
+    ? new Set([sourceRecipeId])
+    : collectCompanionIds(jobs, sourceRecipeId);
+
+  const ctx = await modifyNameContext(supabase, userId, menuId, excludeIds);
+  if (!ctx) return planFail("query");
+
+  const menuMeta = await loadMenuMeta(supabase, menuId);
+  if (!menuMeta) return planFail("query");
+  const inventedIds: string[] = [];
+
+  try {
+    const invented = await inventPositionViaModifyPlan(
+      supabase,
+      userId,
+      { meal, dayPair: anchor.dayPair, role: "main" },
+      { ...ctx, sourceDish, userWish, keepExistingCompanion },
+      {
+        ...options,
+        peoplePerMeal: menuMeta.peoplePerMeal,
+        menuDayCount: menuMeta.dayCount,
+      },
+    );
+    if (!invented.ok) return invented;
+    inventedIds.push(...invented.inventedIds);
+
+    const main = invented.dishes.find((d) => d.role === "main");
+    if (!main) {
+      await cleanupRecipes(supabase, inventedIds);
+      return planFail("parse");
+    }
+    const inventedCompanion = invented.dishes.find((d) => d.role === "companion");
+    // Modify targets the main only — never drop an existing garnish.
+    if (keepExistingCompanion && inventedCompanion) {
+      await cleanupRecipes(supabase, [inventedCompanion.recipeId]);
+      const idx = inventedIds.indexOf(inventedCompanion.recipeId);
+      if (idx >= 0) inventedIds.splice(idx, 1);
+    }
+
+    return assignModifiedDishesToJobs(
+      supabase,
+      userId,
+      menuId,
+      meal,
+      jobs,
+      sourceRecipeId,
+      "main",
+      (pairSlots) =>
+        pairSlots.map((s) => {
+          const companionRecipeId = keepExistingCompanion
+            ? s.companion_recipe_id
+            : (inventedCompanion?.recipeId ?? s.companion_recipe_id ?? null);
+          return {
+            slotId: s.id,
+            recipeId: main.recipeId,
+            companionRecipeId,
+            plateKind: resolveResuggestPlateKind(
+              meal,
+              keepExistingCompanion ? "needs_companion" : main.plateKind,
+              companionRecipeId,
+            ),
+          };
+        }),
+      inventedIds,
+      options.forceSuppressIds,
+    );
+  } catch (err) {
+    await cleanupRecipes(supabase, inventedIds);
+    return { ok: false, error: resuggestFailMessage(err) };
+  }
+}
+
+async function modifyCompanionGroup(
+  supabase: SupabaseClient,
+  userId: string,
+  menuId: string,
+  sourceRecipeId: string,
+  jobs: PairReplaceJob[],
+  sourceDish: PositionModifySource,
+  userWish: string,
+  options: ResuggestOptions,
+): Promise<ResuggestSlotResult> {
+  const anchor = jobs[0];
+  if (!anchor) return { ok: false, error: "Слот не найден." };
+  const meal = anchor.meal;
+  if (!mealAllowsCompanion(meal)) {
+    return { ok: false, error: "Для этого приёма компаньон не используется." };
+  }
+
+  const anchorSlot = anchor.slots[0];
+  if (!anchorSlot?.recipe_id) {
+    return { ok: false, error: "Сначала выберите основное блюдо." };
+  }
+
+  const { data: mainRecipe } = await supabase
+    .from("recipes")
+    .select("name")
+    .eq("id", anchorSlot.recipe_id)
+    .maybeSingle();
+  const mainDishName = mainRecipe?.name?.trim();
+  if (!mainDishName) {
+    return { ok: false, error: SUGGESTION_FAIL_RU.query };
+  }
+
+  const ctx = await modifyNameContext(
+    supabase,
+    userId,
+    menuId,
+    collectCompanionIds(jobs, sourceRecipeId),
+  );
+  if (!ctx) return planFail("query");
+
+  const menuMeta = await loadMenuMeta(supabase, menuId);
+  if (!menuMeta) return planFail("query");
+  const inventedIds: string[] = [];
+
+  try {
+    const invented = await inventPositionViaModifyPlan(
+      supabase,
+      userId,
+      {
+        meal,
+        dayPair: anchor.dayPair,
+        role: "companion",
+        mainName: mainDishName,
+      },
+      {
+        ...ctx,
+        avoidNames: [...ctx.avoidNames, mainDishName],
+        sourceDish,
+        userWish,
+      },
+      {
+        ...options,
+        peoplePerMeal: menuMeta.peoplePerMeal,
+        menuDayCount: menuMeta.dayCount,
+      },
+    );
+    if (!invented.ok) return invented;
+    inventedIds.push(...invented.inventedIds);
+
+    const companion = invented.dishes.find((d) => d.role === "companion");
+    if (!companion) {
+      await cleanupRecipes(supabase, inventedIds);
+      return planFail("parse");
+    }
+
+    return assignModifiedDishesToJobs(
+      supabase,
+      userId,
+      menuId,
+      meal,
+      jobs,
+      sourceRecipeId,
+      "companion",
+      (pairSlots) => {
+        const mainIds = new Set(
+          pairSlots
+            .map((s) => s.recipe_id)
+            .filter((id): id is string => typeof id === "string"),
+        );
+        if (mainIds.size !== 1) return null;
+        const mainRecipeId = [...mainIds][0]!;
+        return pairSlots.map((s) => ({
+          slotId: s.id,
+          recipeId: mainRecipeId,
+          companionRecipeId: companion.recipeId,
+          plateKind: "needs_companion" as const,
+        }));
+      },
+      inventedIds,
+      options.forceSuppressIds,
+    );
+  } catch (err) {
+    await cleanupRecipes(supabase, inventedIds);
+    return { ok: false, error: resuggestFailMessage(err) };
+  }
 }
 
 function collectPairReplaceJobs(

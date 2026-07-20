@@ -20,7 +20,10 @@ type CommentDialogProps = {
   title: string;
   description?: string;
   placeholder?: string;
+  fieldLabel?: string;
+  hint?: string;
   submitLabel?: string;
+  pendingLabel?: string;
   pending?: boolean;
   error?: string | null;
   /** Called with trimmed comment when user submits. */
@@ -33,7 +36,10 @@ export function CommentDialog({
   title,
   description,
   placeholder = "Например: не люблю тушёную капусту",
+  fieldLabel = "Причина",
+  hint = `Минимум ${MIN_FEEDBACK_COMMENT_LENGTH} символа. Учитывается при следующих генерациях меню.`,
   submitLabel = "Сохранить",
+  pendingLabel = "Сохраняем…",
   pending = false,
   error = null,
   onSubmit,
@@ -75,7 +81,7 @@ export function CommentDialog({
 
         <div className="space-y-3">
           <label className="block text-[11px] font-semibold uppercase tracking-[0.04em] text-slot-label">
-            Причина
+            {fieldLabel}
           </label>
           <textarea
             value={comment}
@@ -87,10 +93,7 @@ export function CommentDialog({
             className="flex min-h-[96px] w-full rounded-sm border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
             autoFocus
           />
-          <p className="text-xs text-muted-foreground">
-            Минимум {MIN_FEEDBACK_COMMENT_LENGTH} символа. Учитывается при
-            следующих генерациях меню.
-          </p>
+          <p className="text-xs text-muted-foreground">{hint}</p>
           {tooShort ? (
             <p className="text-xs text-warning-fg" role="alert">
               Напишите чуть подробнее.
@@ -118,7 +121,7 @@ export function CommentDialog({
               aria-busy={pending}
               onClick={() => void onSubmit(trimmed)}
             >
-              {pending ? "Сохраняем…" : submitLabel}
+              {pending ? pendingLabel : submitLabel}
             </Button>
           </div>
         </div>

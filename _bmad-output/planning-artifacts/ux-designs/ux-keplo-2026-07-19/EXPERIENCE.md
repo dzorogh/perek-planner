@@ -98,7 +98,7 @@ Behavioral. Visual specs live in `DESIGN.md` components map and shadcn defaults.
 | `warning-stale` | Planning surfaces (Create **Menu**, slot edit, **Shopping list**) | Inline banner when catalog sync failed or non-fresh; `{colors.warning-bg}`, `{colors.warning-fg}`, `{colors.warning-border}`. **Menu planning actions blocked** until fresh sync — explicit stale warning required. |
 | `shopping-list-cta` | **Shopping list** handoff | Always-available copy action. List may include staples by default — no in-app opt-in. Optional secondary: open store link when available — must not be the only purchase path. → [mock](mockups/mock-shopping-list.html) |
 | `store-picker` | Settings | Concrete store list / selector; default д. Алабино, 92. Set once in Settings — not shown before each new **Menu**. No free-text address. |
-| `recipe-text-panel` | Global read aid | **Dialog** or side panel: full **Recipe** text. Opens from any **Recipe** name on **Menu**, **History**, or **Shopping list** — anytime, not cook-along. |
+| `recipe-text-panel` | Global read aid | **Dialog**: title → yield chips (portions + days) → quiet per-serving price/kcal/BJU line → ingredients → steps. Opens from any **Recipe** name on **Menu**, **History**, or **Shopping list** — anytime, not cook-along. → [header mock](mockups/mock-dish-dialog-header-d-2026-07-20.html) |
 | `history-rating-row` | History | Each past **Recipe** / **Snack**: like/dislike + reason (too hard, not tasty, too long, other). Editable after submit in v1. Dislike hard-suppresses future suggestions in v1. No forced post-cook screen. → [mock](mockups/mock-history-rating.html) |
 
 ## State Patterns

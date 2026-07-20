@@ -73,3 +73,13 @@ All previously open items were closed in the deferred-work sweep. Strikethrough 
 - ~~Resuggest still uses batch invent~~ — **Resolved:** `resuggest-slot.ts` + snack resuggest use position-pair invent (meal×pair×role).
 
 - ~~Unused DayLengthPicker after create-form removal~~ — **Resolved:** picker restored for pair lengths 2 / 4 / 6.
+
+## From spec-modify-dish-with-wishes
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-modify-dish-with-wishes.md`
+  summary: Cross-pair modify is not fully atomic if a later pair assign fails after an earlier success (same pattern as replace).
+  evidence: Review noted partial apply; invent-once reduces variant drift but does not roll back earlier pair slots.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-modify-dish-with-wishes.md`
+  summary: No automated check that the AI recipe body actually satisfies the user wish.
+  evidence: Wish is prompt-only; same trust model as other OpenRouter invent paths.
