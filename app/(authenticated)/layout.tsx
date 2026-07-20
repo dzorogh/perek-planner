@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/layout/app-shell";
+import { isAuthSessionMissingError } from "@/lib/supabase/auth-errors";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function AuthenticatedLayout({
@@ -19,8 +20,9 @@ export default async function AuthenticatedLayout({
       data: { user },
       error,
     } = await supabase.auth.getUser();
-    // Transient auth failures: do not bounce a possibly-valid session to login.
-    if (!error && !user) {
+    // AuthSessionMissingError = signed out. Other errors may be transient —
+    // do not bounce a possibly-valid session to login.
+    if (!user && (!error || isAuthSessionMissingError(error))) {
       redirect("/auth/login");
     }
   }

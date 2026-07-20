@@ -1,6 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { isAuthSessionMissingError } from "@/lib/supabase/auth-errors";
+
 const AUTH_PATH_PREFIX = "/auth";
 
 type CookieToSet = {
@@ -89,16 +91,16 @@ export async function updateSession(request: NextRequest) {
 
   try {
     const { data, error } = await supabase.auth.getUser();
-    if (error) {
+    user = data.user;
+    // No cookie/session is signed-out, not a transient outage.
+    if (error && !isAuthSessionMissingError(error)) {
       authCheckFailed = true;
-    } else {
-      user = data.user;
     }
   } catch {
     authCheckFailed = true;
   }
 
-  // Transient auth failures: do not treat as signed-out (avoids login bounce / 500).
+  // True transient auth failures (network / 5xx): do not bounce a possibly-valid session.
   if (authCheckFailed) {
     return supabaseResponse;
   }

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { DeleteMenuButton } from "@/components/history/delete-menu-button";
 import { HistoryRatingRow } from "@/components/history/history-rating-row";
@@ -12,14 +13,7 @@ export default async function HistoryPage() {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return (
-      <div className="max-w-xl">
-        <h1 className="page-title">История</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Войдите, чтобы видеть прошлые меню.
-        </p>
-      </div>
-    );
+    redirect("/auth/login");
   }
 
   const { menus, error } = await loadHistory(supabase, user.id);
