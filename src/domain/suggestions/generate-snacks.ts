@@ -4,6 +4,11 @@ import {
   isValidFeedbackComment,
   normalizeFeedbackComment,
 } from "@/domain/history/constants";
+import {
+  FIXED_MENU_DAY_COUNT,
+  MENU_DAY_PAIRS,
+  menuDayPairForDay,
+} from "@/domain/menu/constants";
 import { inventPriceToKopecks } from "@/domain/suggestions/invent-recipes";
 import {
   RECENT_SNACK_MENUS_COOLDOWN,
@@ -115,7 +120,7 @@ async function proposeSnacksViaOpenRouter(
           recentlyUsed: [...prefs.recent],
           operatorTasteNotes: tasteNotesForPrompt(tasteNotes),
           instruction:
-            "Invent that many distinct no-cook snacks with price and nutrition when confident. Respect avoid and operatorTasteNotes (constraint PRIMARY, exampleDish secondary). Lean toward the style of likedSnacks when present, but invent new labels — do not only repeat liked ones. Do not reuse recentlyUsed. Capitalize the first letter of each name.",
+            "Invent that many distinct no-cook snacks (each snack is eaten on two consecutive menu days). Include price and nutrition when confident. Respect avoid and operatorTasteNotes (constraint PRIMARY, exampleDish secondary). Lean toward the style of likedSnacks when present, but invent new labels — do not only repeat liked ones. Do not reuse recentlyUsed. Capitalize the first letter of each name.",
         }),
       },
     ],
@@ -243,7 +248,8 @@ function extractJsonObject(text: string): string {
 }
 
 /**
- * Generate one snack label per day via AI (preferences-aware) and upsert menu_snacks.
+ * Generate one snack per day-pair (1–2 and 3–4) and write the same label
+ * to both days in the pair.
  */
 export async function generateSnacksForMenu(
   supabase: SupabaseClient,
@@ -252,7 +258,7 @@ export async function generateSnacksForMenu(
   dayCount: number,
   options: { chat?: ChatCompletionsFn } = {},
 ): Promise<GenerateSnacksResult> {
-  if (dayCount < 1 || dayCount > 4) {
+  if (dayCount !== FIXED_MENU_DAY_COUNT) {
     return { ok: false, error: "Некорректная длина меню." };
   }
 
@@ -273,10 +279,11 @@ export async function generateSnacksForMenu(
     return { ok: false, error: SUGGESTIONS_RU.tasteNotesFail };
   }
   const chat = options.chat ?? openRouterChatCompletions;
+  const pairCount = MENU_DAY_PAIRS.length;
 
   let drafts: SnackDraft[];
   try {
-    drafts = await generateSnackDrafts(dayCount, prefs, chat, tasteNotes);
+    drafts = await generateSnackDrafts(pairCount, prefs, chat, tasteNotes);
   } catch (err) {
     if (err instanceof OpenRouterError) {
       return {
@@ -286,29 +293,32 @@ export async function generateSnacksForMenu(
     }
     throw err;
   }
-  if (drafts.length < dayCount) {
+  if (drafts.length < pairCount) {
     return {
       ok: false,
       error: "Не удалось придумать достаточно перекусов с учётом предпочтений.",
     };
   }
 
-  const selectedDrafts = drafts.slice(0, dayCount);
+  const pairDrafts = drafts.slice(0, pairCount);
   await supabase.from("menu_snacks").delete().eq("menu_id", menuId);
 
-  const { error: insertError } = await supabase.from("menu_snacks").insert(
-    selectedDrafts.map((draft, i) => ({
+  const rows = MENU_DAY_PAIRS.flatMap((pair, pairIndex) => {
+    const draft = pairDrafts[pairIndex]!;
+    return pair.map((dayIndex) => ({
       menu_id: menuId,
-      day_index: i + 1,
+      day_index: dayIndex,
       ...snackRowPayload(draft),
-    })),
-  );
+    }));
+  });
+
+  const { error: insertError } = await supabase.from("menu_snacks").insert(rows);
 
   if (insertError) {
     return { ok: false, error: "Не удалось сохранить перекусы." };
   }
 
-  return { ok: true, labels: selectedDrafts.map((d) => d.label) };
+  return { ok: true, labels: pairDrafts.map((d) => d.label) };
 }
 
 async function generateSnackDrafts(
@@ -347,8 +357,63 @@ async function generateSnackDrafts(
   return drafts;
 }
 
+async function proposeReplacementSnackDraft(
+  supabase: SupabaseClient,
+  userId: string,
+  menuId: string,
+  chat: ChatCompletionsFn,
+): Promise<
+  | { ok: true; draft: SnackDraft }
+  | { ok: false; error: string }
+> {
+  const prefs = await loadSnackPreferences(supabase, userId, menuId);
+  if (!prefs) {
+    return { ok: false, error: "Не удалось загрузить предпочтения по перекусам." };
+  }
+
+  const { data: siblings } = await supabase
+    .from("menu_snacks")
+    .select("label")
+    .eq("menu_id", menuId);
+
+  const extraAvoid = new Set<string>();
+  for (const row of siblings ?? []) {
+    if (typeof row.label === "string") {
+      extraAvoid.add(normalizeSnackLabel(row.label));
+    }
+  }
+
+  const tasteNotes = await loadTasteNotes(supabase, userId);
+  if (!tasteNotes) {
+    return { ok: false, error: SUGGESTIONS_RU.tasteNotesFail };
+  }
+
+  try {
+    const proposed = await proposeSnacksViaOpenRouter(
+      1,
+      prefs,
+      chat,
+      tasteNotes,
+      extraAvoid,
+    );
+    const draft = proposed[0] ?? null;
+    if (!draft) {
+      return { ok: false, error: "Не удалось предложить другой перекус." };
+    }
+    return { ok: true, draft };
+  } catch (err) {
+    if (err instanceof OpenRouterError) {
+      return {
+        ok: false,
+        error: "Не удалось предложить другой перекус. Попробуйте ещё раз.",
+      };
+    }
+    throw err;
+  }
+}
+
 /**
- * Replace one day's snack with a different AI suggestion.
+ * Replace a snack for its whole day-pair (1–2 or 3–4) with one AI suggestion.
  */
 export async function resuggestSnackForMenu(
   supabase: SupabaseClient,
@@ -375,58 +440,25 @@ export async function resuggestSnackForMenu(
     return { ok: false, error: "Перекус не найден." };
   }
 
-  const prefs = await loadSnackPreferences(supabase, userId, menuId);
-  if (!prefs) {
-    return { ok: false, error: "Не удалось загрузить предпочтения по перекусам." };
+  const dayPair = menuDayPairForDay(snack.day_index);
+  if (!dayPair) {
+    return { ok: false, error: "Перекус не найден." };
   }
 
-  const { data: siblings } = await supabase
-    .from("menu_snacks")
-    .select("label")
-    .eq("menu_id", menuId);
-
-  const extraAvoid = new Set<string>();
-  for (const row of siblings ?? []) {
-    if (typeof row.label === "string") {
-      extraAvoid.add(normalizeSnackLabel(row.label));
-    }
-  }
-
-  const tasteNotes = await loadTasteNotes(supabase, userId);
-  if (!tasteNotes) {
-    return { ok: false, error: SUGGESTIONS_RU.tasteNotesFail };
-  }
   const chat = options.chat ?? openRouterChatCompletions;
-
-  let next: SnackDraft | null = null;
-  try {
-    const proposed = await proposeSnacksViaOpenRouter(
-      1,
-      prefs,
-      chat,
-      tasteNotes,
-      extraAvoid,
-    );
-    next = proposed[0] ?? null;
-  } catch (err) {
-    if (err instanceof OpenRouterError) {
-      return {
-        ok: false,
-        error: "Не удалось предложить другой перекус. Попробуйте ещё раз.",
-      };
-    }
-    throw err;
-  }
-
-  if (!next) {
-    return { ok: false, error: "Не удалось предложить другой перекус." };
-  }
+  const proposed = await proposeReplacementSnackDraft(
+    supabase,
+    userId,
+    menuId,
+    chat,
+  );
+  if (!proposed.ok) return proposed;
 
   const { error: updateError } = await supabase
     .from("menu_snacks")
-    .update(snackRowPayload(next))
-    .eq("id", snackId)
-    .eq("menu_id", menuId);
+    .update(snackRowPayload(proposed.draft))
+    .eq("menu_id", menuId)
+    .in("day_index", [...dayPair]);
 
   if (updateError) {
     if (updateError.code === "23505") {
@@ -435,7 +467,7 @@ export async function resuggestSnackForMenu(
     return { ok: false, error: "Не удалось заменить перекус." };
   }
 
-  return { ok: true, label: next.label };
+  return { ok: true, label: proposed.draft.label };
 }
 
 /**

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import {
-  isValidDayCount,
+  FIXED_MENU_DAY_COUNT,
   isValidPeopleCount,
   parseSelectedMeals,
 } from "@/domain/menu/constants";
@@ -22,14 +22,13 @@ const IDEMPOTENCY_TTL_MS = 120_000;
 
 /**
  * Create Menu skeleton + AI-fill slots, then redirect to slot edit.
- * (Story 2.3 — same CTA «Сгенерировать» as 2.1.)
+ * Always plans FIXED_MENU_DAY_COUNT days (pairs 1–2 and 3–4).
  */
 export async function createMenuSkeletonAction(
   _prev: CreateMenuSkeletonActionState,
   formData: FormData,
 ): Promise<CreateMenuSkeletonActionState> {
-  const rawDays = formData.get("dayCount");
-  const dayCount = typeof rawDays === "string" ? Number(rawDays) : Number.NaN;
+  const dayCount = FIXED_MENU_DAY_COUNT;
   const rawPeople = formData.get("peopleCount");
   const peopleCount =
     typeof rawPeople === "string" ? Number(rawPeople) : Number.NaN;
@@ -37,9 +36,6 @@ export async function createMenuSkeletonAction(
   const includeSnacks = formData.get("includeSnacks") === "1";
   const idempotencyKey = String(formData.get("idempotencyKey") ?? "").trim();
 
-  if (!isValidDayCount(dayCount)) {
-    return { ok: false, error: "Выберите длину меню от 1 до 4 дней." };
-  }
   if (!isValidPeopleCount(peopleCount)) {
     return { ok: false, error: "Укажите число человек от 1 до 8." };
   }

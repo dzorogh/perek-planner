@@ -67,3 +67,11 @@ All previously open items were closed in the deferred-work sweep. Strikethrough 
 - source_spec: `_bmad-output/implementation-artifacts/spec-menu-meal-mix-and-day-distribution.md`
   summary: `looksLikeHeavyAnimalProteinDish` still misses some one-pots named in invent prompt (голубцы, пельмени, манты).
   evidence: Pre-existing heuristic gap; invent can invent them but quota check may not count them as meat.
+
+## From spec-position-pair-menu-planning
+
+- ~~Resuggest still uses batch invent~~ — **Resolved:** `resuggest-slot.ts` + snack resuggest use position-pair invent (meal×pair×role).
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-position-pair-menu-planning.md`
+  summary: Unused DayLengthPicker component left in tree after create-form removal.
+  evidence: No imports remain from create-menu-form; safe delete later.

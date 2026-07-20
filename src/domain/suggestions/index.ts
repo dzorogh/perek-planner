@@ -15,6 +15,26 @@ export {
   mergeWithDeterministicFill,
 } from "@/domain/suggestions/generate-menu";
 export {
+  inventForPosition,
+  parsePositionInventJson,
+} from "@/domain/suggestions/invent-for-position";
+export {
+  parseMenuNamePlanJson,
+  parsePositionNamePlanJson,
+  planKey,
+  proposeMenuNamePlan,
+  proposePositionNamePlan,
+  repairMenuNamePlan,
+} from "@/domain/suggestions/plan-menu-names";
+export {
+  analyzeMenuVariety,
+  parseAnalyzeMenuVarietyJson,
+} from "@/domain/suggestions/analyze-menu-variety";
+export {
+  expandMenuRecipes,
+  parseExpandRecipesJson,
+} from "@/domain/suggestions/expand-menu-recipes";
+export {
   clearCompanionForSlot,
   refuseAndReplaceRecipeAcrossMenu,
   resuggestRecipeAcrossMenu,

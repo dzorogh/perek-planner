@@ -28,7 +28,6 @@ function DishLine({
   recipeValue,
   slotServings,
   batch,
-  recipeOccurrenceCount,
   target,
   canClear,
 }: {
@@ -41,7 +40,6 @@ function DishLine({
   recipeValue: RecipePerServingValue;
   slotServings: number;
   batch: RecipeBatchScale;
-  recipeOccurrenceCount: number;
   target: "main" | "companion";
   canClear?: boolean;
 }) {
@@ -70,7 +68,6 @@ function DishLine({
         slotId={slotId}
         hasRecipe
         target={target}
-        recipeOccurrenceCount={recipeOccurrenceCount}
         canClear={canClear}
       />
     </div>
@@ -81,12 +78,10 @@ function SlotCell({
   menuId,
   slot,
   allSlots,
-  recipeOccurrences,
 }: {
   menuId: string;
   slot: MenuSlotView;
   allSlots: MenuSlotView[];
-  recipeOccurrences: Map<string, number>;
 }) {
   if (!slot.recipeId) {
     return (
@@ -103,7 +98,6 @@ function SlotCell({
           slotId={slot.id}
           hasRecipe={false}
           target="main"
-          recipeOccurrenceCount={1}
         />
       </div>
     );
@@ -122,7 +116,6 @@ function SlotCell({
           recipeValue={slot.recipeValue}
           slotServings={slot.servings}
           batch={recipeBatchScale(allSlots, slot.recipeId)}
-          recipeOccurrenceCount={recipeOccurrences.get(slot.recipeId) ?? 1}
           target="main"
         />
       ) : null}
@@ -137,26 +130,12 @@ function SlotCell({
           recipeValue={slot.companionRecipeValue}
           slotServings={slot.servings}
           batch={recipeBatchScale(allSlots, slot.companionRecipeId)}
-          recipeOccurrenceCount={
-            recipeOccurrences.get(slot.companionRecipeId) ?? 1
-          }
           target="companion"
           canClear
         />
       ) : null}
     </div>
   );
-}
-
-function countRecipeOccurrences(slots: MenuSlotView[]): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const slot of slots) {
-    for (const id of [slot.recipeId, slot.companionRecipeId]) {
-      if (!id) continue;
-      counts.set(id, (counts.get(id) ?? 0) + 1);
-    }
-  }
-  return counts;
 }
 
 function mealsPresent(slots: MenuSlotView[]): MealSlot[] {
@@ -180,7 +159,6 @@ export function DayCardGrid({
 }: DayCardGridProps) {
   const days = Array.from({ length: dayCount }, (_, i) => i + 1);
   const menuHasSnacks = snacks.length > 0;
-  const recipeOccurrences = countRecipeOccurrences(slots);
   const meals = mealsPresent(slots);
   const snackServings =
     slots.find((s) => s.servings > 0)?.servings ?? 1;
@@ -231,7 +209,6 @@ export function DayCardGrid({
                 menuId={menuId}
                 slot={slot}
                 allSlots={slots}
-                recipeOccurrences={recipeOccurrences}
               />
             );
           })}

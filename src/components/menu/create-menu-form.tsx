@@ -2,7 +2,6 @@
 
 import { useActionState, useEffect, useState } from "react";
 
-import { DayLengthPicker } from "@/components/menu/day-length-picker";
 import {
   DEFAULT_MEAL_TYPES_SELECTION,
   MealTypesPicker,
@@ -16,8 +15,8 @@ import {
   type CreateMenuSkeletonActionState,
 } from "@/domain/menu/create-menu-actions";
 import {
-  DEFAULT_DAY_COUNT,
   DEFAULT_SERVINGS_PER_MEAL,
+  FIXED_MENU_DAY_COUNT,
 } from "@/domain/menu/constants";
 
 type CreateMenuFormProps = {
@@ -25,7 +24,6 @@ type CreateMenuFormProps = {
 };
 
 export function CreateMenuForm({ onPendingChange }: CreateMenuFormProps = {}) {
-  const [dayCount, setDayCount] = useState(DEFAULT_DAY_COUNT);
   const [peopleCount, setPeopleCount] = useState(DEFAULT_SERVINGS_PER_MEAL);
   const [mealTypes, setMealTypes] = useState<MealTypesSelection>(
     DEFAULT_MEAL_TYPES_SELECTION,
@@ -45,7 +43,7 @@ export function CreateMenuForm({ onPendingChange }: CreateMenuFormProps = {}) {
 
   return (
     <form action={formAction} className="w-full">
-      <input type="hidden" name="dayCount" value={dayCount} />
+      <input type="hidden" name="dayCount" value={FIXED_MENU_DAY_COUNT} />
       <input type="hidden" name="peopleCount" value={peopleCount} />
       <input type="hidden" name="meals" value={mealsCsv} />
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
@@ -55,34 +53,18 @@ export function CreateMenuForm({ onPendingChange }: CreateMenuFormProps = {}) {
         value={mealTypes.includeSnacks ? "1" : "0"}
       />
 
-      <div className="mt-1 grid grid-cols-1 gap-4 text-left min-[520px]:grid-cols-2 min-[520px]:gap-4">
-        <div>
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.04em] text-slot-label">
-            Сколько дней
-          </p>
-          <DayLengthPicker
-            value={dayCount}
-            onChange={setDayCount}
-            disabled={isPending}
-          />
-          <p className="mt-1.5 text-xs text-slot-label">
-            Макс. 4 — по сроку хранения
-          </p>
-        </div>
-
-        <div>
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.04em] text-slot-label">
-            Сколько человек
-          </p>
-          <PeopleCountPicker
-            value={peopleCount}
-            onChange={setPeopleCount}
-            disabled={isPending}
-          />
-          <p className="mt-1.5 text-xs text-slot-label">
-            Порций на каждый приём
-          </p>
-        </div>
+      <div className="mt-1 text-left">
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.04em] text-slot-label">
+          Сколько человек
+        </p>
+        <PeopleCountPicker
+          value={peopleCount}
+          onChange={setPeopleCount}
+          disabled={isPending}
+        />
+        <p className="mt-1.5 text-xs text-slot-label">
+          Меню на {FIXED_MENU_DAY_COUNT} дня · порций на каждый приём
+        </p>
       </div>
 
       <div className="mt-5 text-left">

@@ -26,8 +26,6 @@ type SlotCardActionsProps = {
   slotId: string;
   hasRecipe: boolean;
   target?: SlotDishTarget;
-  /** How many slots on this menu share the same recipe (for «Заменить все»). */
-  recipeOccurrenceCount?: number;
   /** Show «Убрать» for companion dishes. */
   canClear?: boolean;
 };
@@ -46,13 +44,14 @@ export function SlotCardActions({
   slotId,
   hasRecipe,
   target = "main",
-  recipeOccurrenceCount = 1,
   canClear = false,
 }: SlotCardActionsProps) {
   const [refuseOpen, setRefuseOpen] = useState(false);
+  const [suggestState, suggestFormAction, suggestPending] = useActionState<
+    SlotActionState,
+    FormData
+  >(resuggestSlotAction, null);
   const [resuggestState, resuggestFormAction, resuggestPending] =
-    useActionState<SlotActionState, FormData>(resuggestSlotAction, null);
-  const [resuggestAllState, resuggestAllFormAction, resuggestAllPending] =
     useActionState<SlotActionState, FormData>(
       resuggestRecipeAcrossMenuAction,
       null,
@@ -67,8 +66,7 @@ export function SlotCardActions({
   >(clearCompanionAction, null);
 
   const busy =
-    resuggestPending || resuggestAllPending || refusePending || clearPending;
-  const showReplaceAll = hasRecipe && recipeOccurrenceCount > 1;
+    suggestPending || resuggestPending || refusePending || clearPending;
 
   function runAction(
     action: (payload: FormData) => void,
@@ -113,22 +111,23 @@ export function SlotCardActions({
             align="end"
             className="min-w-[13rem] rounded-md border-border"
           >
-            <DropdownMenuItem
-              disabled={busy}
-              className="focus:bg-background focus:text-primary"
-              onSelect={() => runAction(resuggestFormAction)}
-            >
-              {resuggestPending ? "Заменяем…" : "Заменить"}
-            </DropdownMenuItem>
-            {showReplaceAll ? (
+            {hasRecipe ? (
               <DropdownMenuItem
                 disabled={busy}
                 className="focus:bg-background focus:text-primary"
-                onSelect={() => runAction(resuggestAllFormAction)}
+                onSelect={() => runAction(resuggestFormAction)}
               >
-                {resuggestAllPending ? "Заменяем…" : "Заменить все"}
+                {resuggestPending ? "Заменяем…" : "Заменить"}
               </DropdownMenuItem>
-            ) : null}
+            ) : (
+              <DropdownMenuItem
+                disabled={busy}
+                className="focus:bg-background focus:text-primary"
+                onSelect={() => runAction(suggestFormAction)}
+              >
+                {suggestPending ? "Подбираем…" : "Предложить"}
+              </DropdownMenuItem>
+            )}
             {canClear ? (
               <DropdownMenuItem
                 disabled={busy}
@@ -152,8 +151,8 @@ export function SlotCardActions({
       </div>
 
       <div className="mt-1 space-y-0.5 pr-10">
+        <ActionError state={suggestState} />
         <ActionError state={resuggestState} />
-        <ActionError state={resuggestAllState} />
         <ActionError state={refuseState} />
         <ActionError state={clearState} />
       </div>

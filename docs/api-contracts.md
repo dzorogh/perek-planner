@@ -11,8 +11,8 @@ Auth: Supabase session cookies (`@supabase/ssr`). OpenRouter only from server mo
 | Action | File | Behavior |
 |--------|------|----------|
 | `createMenuSkeletonAction` | `src/domain/menu/create-menu-actions.ts` | Validate day/people/meals → `generateBuyableMenuForUser` → redirect to `/plan/menu`; form idempotency key; rollback deletes menu on AI failure |
-| `resuggestSlotAction` | `src/domain/menu/slot-actions.ts` | Replace slot recipe (and companion rules) via invent/assign |
-| `resuggestRecipeAcrossMenuAction` | same | Replace same dish across menu slots |
+| `resuggestSlotAction` | `src/domain/menu/slot-actions.ts` | Fill empty cookable slot (day-pair invent); UI: «Предложить» |
+| `resuggestRecipeAcrossMenuAction` | same | Replace dish in every menu slot where it appears; UI: «Заменить» |
 | `refuseSlotAction` | same | Insert refusal + replace; may ban taste |
 | `clearCompanionAction` | same | Clear `companion_recipe_id` |
 | `continueToShoppingListAction` | same | Set `slot_edit_passed_at`, redirect to shopping list (`continueToPortionsAction` alias) |

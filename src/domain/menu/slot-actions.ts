@@ -39,6 +39,10 @@ function parseTarget(raw: FormDataEntryValue | null): SlotDishTarget {
   return raw === "companion" ? "companion" : "main";
 }
 
+/**
+ * Fill an empty cookable slot (day-pair invent). Not used when a dish already
+ * exists — use {@link resuggestRecipeAcrossMenuAction} instead.
+ */
 export async function resuggestSlotAction(
   _prev: SlotActionState,
   formData: FormData,
@@ -63,7 +67,7 @@ export async function resuggestSlotAction(
   return { ok: true };
 }
 
-/** Soft-replace this dish in every slot of the menu (shared replacement). */
+/** Soft-replace this dish in every slot of the menu where it appears. */
 export async function resuggestRecipeAcrossMenuAction(
   _prev: SlotActionState,
   formData: FormData,

@@ -12,6 +12,11 @@ const MEAL_SLOTS = [
   "late_dinner",
 ];
 const DEFAULT_MEALS = ["breakfast", "lunch", "dinner"];
+const FIXED_MENU_DAY_COUNT = 4;
+const MENU_DAY_PAIRS = [
+  [1, 2],
+  [3, 4],
+];
 
 function isValidDayCount(value) {
   return Number.isInteger(value) && value >= 1 && value <= 4;
@@ -76,6 +81,51 @@ for (const bad of [0, 5, 1.5, NaN]) {
     failed += 1;
   } else {
     console.log(`PASS: reject dayCount=${bad}`);
+  }
+}
+
+{
+  const createSlots = expectedSlotCount(FIXED_MENU_DAY_COUNT, DEFAULT_MEALS);
+  if (createSlots !== 12) {
+    console.error(`FAIL: fixed 4-day B/L/D should be 12 slots, got ${createSlots}`);
+    failed += 1;
+  } else {
+    console.log("PASS: fixed create menu is 4 days × 3 meals = 12 slots");
+  }
+  const covered = new Set(MENU_DAY_PAIRS.flat());
+  if (
+    MENU_DAY_PAIRS.length !== 2 ||
+    covered.size !== FIXED_MENU_DAY_COUNT ||
+    ![1, 2, 3, 4].every((d) => covered.has(d))
+  ) {
+    console.error("FAIL: MENU_DAY_PAIRS must cover days 1–4 as [1,2] and [3,4]");
+    failed += 1;
+  } else {
+    console.log("PASS: MENU_DAY_PAIRS are hard 1–2 and 3–4");
+  }
+
+  function menuDayPairForDay(dayIndex) {
+    for (const pair of MENU_DAY_PAIRS) {
+      if (pair[0] === dayIndex || pair[1] === dayIndex) return pair;
+    }
+    return null;
+  }
+  const p1 = menuDayPairForDay(1);
+  const p3 = menuDayPairForDay(3);
+  const p5 = menuDayPairForDay(5);
+  if (
+    !p1 ||
+    p1[0] !== 1 ||
+    p1[1] !== 2 ||
+    !p3 ||
+    p3[0] !== 3 ||
+    p3[1] !== 4 ||
+    p5 != null
+  ) {
+    console.error("FAIL: menuDayPairForDay mapping");
+    failed += 1;
+  } else {
+    console.log("PASS: menuDayPairForDay maps 1→[1,2], 3→[3,4]");
   }
 }
 

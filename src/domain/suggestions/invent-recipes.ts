@@ -682,7 +682,7 @@ function readString(raw: unknown): string | null {
   return typeof raw === "string" ? raw.trim() : null;
 }
 
-async function persistInventedRecipe(
+export async function persistInventedRecipe(
   supabase: SupabaseClient,
   draft: InventRecipeDraft,
 ): Promise<{ ok: true; recipeId: string } | { ok: false }> {

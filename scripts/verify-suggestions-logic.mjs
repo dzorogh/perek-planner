@@ -1856,6 +1856,82 @@ check(
   );
 }
 
+// Position-pair planning: same recipe on hard pairs 1–2 and 3–4.
+{
+  const MENU_DAY_PAIRS = [
+    [1, 2],
+    [3, 4],
+  ];
+  const slots = [];
+  for (const day of [1, 2, 3, 4]) {
+    for (const meal of ["breakfast", "lunch", "dinner"]) {
+      slots.push({
+        slotId: `${meal}${day}`,
+        dayIndex: day,
+        meal,
+      });
+    }
+  }
+  const mains = {
+    "breakfast:1-2": "bA",
+    "breakfast:3-4": "bB",
+    "lunch:1-2": "lA",
+    "lunch:3-4": "lB",
+    "dinner:1-2": "dA",
+    "dinner:3-4": "dB",
+  };
+  const companions = {
+    "lunch:1-2": "sideA",
+    "dinner:3-4": "sideB",
+  };
+  const plateKinds = {
+    "lunch:1-2": "needs_companion",
+    "lunch:3-4": "complete",
+    "dinner:1-2": "complete",
+    "dinner:3-4": "needs_companion",
+  };
+  const proposals = [];
+  for (const meal of ["breakfast", "lunch", "dinner"]) {
+    for (const pair of MENU_DAY_PAIRS) {
+      const key = `${meal}:${pair[0]}-${pair[1]}`;
+      const recipeId = mains[key];
+      const companionRecipeId = companions[key] ?? null;
+      const plateKind = meal === "breakfast" ? null : plateKinds[key];
+      for (const day of pair) {
+        proposals.push({
+          slotId: `${meal}${day}`,
+          recipeId,
+          companionRecipeId,
+          plateKind,
+        });
+      }
+    }
+  }
+  check("position pairs fill 12 B/L/D slots", proposals.length === 12);
+  check(
+    "lunch days 1–2 share main+companion",
+    proposals.find((p) => p.slotId === "lunch1")?.recipeId === "lA" &&
+      proposals.find((p) => p.slotId === "lunch2")?.recipeId === "lA" &&
+      proposals.find((p) => p.slotId === "lunch1")?.companionRecipeId ===
+        "sideA" &&
+      proposals.find((p) => p.slotId === "lunch2")?.companionRecipeId ===
+        "sideA",
+  );
+  check(
+    "lunch days 3–4 complete has no companion",
+    proposals.find((p) => p.slotId === "lunch3")?.recipeId === "lB" &&
+      proposals.find((p) => p.slotId === "lunch3")?.companionRecipeId == null &&
+      proposals.find((p) => p.slotId === "lunch4")?.companionRecipeId == null,
+  );
+  check(
+    "breakfast never has companion in pair model",
+    proposals
+      .filter((p) => p.slotId.startsWith("breakfast"))
+      .every((p) => p.companionRecipeId == null),
+  );
+  void slots;
+}
+
 if (failed > 0) {
   console.log(`${failed} case(s) failed`);
   process.exit(1);
