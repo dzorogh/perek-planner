@@ -58,6 +58,7 @@ function addKnown(
 }
 
 type SlotLike = {
+  dayIndex?: number;
   servings: number;
   recipeId: string | null;
   companionRecipeId?: string | null;
@@ -65,39 +66,92 @@ type SlotLike = {
   companionRecipeValue?: RecipePerServingValue | null;
 };
 
+type SnackLike = {
+  dayIndex: number;
+  value: RecipePerServingValue;
+};
+
+export type SumMenuTotalsOptions = {
+  snacks?: readonly SnackLike[];
+  /** People per meal — same scale as snack slot cards. Default 2. */
+  snackServings?: number;
+};
+
+const EMPTY_TOTALS: ScaledRecipeTotals = {
+  priceCents: null,
+  caloriesKcal: null,
+  proteinG: null,
+  fatG: null,
+  carbsG: null,
+};
+
+function resolveServings(raw: number | undefined, fallback: number): number {
+  if (Number.isFinite(raw) && (raw as number) >= 1) {
+    return Math.trunc(raw as number);
+  }
+  return fallback;
+}
+
+function accumulateValue(
+  acc: ScaledRecipeTotals,
+  value: RecipePerServingValue | null | undefined,
+  servings: number,
+): ScaledRecipeTotals {
+  if (!value) return acc;
+  const scaled = scalePerServing(value, servings);
+  return {
+    priceCents: addKnown(acc.priceCents, scaled.priceCents),
+    caloriesKcal: addKnown(acc.caloriesKcal, scaled.caloriesKcal),
+    proteinG: addKnown(acc.proteinG, scaled.proteinG),
+    fatG: addKnown(acc.fatG, scaled.fatG),
+    carbsG: addKnown(acc.carbsG, scaled.carbsG),
+  };
+}
+
 /**
- * Sum menu totals across main + companion placements.
+ * Sum menu totals across main + companion placements (+ optional snacks).
  * Only known values contribute; missing fields stay null if never seen.
  */
-export function sumMenuTotals(slots: readonly SlotLike[]): ScaledRecipeTotals {
-  let priceCents: number | null = null;
-  let caloriesKcal: number | null = null;
-  let proteinG: number | null = null;
-  let fatG: number | null = null;
-  let carbsG: number | null = null;
+export function sumMenuTotals(
+  slots: readonly SlotLike[],
+  options: SumMenuTotalsOptions = {},
+): ScaledRecipeTotals {
+  const snacks = options.snacks ?? [];
+  const snackServings = resolveServings(options.snackServings, 2);
+  let acc: ScaledRecipeTotals = { ...EMPTY_TOTALS };
 
   for (const slot of slots) {
-    const servings =
-      Number.isFinite(slot.servings) && slot.servings >= 1
-        ? Math.trunc(slot.servings)
-        : 2;
-
-    const placements: Array<RecipePerServingValue | null | undefined> = [];
-    if (slot.recipeId) placements.push(slot.recipeValue);
-    if (slot.companionRecipeId) placements.push(slot.companionRecipeValue);
-
-    for (const value of placements) {
-      if (!value) continue;
-      const scaled = scalePerServing(value, servings);
-      priceCents = addKnown(priceCents, scaled.priceCents);
-      caloriesKcal = addKnown(caloriesKcal, scaled.caloriesKcal);
-      proteinG = addKnown(proteinG, scaled.proteinG);
-      fatG = addKnown(fatG, scaled.fatG);
-      carbsG = addKnown(carbsG, scaled.carbsG);
+    const servings = resolveServings(slot.servings, 2);
+    if (slot.recipeId) {
+      acc = accumulateValue(acc, slot.recipeValue, servings);
+    }
+    if (slot.companionRecipeId) {
+      acc = accumulateValue(acc, slot.companionRecipeValue, servings);
     }
   }
 
-  return { priceCents, caloriesKcal, proteinG, fatG, carbsG };
+  for (const snack of snacks) {
+    acc = accumulateValue(acc, snack.value, snackServings);
+  }
+
+  return acc;
+}
+
+/** Day column total: slots + snacks for one dayIndex. */
+export function sumDayTotals(
+  slots: readonly SlotLike[],
+  dayIndex: number,
+  options: SumMenuTotalsOptions = {},
+): ScaledRecipeTotals {
+  return sumMenuTotals(
+    slots.filter((slot) => slot.dayIndex === dayIndex),
+    {
+      ...options,
+      snacks: (options.snacks ?? []).filter(
+        (snack) => snack.dayIndex === dayIndex,
+      ),
+    },
+  );
 }
 
 export function hasAnyTotal(totals: ScaledRecipeTotals): boolean {

@@ -14,7 +14,11 @@ import {
   type RecipeBatchScale,
 } from "@/domain/recipes/batch-scale";
 import type { RecipeIngredientView } from "@/domain/recipes/load-recipe";
-import type { RecipePerServingValue } from "@/domain/recipes/scale-totals";
+import {
+  formatCompactValueLine,
+  sumDayTotals,
+  type RecipePerServingValue,
+} from "@/domain/recipes/scale-totals";
 
 type DayCardGridProps = {
   menuId: string;
@@ -230,7 +234,7 @@ export function DayCardGrid({
         <div
           data-component="meal-lane"
           data-meal="snack"
-          className="grid gap-4 border-b border-[#F1F5F9] py-4 last:border-b-0"
+          className="grid gap-4 border-b border-[#F1F5F9] py-4"
           style={gridStyle}
         >
           <div className="pt-3 text-[11px] font-semibold uppercase tracking-[0.04em] text-slot-label">
@@ -251,6 +255,33 @@ export function DayCardGrid({
           })}
         </div>
       ) : null}
+
+      <div
+        data-component="day-totals"
+        className="grid gap-4 border-t border-border pt-4"
+        style={gridStyle}
+      >
+        <div className="pt-0.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-slot-label">
+          Итого
+        </div>
+        {days.map((dayIndex) => {
+          const line = formatCompactValueLine(
+            sumDayTotals(slots, dayIndex, {
+              snacks,
+              snackServings,
+            }),
+          );
+          return (
+            <div
+              key={`day-total-${dayIndex}`}
+              data-day-index={dayIndex}
+              className="text-sm font-semibold tabular-nums text-foreground"
+            >
+              {line ?? "—"}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -83,7 +83,12 @@ export default async function PlanMenuPage({ searchParams }: PlanMenuPageProps) 
         snacks={menu.snacks}
       />
 
-      <MenuTotalsBar totals={sumMenuTotals(menu.slots)} />
+      <MenuTotalsBar
+        totals={sumMenuTotals(menu.slots, {
+          snacks: menu.snacks,
+          snackServings: menu.slots.find((s) => s.servings > 0)?.servings ?? 2,
+        })}
+      />
 
       <MenuDishList dishes={summarizeMenuDishes(menu.slots)} />
 

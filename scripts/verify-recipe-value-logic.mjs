@@ -25,33 +25,61 @@ function addKnown(acc, next) {
   return (acc ?? 0) + next;
 }
 
-function sumMenuTotals(slots) {
-  let priceCents = null;
-  let caloriesKcal = null;
-  let proteinG = null;
-  let fatG = null;
-  let carbsG = null;
+function resolveServings(raw, fallback) {
+  if (Number.isFinite(raw) && raw >= 1) return Math.trunc(raw);
+  return fallback;
+}
+
+function accumulateValue(acc, value, servings) {
+  if (!value) return acc;
+  const scaled = scalePerServing(value, servings);
+  return {
+    priceCents: addKnown(acc.priceCents, scaled.priceCents),
+    caloriesKcal: addKnown(acc.caloriesKcal, scaled.caloriesKcal),
+    proteinG: addKnown(acc.proteinG, scaled.proteinG),
+    fatG: addKnown(acc.fatG, scaled.fatG),
+    carbsG: addKnown(acc.carbsG, scaled.carbsG),
+  };
+}
+
+function sumMenuTotals(slots, options = {}) {
+  const snacks = options.snacks ?? [];
+  const snackServings = resolveServings(options.snackServings, 2);
+  let acc = {
+    priceCents: null,
+    caloriesKcal: null,
+    proteinG: null,
+    fatG: null,
+    carbsG: null,
+  };
 
   for (const slot of slots) {
-    const servings =
-      Number.isFinite(slot.servings) && slot.servings >= 1
-        ? Math.trunc(slot.servings)
-        : 2;
-    const placements = [];
-    if (slot.recipeId) placements.push(slot.recipeValue);
-    if (slot.companionRecipeId) placements.push(slot.companionRecipeValue);
-    for (const value of placements) {
-      if (!value) continue;
-      const scaled = scalePerServing(value, servings);
-      priceCents = addKnown(priceCents, scaled.priceCents);
-      caloriesKcal = addKnown(caloriesKcal, scaled.caloriesKcal);
-      proteinG = addKnown(proteinG, scaled.proteinG);
-      fatG = addKnown(fatG, scaled.fatG);
-      carbsG = addKnown(carbsG, scaled.carbsG);
+    const servings = resolveServings(slot.servings, 2);
+    if (slot.recipeId) {
+      acc = accumulateValue(acc, slot.recipeValue, servings);
+    }
+    if (slot.companionRecipeId) {
+      acc = accumulateValue(acc, slot.companionRecipeValue, servings);
     }
   }
 
-  return { priceCents, caloriesKcal, proteinG, fatG, carbsG };
+  for (const snack of snacks) {
+    acc = accumulateValue(acc, snack.value, snackServings);
+  }
+
+  return acc;
+}
+
+function sumDayTotals(slots, dayIndex, options = {}) {
+  return sumMenuTotals(
+    slots.filter((slot) => slot.dayIndex === dayIndex),
+    {
+      ...options,
+      snacks: (options.snacks ?? []).filter(
+        (snack) => snack.dayIndex === dayIndex,
+      ),
+    },
+  );
 }
 
 function formatPriceRub(priceCents) {
@@ -175,6 +203,63 @@ assert(
     { servings: 2, recipeId: "x", recipeValue: unknown },
   ]).priceCents === null,
 );
+
+const snackApple = {
+  priceCentsPerServing: 4000,
+  caloriesKcalPerServing: 150,
+  proteinGPerServing: null,
+  fatGPerServing: null,
+  carbsGPerServing: null,
+};
+const withSnacks = sumMenuTotals(
+  [
+    {
+      dayIndex: 1,
+      servings: 2,
+      recipeId: "a",
+      recipeValue: chicken,
+    },
+  ],
+  {
+    snacks: [{ dayIndex: 1, value: snackApple }],
+    snackServings: 2,
+  },
+);
+assert(
+  "menu sum includes snacks",
+  withSnacks.priceCents === 18000 * 2 + 4000 * 2,
+);
+assert(
+  "menu sum snack kcal",
+  withSnacks.caloriesKcal === 450 * 2 + 150 * 2,
+);
+
+const day1 = sumDayTotals(
+  [
+    {
+      dayIndex: 1,
+      servings: 2,
+      recipeId: "a",
+      recipeValue: chicken,
+    },
+    {
+      dayIndex: 2,
+      servings: 2,
+      recipeId: "b",
+      recipeValue: omelette,
+    },
+  ],
+  1,
+  {
+    snacks: [
+      { dayIndex: 1, value: snackApple },
+      { dayIndex: 2, value: snackApple },
+    ],
+    snackServings: 2,
+  },
+);
+assert("day total ignores other days", day1.priceCents === 18000 * 2 + 4000 * 2);
+assert("day total kcal", day1.caloriesKcal === 450 * 2 + 150 * 2);
 
 assert("format price", formatPriceRub(18000) === "180 ₽");
 assert("format null price", formatPriceRub(null) === null);

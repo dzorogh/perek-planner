@@ -2,7 +2,6 @@ import {
   formatCompactValueLine,
   formatKbjuLine,
   formatPerServingDetailLine,
-  formatPriceRub,
   scalePerServing,
   type RecipePerServingValue,
   type ScaledRecipeTotals,
@@ -50,9 +49,15 @@ export function MenuTotalsBar({
   totals,
   className = "mt-6 max-w-xl",
 }: MenuTotalsBarProps) {
-  const price = formatPriceRub(totals.priceCents);
+  const compact = formatCompactValueLine(totals);
   const kbju = formatKbjuLine(totals);
-  if (!price && !kbju) return null;
+  // Compact already has kcal; show macros-only remainder when present.
+  const macrosOnly = (() => {
+    if (!kbju) return null;
+    const parts = kbju.split(" · ").filter((p) => !p.endsWith(" ккал"));
+    return parts.length > 0 ? parts.join(" · ") : null;
+  })();
+  if (!compact && !macrosOnly) return null;
 
   return (
     <section
@@ -67,8 +72,10 @@ export function MenuTotalsBar({
         Итого по меню
       </h2>
       <div className="mt-2 space-y-1 text-sm tabular-nums text-muted-foreground">
-        {price ? <p>{price}</p> : null}
-        {kbju ? <p>{kbju}</p> : null}
+        {compact ? (
+          <p className="font-semibold text-foreground">{compact}</p>
+        ) : null}
+        {macrosOnly ? <p>{macrosOnly}</p> : null}
       </div>
     </section>
   );

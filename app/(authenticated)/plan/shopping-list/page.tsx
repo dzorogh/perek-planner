@@ -71,6 +71,9 @@ export default async function PlanShoppingListPage({
   }
 
   const slots = menuLoaded.menu?.slots ?? [];
+  const snacks = menuLoaded.menu?.snacks ?? [];
+  const snackServings =
+    slots.find((s) => s.servings > 0)?.servings ?? 2;
   const recipeMap = new Map<
     string,
     {
@@ -119,7 +122,10 @@ export default async function PlanShoppingListPage({
           создания меню). Копия всегда доступна.
         </p>
       </div>
-      <MenuTotalsBar totals={sumMenuTotals(slots)} className="mb-6 max-w-xl" />
+      <MenuTotalsBar
+        totals={sumMenuTotals(slots, { snacks, snackServings })}
+        className="mb-6 max-w-xl"
+      />
       <ShoppingListClient list={built.list} />
       {recipes.length > 0 ? (
         <section className="mt-8 max-w-xl">
