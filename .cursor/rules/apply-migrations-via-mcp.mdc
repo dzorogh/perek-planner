@@ -1,0 +1,13 @@
+---
+description: Always apply Supabase migrations via MCP immediately after creating them
+alwaysApply: true
+---
+
+# Apply migrations via Supabase MCP
+
+When you add or change a file under `supabase/migrations/`:
+
+1. **Apply it yourself** through the Supabase MCP (`user-supabase` → `apply_migration`) in the same turn — do not only leave a reminder for the user.
+2. Use the migration’s SQL contents; name it clearly (snake_case, matching the file intent).
+3. If MCP auth fails, call `mcp_auth` for that server once, then retry. If apply still fails, report the error and the local file path.
+4. Do not tell the user “apply this migration yourself” as the primary next step unless MCP is unavailable after retry.
