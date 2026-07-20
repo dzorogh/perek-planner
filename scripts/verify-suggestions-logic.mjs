@@ -271,7 +271,7 @@ function isBreakfastMeal(meal) {
   return meal === "breakfast" || meal === "second_breakfast";
 }
 
-function looksLikeProteinDish(name) {
+function looksLikeHeavyAnimalProteinDish(name) {
   const n = normalizeDishName(name);
   if (!n) return false;
   if (
@@ -284,26 +284,36 @@ function looksLikeProteinDish(name) {
   ) {
     return false;
   }
+  if (/(^|\s)(творожн|сырны|сырн)[а-я]*\s+котлет/.test(n)) return false;
   if (
-    /(^|\s)(мяс|говяд|свинин|барани|телятин|куриц|курин|индейк|утин|утка|гусин|грудк|окороч|филе|фарш|стейк|шашлык|гуляш|бефстроган|люля|тефтел|фрикадель|зразы|отбивн|шницел|бифштекс|колбас|сосиск|ветчин|бекон|печень|печенк|язык)/.test(
+    /(^|\s)(мяс|говяд|свинин|барани|телятин|куриц|курин|цыплен|индейк|утин|утка|гусин|кролик|грудк|окороч|филе|фарш|стейк|шашлык|гуляш|бефстроган|люля|тефтел|фрикадель|зразы|отбивн|шницел|бифштекс|колбас|сосиск|ветчин|бекон|печень|печенк|язык)/.test(
       n,
     )
   ) {
     return true;
   }
   if (
-    /(^|\s)(рыб|лосос|форел|треск|минтай|хек|скумбр|сельд|тунец|креветк|кальмар|миди)/.test(
+    /(^|\s)(рыб|лосос|семг|сёмг|форел|треск|минтай|хек|скумбр|тунец|креветк|кальмар|миди)/.test(
       n,
     )
   ) {
     return true;
   }
-  if (/(^|\s)(яйц|яичниц|омлет)/.test(n)) return true;
-  if (/(^|\s)(творог|сырник)/.test(n)) return true;
-  if (/(^|\s)(фасол|чечевиц|нут|горохов)/.test(n)) return true;
-  if (/(^|\s)гриб/.test(n)) return true;
+  // «сельд» = herring; do not match «сельдерей».
+  if (/(^|\s)сельд(?!ере)/.test(n)) return true;
   if (/(^|\s)котлет/.test(n)) return true;
   if (/(^|\s)(плов|лазань|гуляш)/.test(n)) return true;
+  return false;
+}
+
+function looksLikeProteinDish(name) {
+  const n = normalizeDishName(name);
+  if (!n) return false;
+  if (looksLikeHeavyAnimalProteinDish(name)) return true;
+  if (/(^|\s)(яйц|яичниц|омлет)/.test(n)) return true;
+  if (/(^|\s)(творог|творожн|сырник|сырны|сырн)[а-я]*/.test(n)) return true;
+  if (/(^|\s)(фасол|чечевиц|нут|горохов)/.test(n)) return true;
+  if (/(^|\s)гриб/.test(n)) return true;
   return false;
 }
 
@@ -373,9 +383,9 @@ function normalizePlateAssignments(slots, proposals, candidates) {
   const outBySlot = new Map();
   for (const proposal of ordered) {
     const meal = mealBySlot.get(proposal.slotId);
-    const mainHasProtein = looksLikeProteinDish(
-      nameById.get(proposal.recipeId) ?? "",
-    );
+    const mainName = nameById.get(proposal.recipeId) ?? "";
+    const mainHasProtein = looksLikeProteinDish(mainName);
+    const mainIsHeavy = looksLikeHeavyAnimalProteinDish(mainName);
     if (!meal || !mealAllowsCompanion(meal)) {
       outBySlot.set(proposal.slotId, {
         slotId: proposal.slotId,
@@ -404,13 +414,25 @@ function normalizePlateAssignments(slots, proposals, candidates) {
     ) {
       companion = null;
     }
+    const companionName = companion ? (nameById.get(companion) ?? "") : "";
+    if (
+      companion &&
+      mainIsHeavy &&
+      looksLikeHeavyAnimalProteinDish(companionName) &&
+      !looksLikeCompanionOnly(companionName)
+    ) {
+      companion = null;
+    }
     if (!companion) {
       companion = pickCompanionCandidate(
         candidates,
         proposal.recipeId,
         used,
         avoidAsCompanion,
-        { requireProtein: !mainHasProtein },
+        {
+          requireProtein: !mainHasProtein,
+          forbidHeavyAnimal: mainHasProtein,
+        },
       );
     }
     recordCompanion(companion, day, used, usedOnDay);
@@ -557,6 +579,227 @@ check(
   "normalize rejects protein-less plateKind=complete",
   proteinLessComplete.find((a) => a.slotId === "d2")?.companionRecipeId ===
     "chicken",
+);
+
+check(
+  "heavy animal: chicken is heavy",
+  looksLikeHeavyAnimalProteinDish("Куриные грудки запечённые с овощами"),
+);
+check(
+  "heavy animal: fish is heavy",
+  looksLikeHeavyAnimalProteinDish("Запечённая рыба с лимоном"),
+);
+check(
+  "heavy animal: egg salad is not heavy",
+  !looksLikeHeavyAnimalProteinDish("Шпинатный салат с яйцом"),
+);
+check(
+  "heavy animal: mushroom sauce is not heavy",
+  !looksLikeHeavyAnimalProteinDish("Грибной соус"),
+);
+check(
+  "heavy animal: dairy cutlets are not heavy",
+  !looksLikeHeavyAnimalProteinDish("Творожные котлеты"),
+);
+check(
+  "heavy animal: celery is not herring",
+  !looksLikeHeavyAnimalProteinDish("Салат с сельдереем"),
+);
+check(
+  "heavy animal: herring is heavy",
+  looksLikeHeavyAnimalProteinDish("Сельдь под шубой"),
+);
+
+const chickenFishPlate = normalizePlateAssignments(
+  [{ slotId: "d1", dayIndex: 1, meal: "dinner" }],
+  [
+    {
+      slotId: "d1",
+      recipeId: "chicken",
+      companionRecipeId: "fish",
+      plateKind: "needs_companion",
+    },
+  ],
+  [
+    {
+      recipeId: "chicken",
+      name: "Куриные грудки запечённые с овощами",
+    },
+    {
+      recipeId: "fish",
+      name: "Запечённая рыба с лимоном",
+      plateRole: "companion",
+    },
+    {
+      recipeId: "puree",
+      name: "Картофельное пюре",
+      plateRole: "companion",
+    },
+  ],
+);
+check(
+  "normalize replaces chicken+fish with carb side",
+  chickenFishPlate.find((a) => a.slotId === "d1")?.companionRecipeId ===
+    "puree",
+);
+
+const chickenOnlyFish = normalizePlateAssignments(
+  [{ slotId: "d1", dayIndex: 1, meal: "dinner" }],
+  [
+    {
+      slotId: "d1",
+      recipeId: "chicken",
+      companionRecipeId: "fish",
+      plateKind: "needs_companion",
+    },
+  ],
+  [
+    {
+      recipeId: "chicken",
+      name: "Куриные грудки запечённые с овощами",
+    },
+    {
+      recipeId: "fish",
+      name: "Запечённая рыба с лимоном",
+      plateRole: "companion",
+    },
+  ],
+);
+check(
+  "normalize clears companion when only fish left for chicken main",
+  chickenOnlyFish.find((a) => a.slotId === "d1")?.companionRecipeId == null,
+);
+
+const chickenSauce = normalizePlateAssignments(
+  [{ slotId: "d1", dayIndex: 1, meal: "dinner" }],
+  [
+    {
+      slotId: "d1",
+      recipeId: "chicken",
+      companionRecipeId: "sauce",
+      plateKind: "needs_companion",
+    },
+  ],
+  [
+    { recipeId: "chicken", name: "Куриная грудка" },
+    {
+      recipeId: "sauce",
+      name: "Грибной соус",
+      plateRole: "companion",
+    },
+  ],
+);
+check(
+  "normalize keeps mushroom sauce with chicken main",
+  chickenSauce.find((a) => a.slotId === "d1")?.companionRecipeId === "sauce",
+);
+
+const vegFish = normalizePlateAssignments(
+  [{ slotId: "d1", dayIndex: 1, meal: "dinner" }],
+  [
+    {
+      slotId: "d1",
+      recipeId: "cutlets",
+      companionRecipeId: "fish",
+      plateKind: "needs_companion",
+    },
+  ],
+  [
+    { recipeId: "cutlets", name: "Морковные котлеты" },
+    {
+      recipeId: "fish",
+      name: "Запечённая рыба с лимоном",
+      plateRole: "companion",
+    },
+  ],
+);
+check(
+  "normalize keeps fish companion for vegetable cutlets",
+  vegFish.find((a) => a.slotId === "d1")?.companionRecipeId === "fish",
+);
+
+const chickenAutofill = normalizePlateAssignments(
+  [{ slotId: "d1", dayIndex: 1, meal: "dinner" }],
+  [
+    {
+      slotId: "d1",
+      recipeId: "chicken",
+      companionRecipeId: null,
+      plateKind: "needs_companion",
+    },
+  ],
+  [
+    { recipeId: "chicken", name: "Куриная грудка" },
+    {
+      recipeId: "fish",
+      name: "Запечённая рыба с лимоном",
+      plateRole: "companion",
+    },
+    {
+      recipeId: "puree",
+      name: "Картофельное пюре",
+      plateRole: "companion",
+    },
+  ],
+);
+check(
+  "normalize auto-fill for protein main prefers puree over fish",
+  chickenAutofill.find((a) => a.slotId === "d1")?.companionRecipeId ===
+    "puree",
+);
+
+const meatMeatPlate = normalizePlateAssignments(
+  [{ slotId: "d1", dayIndex: 1, meal: "dinner" }],
+  [
+    {
+      slotId: "d1",
+      recipeId: "cutlets",
+      companionRecipeId: "chicken",
+      plateKind: "needs_companion",
+    },
+  ],
+  [
+    { recipeId: "cutlets", name: "Котлеты из говядины" },
+    {
+      recipeId: "chicken",
+      name: "Куриная грудка",
+      plateRole: "companion",
+    },
+    {
+      recipeId: "puree",
+      name: "Картофельное пюре",
+      plateRole: "companion",
+    },
+  ],
+);
+check(
+  "normalize replaces meat+meat with carb side",
+  meatMeatPlate.find((a) => a.slotId === "d1")?.companionRecipeId === "puree",
+);
+
+const chickenEggCompanion = normalizePlateAssignments(
+  [{ slotId: "d1", dayIndex: 1, meal: "dinner" }],
+  [
+    {
+      slotId: "d1",
+      recipeId: "chicken",
+      companionRecipeId: "egg",
+      plateKind: "needs_companion",
+    },
+  ],
+  [
+    { recipeId: "chicken", name: "Куриная грудка" },
+    {
+      recipeId: "egg",
+      name: "Шпинатный салат с яйцом",
+      plateRole: "companion",
+    },
+  ],
+);
+check(
+  "normalize keeps egg companion with chicken main",
+  chickenEggCompanion.find((a) => a.slotId === "d1")?.companionRecipeId ===
+    "egg",
 );
 
 function groupSlotsByMeal(slots) {
@@ -935,10 +1178,17 @@ function pickCompanionCandidate(
   const others = candidates.filter(
     (c) => c.recipeId !== mainRecipeId && !avoidIds.has(c.recipeId),
   );
-  const pool =
+  let pool =
     others.length > 0
       ? others
       : candidates.filter((c) => c.recipeId !== mainRecipeId);
+  if (options.forbidHeavyAnimal) {
+    pool = pool.filter(
+      (c) =>
+        looksLikeCompanionOnly(c.name) ||
+        !looksLikeHeavyAnimalProteinDish(c.name),
+    );
+  }
   if (pool.length === 0) return null;
   const prefer = (list) => {
     if (list.length === 0) return null;

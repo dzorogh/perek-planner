@@ -203,6 +203,26 @@ export function looksLikeCompanionOnly(name: string): boolean {
 }
 
 /**
+ * True when the dish name signals meat or fish (heavy animal protein).
+ * Egg / mushroom / legume / dairy protein do NOT count — those may still
+ * sit beside a meat/fish main as a light add-on or sauce base.
+ */
+export function looksLikeHeavyAnimalProteinDish(name: string): boolean {
+  const n = normalizeDishName(name);
+  if (!n) return false;
+  if (looksLikeVegetableCutlet(n)) return false;
+  // Dairy cutlets are light protein, not a second meat/fish main.
+  if (/(^|\s)(творожн|сырны|сырн)[а-я]*\s+котлет/.test(n)) return false;
+  if (containsProteinStem(n, MEAT_PROTEIN_STEMS)) return true;
+  if (containsFishProteinStem(n)) return true;
+  // Meat/fish cutlets (vegetable/dairy cutlets already excluded above).
+  if (/(^|\s)котлет/.test(n)) return true;
+  // Classic one-pots that imply meat/fish in Russian home cooking.
+  if (/(^|\s)(плов|лазань|гуляш)/.test(n)) return true;
+  return false;
+}
+
+/**
  * True when the dish name signals a real protein component for a lunch/dinner plate.
  * Vegetable «котлеты» (carrot/cabbage/…) do not count — they need a protein companion.
  * Note: JS `\b` is ASCII-only — use (^|\s) edges for Cyrillic.
@@ -214,37 +234,35 @@ export function looksLikeProteinDish(name: string): boolean {
 
   // Animal / seafood / egg / dairy-protein / legumes / mushrooms (simple add-on).
   // Stems are chosen to avoid cookie/bakery false positives (печенье, баранки).
-  if (containsProteinStem(n, MEAT_PROTEIN_STEMS)) {
-    return true;
-  }
-  if (containsProteinStem(n, FISH_PROTEIN_STEMS)) {
-    return true;
-  }
+  if (looksLikeHeavyAnimalProteinDish(name)) return true;
   if (/(^|\s)(яйц|яичниц|омлет)/.test(n)) return true;
-  if (/(^|\s)(творог|сырник)/.test(n)) return true;
+  if (/(^|\s)(творог|творожн|сырник|сырны|сырн)[а-я]*/.test(n)) return true;
   if (/(^|\s)(фасол|чечевиц|нут|горохов)/.test(n)) return true;
   if (/(^|\s)гриб/.test(n)) return true;
-  // Meat/fish cutlets (not vegetable — those returned false above).
-  if (/(^|\s)котлет/.test(n)) return true;
-  // Classic one-pots that imply protein in Russian home cooking.
-  if (/(^|\s)(плов|лазань|гуляш)/.test(n)) return true;
   return false;
 }
 
 const MEAT_PROTEIN_STEMS = [
-  "мяс", "говяд", "свинин", "барани", "телятин", "куриц", "курин", "индейк",
-  "утин", "утка", "гусин", "грудк", "окороч", "филе", "фарш", "стейк",
-  "шашлык", "гуляш", "бефстроган", "люля", "тефтел", "фрикадель", "зразы",
-  "отбивн", "шницел", "бифштекс", "колбас", "сосиск", "ветчин", "бекон",
-  "печень", "печенк", "язык",
+  "мяс", "говяд", "свинин", "барани", "телятин", "куриц", "курин", "цыплен",
+  "индейк", "утин", "утка", "гусин", "кролик", "грудк", "окороч", "филе",
+  "фарш", "стейк", "шашлык", "гуляш", "бефстроган", "люля", "тефтел",
+  "фрикадель", "зразы", "отбивн", "шницел", "бифштекс", "колбас", "сосиск",
+  "ветчин", "бекон", "печень", "печенк", "язык",
 ] as const;
 const FISH_PROTEIN_STEMS = [
-  "рыб", "лосос", "форел", "треск", "минтай", "хек", "скумбр", "сельд",
+  "рыб", "лосос", "семг", "сёмг", "форел", "треск", "минтай", "хек", "скумбр",
   "тунец", "креветк", "кальмар", "миди",
 ] as const;
 
 function containsProteinStem(name: string, stems: readonly string[]): boolean {
   return stems.some((stem) => name.includes(stem));
+}
+
+/** Fish stems plus «сельд*» that is not «сельдерей». */
+function containsFishProteinStem(name: string): boolean {
+  if (containsProteinStem(name, FISH_PROTEIN_STEMS)) return true;
+  // «сельд» matches herring; «сельдерей» must not count as fish.
+  return /(^|\s)сельд(?!ере)/.test(name);
 }
 
 /** Carrot/cabbage/potato/… cutlets — carb/veg shape, not a protein main. */

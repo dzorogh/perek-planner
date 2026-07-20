@@ -51,3 +51,9 @@ All previously open items were closed in the deferred-work sweep. Strikethrough 
 - **Resolved:** Authenticated RLS script wired into `verify:rls` (skips if no operator creds)
 - **Resolved:** `npm run verify:e2e` alias (kept out of default `verify` — needs OpenRouter/operator)
 - **Resolved (decided keep):** Auth middleware fail-open on transient `getUser`
+
+## From spec-fix-protein-protein-plate-pairing
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-fix-protein-protein-plate-pairing.md`
+  summary: Verifier still duplicates plate/meal-fit helpers instead of importing TS domain.
+  evidence: Pre-existing pattern; green verify:logic can drift from production if only one copy is edited.

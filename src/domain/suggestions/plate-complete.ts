@@ -6,6 +6,8 @@ import {
 import type { SuggestionCandidate } from "@/domain/suggestions/candidates";
 import {
   isBreakfastMeal,
+  looksLikeCompanionOnly,
+  looksLikeHeavyAnimalProteinDish,
   looksLikeProteinDish,
 } from "@/domain/suggestions/meal-fit";
 import type {
@@ -22,6 +24,11 @@ export type PlateAssignment = ProposedAssignment & {
 export type PickCompanionOptions = {
   /** When true, prefer (and require when possible) a protein add-on. */
   requireProtein?: boolean;
+  /**
+   * When true (protein main needing a side), never pick a second meat/fish
+   * dish — only carb/veg/sauce companions.
+   */
+  forbidHeavyAnimal?: boolean;
 };
 
 /**
@@ -29,6 +36,7 @@ export type PickCompanionOptions = {
  * - complete → no companion, but only if the main itself looks like protein
  * - needs_companion → keep AI companion when valid; fill if missing
  * - veg/carb main + veg/carb side is invalid — replace with a protein companion
+ * - meat/fish main + meat/fish companion is invalid — replace with a side or clear
  * - no plateKind and protein main → leave alone (do not invent a side)
  * - no plateKind and protein-less main → force a protein companion
  * Structural only otherwise: same-day / breakfast-main reuse for companions.
@@ -111,9 +119,9 @@ function normalizePlateAssignment(
   usedOnDay: Map<number, Set<string>>,
 ): ProposedAssignment {
   const meal = mealBySlot.get(proposal.slotId);
-  const mainHasProtein = looksLikeProteinDish(
-    nameById.get(proposal.recipeId) ?? "",
-  );
+  const mainName = nameById.get(proposal.recipeId) ?? "";
+  const mainHasProtein = looksLikeProteinDish(mainName);
+  const mainIsHeavy = looksLikeHeavyAnimalProteinDish(mainName);
   if (
     !meal ||
     !mealAllowsCompanion(meal) ||
@@ -140,13 +148,27 @@ function normalizePlateAssignment(
     companion = null;
   }
 
+  // Meat/fish main + meat/fish companion (курица + рыба) is invalid.
+  // Sauces stay allowed even if the name mentions a protein.
+  if (
+    companion &&
+    mainIsHeavy &&
+    looksLikeHeavyAnimalProteinDish(nameById.get(companion) ?? "") &&
+    !looksLikeCompanionOnly(nameById.get(companion) ?? "")
+  ) {
+    companion = null;
+  }
+
   if (!companion) {
     companion = pickCompanionCandidate(
       candidates,
       proposal.recipeId,
       usedCompanionIds,
       avoidAsCompanion,
-      { requireProtein: !mainHasProtein },
+      {
+        requireProtein: !mainHasProtein,
+        forbidHeavyAnimal: mainHasProtein,
+      },
     );
   }
 
@@ -209,6 +231,7 @@ function resolvePlateKind(
  * Structural fallback when the model asked for a companion but omitted the id.
  * Prefer unused candidates; never the main; avoid same-day / breakfast mains.
  * When requireProtein, prefer a protein add-on over another carb/veg side.
+ * When forbidHeavyAnimal, never pick a second meat/fish dish (clear instead).
  */
 export function pickCompanionCandidate(
   candidates: SuggestionCandidate[],
@@ -220,10 +243,17 @@ export function pickCompanionCandidate(
   const others = candidates.filter(
     (c) => c.recipeId !== mainRecipeId && !avoidIds.has(c.recipeId),
   );
-  const pool =
+  let pool =
     others.length > 0
       ? others
       : candidates.filter((c) => c.recipeId !== mainRecipeId);
+  if (options.forbidHeavyAnimal) {
+    pool = pool.filter(
+      (c) =>
+        looksLikeCompanionOnly(c.name) ||
+        !looksLikeHeavyAnimalProteinDish(c.name),
+    );
+  }
   if (pool.length === 0) return null;
 
   const prefer = (list: SuggestionCandidate[]) => {

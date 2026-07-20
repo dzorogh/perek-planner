@@ -46,6 +46,7 @@ export {
   isSuitableAsBreakfastMain,
   looksLikeBreakfastDish,
   looksLikeCompanionOnly,
+  looksLikeHeavyAnimalProteinDish,
   looksLikeLunchDinnerOnlyMain,
   looksLikeNoCookSnack,
   looksLikeProteinDish,
