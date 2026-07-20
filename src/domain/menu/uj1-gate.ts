@@ -3,6 +3,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export const UJ1_GATE_RU =
   "Сначала проверьте меню и перейдите к списку покупок.";
 
+/** Pure predicate shared with verify-uj1-gate-logic.mjs. */
+export function shoppingListAllowed(
+  slotEditPassedAt: string | null | undefined,
+): boolean {
+  return slotEditPassedAt != null;
+}
+
 export async function hasSlotEditPassed(
   supabase: SupabaseClient,
   menuId: string,
@@ -14,7 +21,7 @@ export async function hasSlotEditPassed(
     .maybeSingle();
 
   if (error || !data) return false;
-  return data.slot_edit_passed_at != null;
+  return shoppingListAllowed(data.slot_edit_passed_at);
 }
 
 export async function markSlotEditPassed(

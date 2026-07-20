@@ -18,14 +18,19 @@ export type CreateSkeletonOptions = {
 };
 
 /**
- * Persist Menu + empty Model C slots for the authenticated user.
+ * Persist Menu + empty slots for the authenticated user.
+ * `userId` is unused: RPC `create_menu_skeleton` uses `auth.uid()` for ownership.
+ * Callers must pass the same session user that owns the Supabase client.
  */
 export async function createMenuSkeletonForUser(
   supabase: SupabaseClient,
-  _userId: string,
+  userId: string,
   dayCount: number,
   options: CreateSkeletonOptions = {},
 ): Promise<CreateSkeletonResult> {
+  if (!userId) {
+    return { ok: false, error: "Сессия истекла. Войдите снова." };
+  }
   const peopleCount = options.peopleCount ?? DEFAULT_SERVINGS_PER_MEAL;
   const meals = options.meals ?? (["breakfast", "lunch", "dinner"] as const);
 

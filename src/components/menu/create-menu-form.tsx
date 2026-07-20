@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 
 import { DayLengthPicker } from "@/components/menu/day-length-picker";
 import {
@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import {
   createMenuSkeletonAction,
   type CreateMenuSkeletonActionState,
-} from "@/domain/menu/actions";
+} from "@/domain/menu/create-menu-actions";
 import {
   DEFAULT_DAY_COUNT,
   DEFAULT_SERVINGS_PER_MEAL,
@@ -29,6 +29,11 @@ export function CreateMenuForm({ onPendingChange }: CreateMenuFormProps = {}) {
   const [peopleCount, setPeopleCount] = useState(DEFAULT_SERVINGS_PER_MEAL);
   const [mealTypes, setMealTypes] = useState<MealTypesSelection>(
     DEFAULT_MEAL_TYPES_SELECTION,
+  );
+  const idempotencyKeyRef = useRef(
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `create-${Date.now()}-${Math.random().toString(36).slice(2)}`,
   );
   const [state, formAction, isPending] = useActionState<
     CreateMenuSkeletonActionState,
@@ -46,6 +51,7 @@ export function CreateMenuForm({ onPendingChange }: CreateMenuFormProps = {}) {
       <input type="hidden" name="dayCount" value={dayCount} />
       <input type="hidden" name="peopleCount" value={peopleCount} />
       <input type="hidden" name="meals" value={mealsCsv} />
+      <input type="hidden" name="idempotencyKey" value={idempotencyKeyRef.current} />
       <input
         type="hidden"
         name="includeSnacks"

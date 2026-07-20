@@ -16,7 +16,7 @@ export default async function HistoryPage() {
     redirect("/auth/login");
   }
 
-  const { menus, error } = await loadHistory(supabase, user.id);
+  const { menus, error, warning } = await loadHistory(supabase, user.id);
 
   if (error) {
     return (
@@ -54,6 +54,11 @@ export default async function HistoryPage() {
         <p className="mt-2 text-sm text-muted-foreground">
           Прошлые меню и рецепты. Оценки можно менять в любой момент.
         </p>
+        {warning ? (
+          <p className="mt-2 text-sm text-warning-fg" role="status">
+            {warning}
+          </p>
+        ) : null}
       </div>
 
       <div className="space-y-8">

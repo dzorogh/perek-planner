@@ -43,13 +43,15 @@ export async function updateSession(request: NextRequest) {
   });
   let cookiesToSet: CookieToSet[] = [];
 
+  const productionLike =
+    process.env.NODE_ENV === "production" ||
+    process.env.KEPLO_ENV === "production";
   const bypassAuth =
-    process.env.KEPLO_DEV_BYPASS_AUTH === "true" &&
-    process.env.NODE_ENV !== "production";
+    process.env.KEPLO_DEV_BYPASS_AUTH === "true" && !productionLike;
 
-  if (process.env.KEPLO_DEV_BYPASS_AUTH === "true" && process.env.NODE_ENV === "production") {
+  if (process.env.KEPLO_DEV_BYPASS_AUTH === "true" && productionLike) {
     console.error(
-      "KEPLO_DEV_BYPASS_AUTH is enabled in production; ignoring bypass.",
+      "KEPLO_DEV_BYPASS_AUTH is enabled in a production-like env; ignoring bypass.",
     );
   }
 

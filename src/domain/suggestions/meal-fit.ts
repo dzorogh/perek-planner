@@ -15,6 +15,26 @@ export function looksLikeNoCookSnack(name: string): boolean {
   if (!n) return false;
   if (n.includes("перекус")) return true;
   if (/(^|\s)(снек|snack)(ы|а|ов)?(\s|$)/.test(n)) return true;
+  // Ready-to-eat / no-cook pantry snacks (not cooked breakfast).
+  if (
+    /(^|\s)(йогурт|кефир|ряженк|простокваш|творожок|фрукты|ягод(ы|а)|банан|яблок|груш|апельсин|мандарин|орех|миндаль|кешью|арахис|фисташк|сухофрукт|изюм|курага|чернослив|батончик|протеинов\w*\s+батон|чипсы|крекер|галет|печенье|вафли|зефир|маршмеллоу|шоколадк|конфет)/.test(
+      n,
+    )
+  ) {
+    // Cooked dishes with these words as toppings stay cookable
+    // (e.g. «каша с бананом», «сырники с ягодами»).
+    if (looksLikeBreakfastDish(n) || looksLikeLunchDinnerOnlyMain(n)) {
+      return false;
+    }
+    if (
+      /(каш|сырник|оладь|блин|омлет|яичниц|запеканк|суп|плов|котлет|паст|рис|гречк|картоф)/.test(
+        n,
+      )
+    ) {
+      return false;
+    }
+    return true;
+  }
   return false;
 }
 

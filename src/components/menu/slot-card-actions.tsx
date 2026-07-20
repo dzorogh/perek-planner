@@ -93,8 +93,8 @@ export function SlotCardActions({
   }
 
   return (
-    <div data-component="slot-actions" data-target={target}>
-      <div className="absolute right-2 top-2">
+    <div data-component="slot-actions" data-target={target} className="contents">
+      <div className="absolute right-2 top-2 z-10">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -155,10 +155,12 @@ export function SlotCardActions({
         </DropdownMenu>
       </div>
 
-      <ActionError state={resuggestState} />
-      <ActionError state={resuggestAllState} />
-      <ActionError state={refuseState} />
-      <ActionError state={clearState} />
+      <div className="mt-1 space-y-0.5 pr-10">
+        <ActionError state={resuggestState} />
+        <ActionError state={resuggestAllState} />
+        <ActionError state={refuseState} />
+        <ActionError state={clearState} />
+      </div>
 
       <CommentDialog
         open={refuseOpen}

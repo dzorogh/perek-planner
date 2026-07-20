@@ -3,7 +3,7 @@
 import { useFormStatus } from "react-dom";
 
 import { Button } from "@/components/ui/button";
-import { continueToPortionsAction } from "@/domain/menu/slot-actions";
+import { continueToShoppingListAction } from "@/domain/menu/slot-actions";
 
 type ContinueToShoppingButtonProps = {
   menuId: string;
@@ -30,7 +30,7 @@ export function ContinueToShoppingButton({
   menuId,
 }: ContinueToShoppingButtonProps) {
   return (
-    <form action={continueToPortionsAction} className="mt-8 max-w-xl">
+    <form action={continueToShoppingListAction} className="mt-8 max-w-xl">
       <input type="hidden" name="menuId" value={menuId} />
       <SubmitButton />
     </form>

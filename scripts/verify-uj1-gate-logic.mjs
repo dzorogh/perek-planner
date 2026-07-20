@@ -1,8 +1,9 @@
 /**
- * Pure-logic smoke for Story 2.4 UJ-1 gate predicates.
+ * Pure-logic smoke for UJ-1 gate predicates (keep in sync with uj1-gate.ts).
  * Usage: node scripts/verify-uj1-gate-logic.mjs
  */
 
+/** Mirrors `shoppingListAllowed` in src/domain/menu/uj1-gate.ts */
 function shoppingListAllowed(slotEditPassedAt) {
   return slotEditPassedAt != null;
 }

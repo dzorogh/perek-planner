@@ -191,15 +191,15 @@ export async function buildShoppingList(
     });
   }
 
-  const seenSnack = new Set(
-    drafts.map((d) => d.ingredient_name.toLocaleLowerCase("ru")),
-  );
+  // Snacks always get their own section lines. If a snack label collides with
+  // an ingredient name, keep both — shopping sections distinguish them.
+  const seenSnackLabels = new Set<string>();
   for (const row of snacksRes.data ?? []) {
     const name = typeof row.label === "string" ? row.label.trim() : "";
     if (!name) continue;
     const key = name.toLocaleLowerCase("ru");
-    if (seenSnack.has(key)) continue;
-    seenSnack.add(key);
+    if (seenSnackLabels.has(key)) continue;
+    seenSnackLabels.add(key);
     drafts.push({
       ingredient_name: name,
       line_kind: "snack",

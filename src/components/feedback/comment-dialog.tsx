@@ -54,7 +54,17 @@ export function CommentDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent data-component="comment-dialog">
+      <DialogContent
+        data-component="comment-dialog"
+        className="z-[70]"
+        overlayClassName="z-[65]"
+        onOpenAutoFocus={(e) => {
+          // Prefer focusing the textarea over fighting a stacked recipe dialog.
+          e.preventDefault();
+          const root = e.currentTarget as HTMLElement;
+          root.querySelector("textarea")?.focus();
+        }}
+      >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description ? (

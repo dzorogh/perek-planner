@@ -111,12 +111,12 @@ function SlotCell({
 
   return (
     <div data-component="slot-cell" data-empty="false" className="space-y-2">
-      {slot.recipeId && slot.recipeName ? (
+      {slot.recipeId ? (
         <DishLine
           menuId={menuId}
           slotId={slot.id}
           recipeId={slot.recipeId}
-          recipeName={slot.recipeName}
+          recipeName={slot.recipeName ?? "Рецепт недоступен"}
           recipeBodyText={slot.recipeBodyText}
           recipeIngredients={slot.recipeIngredients}
           recipeValue={slot.recipeValue}
@@ -126,12 +126,12 @@ function SlotCell({
           target="main"
         />
       ) : null}
-      {slot.companionRecipeId && slot.companionRecipeName ? (
+      {slot.companionRecipeId ? (
         <DishLine
           menuId={menuId}
           slotId={slot.id}
           recipeId={slot.companionRecipeId}
-          recipeName={slot.companionRecipeName}
+          recipeName={slot.companionRecipeName ?? "Компаньон недоступен"}
           recipeBodyText={slot.companionRecipeBodyText}
           recipeIngredients={slot.companionRecipeIngredients}
           recipeValue={slot.companionRecipeValue}

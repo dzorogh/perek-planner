@@ -49,7 +49,12 @@ function asReason(v: string | null): string | null {
 export async function loadHistory(
   supabase: SupabaseClient,
   userId: string,
-): Promise<{ menus: HistoryMenuCard[]; error: string | null }> {
+): Promise<{
+  menus: HistoryMenuCard[];
+  error: string | null;
+  /** Soft degradation (e.g. ratings query failed) — menus still render. */
+  warning?: string | null;
+}> {
   const { data: menus, error: menusError } = await supabase
     .from("menus")
     .select("id, day_count, created_at")
@@ -94,6 +99,11 @@ export async function loadHistory(
   if (slotsRes.error || snacksRes.error) {
     return { menus: [], error: "Не удалось загрузить историю." };
   }
+
+  const ratingsWarning =
+    ratingsRes.error || snackRatingsRes.error
+      ? "Не удалось загрузить оценки — меню показаны без звёзд."
+      : null;
 
   const recipeRating = new Map<
     string,
@@ -255,5 +265,6 @@ export async function loadHistory(
       snacks: snacksByMenu.get(m.id) ?? [],
     })),
     error: null,
+    warning: ratingsWarning,
   };
 }

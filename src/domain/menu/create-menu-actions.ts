@@ -16,6 +16,10 @@ export type CreateMenuSkeletonActionState =
   | { ok: false; error: string }
   | null;
 
+/** In-process dedupe for double-submit (same form idempotency key). */
+const recentCreates = new Map<string, { menuId: string; at: number }>();
+const IDEMPOTENCY_TTL_MS = 120_000;
+
 /**
  * Create Menu skeleton + AI-fill slots, then redirect to slot edit.
  * (Story 2.3 — same CTA «Сгенерировать» as 2.1.)
@@ -31,6 +35,7 @@ export async function createMenuSkeletonAction(
     typeof rawPeople === "string" ? Number(rawPeople) : Number.NaN;
   const meals = parseSelectedMeals(formData.get("meals"));
   const includeSnacks = formData.get("includeSnacks") === "1";
+  const idempotencyKey = String(formData.get("idempotencyKey") ?? "").trim();
 
   if (!isValidDayCount(dayCount)) {
     return { ok: false, error: "Выберите длину меню от 1 до 4 дней." };
@@ -55,6 +60,16 @@ export async function createMenuSkeletonAction(
     return { ok: false, error: "Сессия истекла. Войдите снова." };
   }
 
+  if (idempotencyKey) {
+    const cacheKey = `${user.id}:${idempotencyKey}`;
+    const hit = recentCreates.get(cacheKey);
+    if (hit && Date.now() - hit.at < IDEMPOTENCY_TTL_MS) {
+      revalidatePath("/history");
+      revalidatePath("/plan/menu");
+      redirect(`/plan/menu?menuId=${hit.menuId}`);
+    }
+  }
+
   const result = await generateBuyableMenuForUser(
     supabase,
     user.id,
@@ -63,6 +78,13 @@ export async function createMenuSkeletonAction(
   );
   if (!result.ok) {
     return { ok: false, error: result.error };
+  }
+
+  if (idempotencyKey) {
+    recentCreates.set(`${user.id}:${idempotencyKey}`, {
+      menuId: result.menuId,
+      at: Date.now(),
+    });
   }
 
   revalidatePath("/history");

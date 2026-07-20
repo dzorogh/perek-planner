@@ -647,6 +647,20 @@ function looksLikeNoCookSnack(name) {
   if (!n) return false;
   if (n.includes("перекус")) return true;
   if (/(^|\s)(снек|snack)(ы|а|ов)?(\s|$)/.test(n)) return true;
+  if (
+    /(^|\s)(йогурт|кефир|ряженк|простокваш|творожок|фрукты|ягод(ы|а)|банан|яблок|груш|апельсин|мандарин|орех|миндаль|кешью|арахис|фисташк|сухофрукт|изюм|курага|чернослив|батончик|чипсы|крекер|галет|печенье|вафли|зефир|шоколадк|конфет)/.test(
+      n,
+    )
+  ) {
+    if (
+      /(каш|сырник|оладь|блин|омлет|яичниц|запеканк|суп|плов|котлет|паст|рис|гречк|картоф)/.test(
+        n,
+      )
+    ) {
+      return false;
+    }
+    return true;
+  }
   return false;
 }
 
@@ -1110,6 +1124,10 @@ check(
   "looksLikeNoCookSnack: cooked breakfast stays",
   !looksLikeNoCookSnack("Пшеничная каша с яблоками и корицей") &&
     !looksLikeNoCookSnack("Творожные сырники"),
+);
+check(
+  "looksLikeNoCookSnack: ready-to-eat yogurt",
+  looksLikeNoCookSnack("Йогурт натуральный"),
 );
 
 check(

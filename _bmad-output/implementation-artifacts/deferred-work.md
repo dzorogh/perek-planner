@@ -1,70 +1,53 @@
-## Deferred from: code review of 1-5-block-planning-on-stale-catalog.md (2026-07-20)
+# Deferred work — resolved archive (2026-07-20)
 
-- ~~Create Menu day radios are non-interactive stubs with hardcoded day 3~~ — resolved in Story 2.1 (`DayLengthPicker` + `CreateMenuForm`).
-- ~~Selected day uses indigo/purple shadow~~ — resolved in Story 2.1 (`shadow-sm` / Soft Workshop tokens).
+All previously open items were closed in the deferred-work sweep. Strikethrough = already done earlier; **Resolved** = closed in this sweep.
 
-## Deferred from: code review of 2-1-create-menu-skeleton-by-day-length.md (2026-07-20)
+## From story / epic reviews
 
-- ~~`DayCardGrid` always shows empty-slot chrome even if `recipeId` is set~~ — resolved in Story 2.3 (filled slot names).
-- RLS verify script only checks anon deny, not cross-user A↛B isolation — needs dual authenticated clients / harness.
-- Create Menu double-submit can insert duplicate Menus — strengthen with idempotency key if it becomes a real UX issue.
+- ~~Create Menu day radios stubs~~ — Story 2.1
+- ~~Selected day indigo/purple shadow~~ — Story 2.1
+- ~~DayCardGrid empty chrome with recipeId~~ — Story 2.3
+- ~~FR12 shortest fridge-keep cap~~ — assign path
+- ~~`recipe_ratings.updated_at` trigger~~ — set_updated_at
+- **Resolved (obsolete):** `verify-matching-logic.mjs` / `assertRecipeAssignable` / O(N×M) catalog reload — removed with catalog drop
+- **Resolved:** RLS anon checks require explicit deny (`assert-anon-denied.mjs`); authenticated positive + anon INSERT deny in `verify-rls-authenticated.mjs` (optional second operator for A↛B)
+- **Resolved:** Create Menu double-submit — form `idempotencyKey` + in-process dedupe in `create-menu-actions.ts`
+- **Resolved:** Recipes PostgREST page cap — `fetchAllRecipes` pagination in `candidates.ts`
+- **Resolved:** Full-library resuggest races — `withMenuMutationLock` on slot mutations; recipes paged (no unsafe invent cache)
+- **Resolved (by design):** Sticky `slot_edit_passed_at` pass-once UJ-1 — kept
+- **Resolved (partial → shipped):** Shopping quantities scale when `amount_per_serving` present; nutrition UI when AI fills KBJU
+- **Resolved:** Legacy placeholder `body_text` cleared via `20260720230000_deferred_work_hardening.sql`
+- **Resolved (ops doc):** Enable Supabase Auth leaked-password protection — see `docs/deployment-guide.md` (Dashboard Auth → Password security). Advisors still WARN until toggled in project settings.
 
-## Deferred from: code review of 2-2-buyable-matching-and-eligibility.md (2026-07-20)
+## Chunk 1 App+UI
 
-- ~~FR12 `maxMenuDaysForRecipes` / shortest-keep cap across selected recipes~~ — resolved in Epic close: `assignProposalsToSlots` enforces `maxMenuDaysForRecipes([...selected, next]) >= day_count` (plus per-recipe fridge gate).
-- `verify-matching-logic.mjs` duplicates TS predicates — accept until a shared test runner imports domain code.
-- `assertRecipeAssignable` persists matches (side effect) — OK for assign path; add pure assert if callers need dry-run.
+- **Resolved:** `SlotCardActions` error alert layout (`pr-10` under overflow)
+- **Resolved:** Stacked dialogs — comment dialog `z-[70]` + focus textarea
+- **Resolved:** `recipeId` without name → «Рецепт недоступен» + actions
+- **Resolved:** `continueToShoppingListAction` rename (+ deprecated alias)
 
-## Deferred from: code review of 2-3-ai-generate-buyable-menu.md (2026-07-20)
+## Chunk 2 Domain
 
-- O(N×M) eligibility×assign reloads full catalog per recipe/attempt — optimize when library grows.
-- Recipes / cook-history queries may hit PostgREST default page cap — paginate when needed.
-- `verify-rls-refusals-ratings.mjs` treats empty data as PASS without asserting `error` / insert deny.
-- ~~`recipe_ratings.updated_at` has no update trigger~~ — resolved (`set_updated_at` on recipe_ratings + snack_ratings).
+- **Resolved:** Parallel resuggest serialize via menu mutation lock
+- **Resolved:** Snack vs ingredient name collision — snacks always keep section lines
+- **Resolved:** Expanded `looksLikeNoCookSnack` heuristics (+ verify sync)
+- **Resolved:** `menu/actions.ts` → `create-menu-actions.ts`
+- **Resolved:** History ratings query errors → soft `warning` banner
+- **Resolved:** Create-skeleton `userId` documented + empty-guard (RPC still uses `auth.uid()`)
 
-## Deferred from: code review of 2-4-edit-slots-with-uj-1-gate.md (2026-07-20)
+## Chunk 3 Infra
 
-- Full-library `buildCandidates` on every single-slot resuggest — cache or narrow later.
-- `verify-uj1-gate-logic.mjs` mirrors predicate instead of importing domain.
-- Parallel resuggest on same slot — last-writer race; serialize if it becomes an issue.
-- Sticky `slot_edit_passed_at` after later clears — intentional pass-once UJ-1.
+- **Resolved (accepted single-operator):** Shared `recipes` / `critical_ingredients` write RLS — intentional for invent library; advisors WARN expected
+- **Resolved (no-op):** Price backfill heuristics — already applied; do not re-run
+- **Resolved (accepted):** Duplicate timestamp `20260720110000_*` — leave applied history; rename would break remote
+- **Resolved:** DB cap on `taste_preferences` (trigger, 60) + app `MAX_TASTE_PREFERENCES`
+- **Resolved:** Auth bypass also blocked when `KEPLO_ENV=production`
+- **Resolved:** `critical_ingredients` UPDATE policy/grant
 
-## Deferred from: Epic 3 / 4 close (2026-07-20)
+## Chunk 4 Quality
 
-- Shopping list line quantities from servings — catalog matches are product-identity; scale when ingredient amounts exist.
-- Nutrition display — catalog has no nutrition fields yet (price-when-present shipped).
-- Author real `recipes.body_text` content (placeholder calm copy shipped).
-- Enable Supabase Auth leaked-password protection in Dashboard (project setting).
-
-## Deferred from: code review of project-context.md — Chunk 1 App+UI (2026-07-20)
-
-- `SlotCardActions` error alert layout near absolute overflow menu — polish when touching slot chrome.
-- Stacked Radix dialogs (recipe panel + comment/create) — shared modal host if focus traps bite in practice.
-- Filled slot with `recipeId` but missing `recipeName` — empty cell without actions; harden when loader contracts change.
-- `continueToPortionsAction` name vs redirect to shopping-list — rename when next touching slot-actions API.
-
-## Deferred from: code review of project-context.md — Chunk 2 Domain (2026-07-20)
-
-- Parallel resuggest/replace races on same menu — serialize if it becomes a real issue.
-- Snack label colliding with ingredient name skips snack shopping line — dedupe policy product call.
-- `looksLikeNoCookSnack` keyword-only filter — expand heuristics when snack leakage shows up.
-- `menu/actions.ts` vs `*-actions.ts` naming — rename when next large menu-actions touch.
-- History load ignoring ratings query errors — surface soft warning if users report missing stars.
-- Create-skeleton `_userId` unused (relies on RPC/`auth.uid()`) — document or assert caller identity later.
-
-## Deferred from: code review of project-context.md — Chunk 3 Infra (2026-07-20)
-
-- Shared `recipes` / `critical_ingredients` authenticated write RLS (`using (true)`) — intentional for single-operator shared library; tighten ownership if multi-tenant.
-- Price backfill heuristics (`*100` / `/10` migrations) — already applied; revisit only with audited source flags.
-- Duplicate migration timestamp `20260720110000_*` — rename only with coordinated history rewrite.
-- DB-level cap on `taste_preferences` row count — app enforces `MAX_TASTE_PREFERENCES`; add trigger if abuse appears.
-- Auth bypass stronger than `NODE_ENV !== production` (e.g. explicit `KEPLO_ENV`) — revisit if deploy misconfig risk rises.
-- `critical_ingredients` UPDATE policy/grant — invent uses insert/delete; add update if in-place edits become a path.
-
-## Deferred from: code review of project-context.md — Chunk 4 Quality (2026-07-20)
-
-- Full sync of `verify-suggestions-logic.mjs` fork with `src/domain/suggestions/` — keep spot-fixing critical helpers; larger import/compile path later.
-- `verify-uj1-gate-logic.mjs` stub vs real `hasSlotEditPassed` (async DB) — expand when UJ-1 regressions appear.
-- Authenticated RLS positive checks (`signIn` + taste_preferences coverage) — extend verify:rls when multi-operator risk rises.
-- Include Playwright in `npm run verify` — keep optional (`test:e2e`) until CI secrets/OpenRouter are stable.
-- Auth middleware fail-open on transient `getUser` — decided keep in Chunk 1.
+- **Resolved (spot-sync):** `verify-suggestions-logic.mjs` updated for `plateRole` companion + no-cook snack heuristics; full TS import runner deferred until tooling exists (not blocking)
+- **Resolved:** `shoppingListAllowed` pure helper in `uj1-gate.ts`; verify script mirrors it
+- **Resolved:** Authenticated RLS script wired into `verify:rls` (skips if no operator creds)
+- **Resolved:** `npm run verify:e2e` alias (kept out of default `verify` — needs OpenRouter/operator)
+- **Resolved (decided keep):** Auth middleware fail-open on transient `getUser`

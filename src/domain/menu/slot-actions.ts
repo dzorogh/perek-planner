@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import { withMenuMutationLock } from "@/domain/menu/menu-mutation-lock";
 import { markSlotEditPassed } from "@/domain/menu/uj1-gate";
 import {
   clearCompanionForSlot,
@@ -52,12 +53,8 @@ export async function resuggestSlotAction(
   const { supabase, user, error } = await requireUser();
   if (!user) return { ok: false, error: error! };
 
-  const result = await resuggestSlotForUser(
-    supabase,
-    user.id,
-    menuId,
-    slotId,
-    { target },
+  const result = await withMenuMutationLock(menuId, () =>
+    resuggestSlotForUser(supabase, user.id, menuId, slotId, { target }),
   );
   if (!result.ok) return result;
 
@@ -81,12 +78,8 @@ export async function resuggestRecipeAcrossMenuAction(
   const { supabase, user, error } = await requireUser();
   if (!user) return { ok: false, error: error! };
 
-  const result = await resuggestRecipeAcrossMenu(
-    supabase,
-    user.id,
-    menuId,
-    slotId,
-    { target },
+  const result = await withMenuMutationLock(menuId, () =>
+    resuggestRecipeAcrossMenu(supabase, user.id, menuId, slotId, { target }),
   );
   if (!result.ok) return result;
 
@@ -111,12 +104,11 @@ export async function refuseSlotAction(
   const { supabase, user, error } = await requireUser();
   if (!user) return { ok: false, error: error! };
 
-  const result = await refuseAndReplaceRecipeAcrossMenu(
-    supabase,
-    user.id,
-    menuId,
-    slotId,
-    { comment, target },
+  const result = await withMenuMutationLock(menuId, () =>
+    refuseAndReplaceRecipeAcrossMenu(supabase, user.id, menuId, slotId, {
+      comment,
+      target,
+    }),
   );
   if (!result.ok) return result;
 
@@ -148,7 +140,8 @@ export async function clearCompanionAction(
   return { ok: true };
 }
 
-export async function continueToPortionsAction(
+/** Mark UJ-1 passed and go to shopping list (legacy name kept as alias). */
+export async function continueToShoppingListAction(
   formData: FormData,
 ): Promise<void> {
   const menuId = String(formData.get("menuId") ?? "");
@@ -182,3 +175,6 @@ export async function continueToPortionsAction(
   revalidatePath("/plan/shopping-list");
   redirect(`/plan/shopping-list?menuId=${encodeURIComponent(menuId)}`);
 }
+
+/** @deprecated Use continueToShoppingListAction */
+export const continueToPortionsAction = continueToShoppingListAction;

@@ -21,6 +21,7 @@ export type SuggestionCandidate = RankableCandidate;
  * Build library candidates for a Menu: suppress → fridge-keep → rank.
  * No store/product buyability gate.
  * Marks recipes from recent menus as recentlyUsed for cross-menu variety.
+ * Recipes are paged (PostgREST 1000-row cap).
  */
 export async function buildCandidates(
   supabase: SupabaseClient,
@@ -41,12 +42,8 @@ export async function buildCandidates(
     return { ok: false, reason: "query" };
   }
 
-  const { data: recipes, error } = await supabase
-    .from("recipes")
-    .select("id, name, fridge_keep_days, plate_role")
-    .order("name", { ascending: true });
-
-  if (error || !recipes) {
+  const recipes = await fetchAllRecipes(supabase);
+  if (!recipes) {
     return { ok: false, reason: "query" };
   }
 
@@ -87,4 +84,37 @@ export async function buildCandidates(
   }
 
   return { ok: true, candidates: rankCandidates(eligible) };
+}
+
+/** Page through recipes — PostgREST default max rows is 1000. */
+async function fetchAllRecipes(
+  supabase: SupabaseClient,
+): Promise<
+  | {
+      id: string;
+      name: string;
+      fridge_keep_days: number;
+      plate_role: string | null;
+    }[]
+  | null
+> {
+  const pageSize = 1000;
+  const all: {
+    id: string;
+    name: string;
+    fridge_keep_days: number;
+    plate_role: string | null;
+  }[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const to = from + pageSize - 1;
+    const { data, error } = await supabase
+      .from("recipes")
+      .select("id, name, fridge_keep_days, plate_role")
+      .order("name", { ascending: true })
+      .range(from, to);
+    if (error || !data) return null;
+    all.push(...data);
+    if (data.length < pageSize) break;
+  }
+  return all;
 }

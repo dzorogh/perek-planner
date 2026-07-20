@@ -10,12 +10,12 @@ Auth: Supabase session cookies (`@supabase/ssr`). OpenRouter only from server mo
 
 | Action | File | Behavior |
 |--------|------|----------|
-| `createMenuSkeletonAction` | `src/domain/menu/actions.ts` | Validate day/people/meals → `generateBuyableMenuForUser` → redirect to `/plan/menu`; rollback deletes menu on AI failure |
+| `createMenuSkeletonAction` | `src/domain/menu/create-menu-actions.ts` | Validate day/people/meals → `generateBuyableMenuForUser` → redirect to `/plan/menu`; form idempotency key; rollback deletes menu on AI failure |
 | `resuggestSlotAction` | `src/domain/menu/slot-actions.ts` | Replace slot recipe (and companion rules) via invent/assign |
 | `resuggestRecipeAcrossMenuAction` | same | Replace same dish across menu slots |
 | `refuseSlotAction` | same | Insert refusal + replace; may ban taste |
 | `clearCompanionAction` | same | Clear `companion_recipe_id` |
-| `continueToPortionsAction` | same | Set `slot_edit_passed_at`, redirect toward shopping |
+| `continueToShoppingListAction` | same | Set `slot_edit_passed_at`, redirect to shopping list (`continueToPortionsAction` alias) |
 | `updateSlotServingsAction` | `src/domain/menu/portion-actions.ts` | Update `menu_slots.servings` (1–20) |
 | `getSlotEditPassedAction` | `src/domain/menu/uj1-actions.ts` | Read UJ-1 flag |
 
