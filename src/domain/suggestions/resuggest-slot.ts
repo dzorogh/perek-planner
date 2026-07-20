@@ -17,6 +17,7 @@ import {
   analyzeMenuVariety,
   type MenuPlanDish,
 } from "@/domain/suggestions/analyze-menu-variety";
+import { namesEqual } from "@/domain/suggestions/dish-similarity";
 import {
   expandMenuRecipes,
   type ExpandedDish,
@@ -182,6 +183,21 @@ async function loadPairSlots(
   return data as SlotRow[];
 }
 
+async function loadRecipeNamesByIds(
+  supabase: SupabaseClient,
+  ids: ReadonlySet<string>,
+): Promise<string[]> {
+  if (ids.size === 0) return [];
+  const { data, error } = await supabase
+    .from("recipes")
+    .select("name")
+    .in("id", [...ids]);
+  if (error || !data) return [];
+  return data
+    .map((row) => row.name?.trim())
+    .filter((name): name is string => Boolean(name));
+}
+
 async function resuggestNameContext(
   supabase: SupabaseClient,
   userId: string,
@@ -201,12 +217,15 @@ async function resuggestNameContext(
     excludeRecipeIds,
   });
   if (!keepDishes) return null;
+  // Excluded ids leave keepDishes — still ban their names so replace ≠ same label.
+  const replacedNames = await loadRecipeNamesByIds(supabase, excludeRecipeIds);
   return {
     keepDishes,
     previousMenusDishes,
     avoidNames: [
       ...previousMenusDishes,
       ...keepDishes.map((d) => d.name),
+      ...replacedNames,
     ],
   };
 }
@@ -271,6 +290,20 @@ async function inventPositionViaNamePlan(
 
   let plan = planned.plan;
 
+  const planHitsAvoid = (names: readonly { name: string }[]) =>
+    names.some((d) => ctx.avoidNames.some((a) => namesEqual(a, d.name)));
+
+  // Soft prompt can still echo the replaced label — force a different name.
+  if (planHitsAvoid(plan)) {
+    const repaired = await proposeOnce([
+      ...ctx.avoidNames,
+      ...plan.map((d) => d.name),
+    ]);
+    if (!repaired.ok) return planFail(repaired.reason);
+    plan = repaired.plan;
+    if (planHitsAvoid(plan)) return planFail("parse");
+  }
+
   const audit = await analyzeMenuVariety(
     [
       ...ctx.keepDishes,
@@ -293,6 +326,7 @@ async function inventPositionViaNamePlan(
     const rejected = plan.map((d) => d.name);
     const repaired = await proposeOnce([...ctx.avoidNames, ...rejected]);
     if (repaired.ok) plan = repaired.plan;
+    if (planHitsAvoid(plan)) return planFail("parse");
   }
 
   const expanded = await expandMenuRecipes(supabase, plan, {

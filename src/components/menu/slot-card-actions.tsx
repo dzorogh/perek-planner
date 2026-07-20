@@ -4,6 +4,7 @@ import { MoreHorizontal } from "lucide-react";
 import { startTransition, useActionState, useState } from "react";
 
 import { CommentDialog } from "@/components/feedback/comment-dialog";
+import { SlotGeneratingOverlay } from "@/components/menu/slot-generating-overlay";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -67,6 +68,11 @@ export function SlotCardActions({
 
   const busy =
     suggestPending || resuggestPending || refusePending || clearPending;
+  const generating =
+    suggestPending || resuggestPending || refusePending;
+  const generatingLabel = suggestPending
+    ? "Подбираем…"
+    : "Заменяем…";
 
   function runAction(
     action: (payload: FormData) => void,
@@ -88,6 +94,7 @@ export function SlotCardActions({
 
   return (
     <div data-component="slot-actions" data-target={target} className="contents">
+      {generating ? <SlotGeneratingOverlay label={generatingLabel} /> : null}
       <div className="absolute right-2 top-2 z-10">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -150,12 +157,14 @@ export function SlotCardActions({
         </DropdownMenu>
       </div>
 
-      <div className="mt-1 space-y-0.5 pr-10">
-        <ActionError state={suggestState} />
-        <ActionError state={resuggestState} />
-        <ActionError state={refuseState} />
-        <ActionError state={clearState} />
-      </div>
+      {!generating ? (
+        <div className="relative z-[6] mt-1 space-y-0.5 pr-10">
+          <ActionError state={suggestState} />
+          <ActionError state={resuggestState} />
+          <ActionError state={refuseState} />
+          <ActionError state={clearState} />
+        </div>
+      ) : null}
 
       <CommentDialog
         open={refuseOpen}

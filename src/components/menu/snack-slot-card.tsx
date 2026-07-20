@@ -4,6 +4,7 @@ import { MoreHorizontal } from "lucide-react";
 import { startTransition, useActionState, useState } from "react";
 
 import { CommentDialog } from "@/components/feedback/comment-dialog";
+import { SlotGeneratingOverlay } from "@/components/menu/slot-generating-overlay";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -59,6 +60,10 @@ export function SnackSlotCard({
   >(refuseSnackAction, null);
 
   const busy = resuggestPending || suggestPending || refusePending;
+  const generating = busy;
+  const generatingLabel = suggestPending
+    ? "Подбираем…"
+    : "Заменяем…";
   const empty = !snack;
 
   function runAction(
@@ -81,6 +86,7 @@ export function SnackSlotCard({
       className="relative min-h-14 rounded-md bg-empty-slot px-3.5 py-3"
     >
       <span className="sr-only">Перекус</span>
+      {generating ? <SlotGeneratingOverlay label={generatingLabel} /> : null}
 
       <div className="pr-8">
         {empty ? (
@@ -154,9 +160,13 @@ export function SnackSlotCard({
         </DropdownMenu>
       </div>
 
-      <ActionError state={resuggestState} />
-      <ActionError state={suggestState} />
-      <ActionError state={refuseState} />
+      {!generating ? (
+        <>
+          <ActionError state={resuggestState} />
+          <ActionError state={suggestState} />
+          <ActionError state={refuseState} />
+        </>
+      ) : null}
 
       {snack ? (
         <CommentDialog

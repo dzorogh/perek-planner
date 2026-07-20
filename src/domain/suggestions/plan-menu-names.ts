@@ -5,7 +5,10 @@ import {
   type MealSlot,
   type MenuDayPair,
 } from "@/domain/menu/constants";
-import { uniqueExactNames } from "@/domain/suggestions/dish-similarity";
+import {
+  namesEqual,
+  uniqueExactNames,
+} from "@/domain/suggestions/dish-similarity";
 import {
   isBreakfastMeal,
   looksLikeBreakfastDish,
@@ -56,6 +59,22 @@ Rules:
 - Companion names: simple sides/sauces/protein add-ons; NEVER «к пасте»/«к мясу»; never a second meat/fish main beside a meat/fish main.
 - Names in Russian, sentence case. No recipe steps. Honor operatorTasteNotes (constraint PRIMARY).
 - Never invent snacks / перекусы here.`;
+
+/** Single-slot replace — must NOT reuse full-menu invent system (models echo keepDishes). */
+const POSITION_REPLACE_SYSTEM = `You invent dish NAME(s) for ONE replace slot on a Russian batch-cook menu (names only, no recipes).
+Days are hard pairs ([1,2], [3,4], [5,6]); the dish is eaten on both days of replacePosition.dayPair.
+
+Respond with a single JSON object. dishes MUST contain ONLY the new dish(es) for replacePosition — never copy keepDishes, never list other meals/pairs.
+{"dishes":[{"meal":"...","dayPair":[3,4],"role":"main"|"companion","name":"...","plate_kind":"complete"|"needs_companion"|null}]}
+
+Rules:
+- If replacePosition.role="companion": return exactly ONE dish (role=companion, plate_kind=null) for that meal×dayPair. Do not invent a main.
+- If replacePosition.role="main": return one main; for lunch/dinner/late_dinner also set plate_kind. If plate_kind="needs_companion", ALSO include one companion for the same meal×dayPair. If "complete", no companion.
+- NEW name(s) MUST NOT match or near-duplicate any string in avoidNames or keepDishes (exact and word-order/topping swaps are FORBIDDEN).
+- Companion: simple side/sauce/protein add-on for mainName; NEVER «к пасте»/«к мясу»; never a second meat/fish main.
+- Lunch/dinner mains: savory; never morning forms (сырники, оладьи, каша, омлет as L/D main).
+- Names in Russian, sentence case. Honor operatorTasteNotes (constraint PRIMARY).
+- Never invent snacks / перекусы.`;
 
 /**
  * One AI call: invent dish names (+ plate_kind / companions) for all cookable positions.
@@ -117,14 +136,16 @@ export async function proposeMenuNamePlan(
  * Names-only invent for one meal×dayPair (main±companion, or companion alone).
  * Used by resuggest — same scheme as full menu plan, smaller payload.
  */
+type PositionReplaceTarget = {
+  meal: MealSlot;
+  dayPair: MenuDayPair;
+  role: "main" | "companion";
+  /** Required when role=companion — locked main name. */
+  mainName?: string;
+};
+
 export async function proposePositionNamePlan(
-  position: {
-    meal: MealSlot;
-    dayPair: MenuDayPair;
-    role: "main" | "companion";
-    /** Required when role=companion — locked main name. */
-    mainName?: string;
-  },
+  position: PositionReplaceTarget,
   context: {
     keepDishes?: Array<{
       meal: MealSlot;
@@ -143,45 +164,116 @@ export async function proposePositionNamePlan(
     return { ok: false, reason: "parse" };
   }
 
-  const chat = context.chat ?? openRouterChatCompletions;
-  const userContent = JSON.stringify({
-    replacePosition: {
-      meal: position.meal,
-      mealLabelRu: MEAL_LABELS_RU[position.meal],
-      dayPair: [...position.dayPair],
-      role: position.role,
-      needsPlateKind:
-        position.role === "main" && mealAllowsCompanion(position.meal),
-      mainName: position.mainName?.trim() || undefined,
-    },
+  return runPositionReplaceAttempts(position, {
+    chat: context.chat ?? openRouterChatCompletions,
     keepDishes: (context.keepDishes ?? []).map((d) => ({
       meal: d.meal,
-      dayPair: [...d.dayPair],
+      dayPair: [...d.dayPair] as number[],
       role: d.role,
       name: d.name,
     })),
-    previousMenusDishes: uniqueExactNames(context.previousMenusDishes ?? []).slice(
-      0,
-      60,
-    ),
+    keepNames: (context.keepDishes ?? []).map((d) => d.name),
+    previousMenusDishes: uniqueExactNames(
+      context.previousMenusDishes ?? [],
+    ).slice(0, 60),
     avoidNames: uniqueExactNames(context.avoidNames ?? []).slice(0, 50),
     peoplePerMeal: context.peoplePerMeal ?? 2,
-    instruction:
-      position.role === "companion"
-        ? "Invent ONE companion NAME for replacePosition (role=companion). Do not invent a main. Name must not near-duplicate keepDishes or avoidNames. plate_kind=null."
-        : "Invent dish NAMES for replacePosition only: one main (+ companion if plate_kind=needs_companion). Do not invent other meals/pairs. New names must not near-duplicate keepDishes or avoidNames; lunch≠dinner form vs keepDishes on the same dayPair.",
-    operatorTasteNotes: tasteNotesForPrompt(context.tasteNotes),
+    tasteNotes: tasteNotesForPrompt(context.tasteNotes),
   });
+}
 
+async function runPositionReplaceAttempts(
+  position: PositionReplaceTarget,
+  args: {
+    chat: ChatCompletionsFn;
+    keepDishes: Array<{
+      meal: MealSlot;
+      dayPair: number[];
+      role: "main" | "companion";
+      name: string;
+    }>;
+    keepNames: string[];
+    previousMenusDishes: string[];
+    avoidNames: string[];
+    peoplePerMeal: number;
+    tasteNotes: ReturnType<typeof tasteNotesForPrompt>;
+  },
+): Promise<PlanMenuNamesResult> {
+  let avoidNames = args.avoidNames;
+  const baseInstruction =
+    position.role === "companion"
+      ? "Return dishes with EXACTLY one NEW companion name for replacePosition. Do not echo keepDishes. Forbidden: every avoidNames entry (including the dish being replaced). plate_kind=null."
+      : "Return dishes with ONLY replacePosition: one NEW main (+ companion if needs_companion). Do not echo keepDishes or other pairs. Forbidden: every avoidNames entry. lunch≠dinner form vs keepDishes on the same dayPair.";
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = await requestPositionReplacePlan(
+      position,
+      { ...args, avoidNames },
+      attempt === 0
+        ? baseInstruction
+        : `${baseInstruction} Previous answer reused a forbidden name — invent a clearly different one.`,
+    );
+    if (!result.ok) {
+      if (result.reason === "openrouter") return result;
+      continue;
+    }
+    const collisions = result.plan.filter((d) =>
+      [...avoidNames, ...args.keepNames].some((b) => namesEqual(b, d.name)),
+    );
+    if (collisions.length === 0) return result;
+    avoidNames = uniqueExactNames([
+      ...avoidNames,
+      ...collisions.map((d) => d.name),
+    ]).slice(0, 50);
+  }
+  return { ok: false, reason: "parse" };
+}
+
+async function requestPositionReplacePlan(
+  position: PositionReplaceTarget,
+  args: {
+    chat: ChatCompletionsFn;
+    keepDishes: Array<{
+      meal: MealSlot;
+      dayPair: number[];
+      role: "main" | "companion";
+      name: string;
+    }>;
+    previousMenusDishes: string[];
+    avoidNames: string[];
+    peoplePerMeal: number;
+    tasteNotes: ReturnType<typeof tasteNotesForPrompt>;
+  },
+  instruction: string,
+): Promise<PlanMenuNamesResult> {
   let content: string;
   try {
-    content = await chat({
+    content = await args.chat({
       messages: [
-        { role: "system", content: PLAN_SYSTEM },
-        { role: "user", content: userContent },
+        { role: "system", content: POSITION_REPLACE_SYSTEM },
+        {
+          role: "user",
+          content: JSON.stringify({
+            replacePosition: {
+              meal: position.meal,
+              mealLabelRu: MEAL_LABELS_RU[position.meal],
+              dayPair: [...position.dayPair],
+              role: position.role,
+              needsPlateKind:
+                position.role === "main" && mealAllowsCompanion(position.meal),
+              mainName: position.mainName?.trim() || undefined,
+            },
+            keepDishes: args.keepDishes,
+            previousMenusDishes: args.previousMenusDishes,
+            avoidNames: args.avoidNames,
+            peoplePerMeal: args.peoplePerMeal,
+            instruction,
+            operatorTasteNotes: args.tasteNotes,
+          }),
+        },
       ],
       responseFormatJson: true,
-      temperature: 0.75,
+      temperature: 0.85,
     });
   } catch (err) {
     if (err instanceof OpenRouterError) {
