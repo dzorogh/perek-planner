@@ -1,10 +1,9 @@
 /**
- * Pure-logic smoke for Story 5.1 W1 plan-chrome helpers.
+ * Pure-logic smoke for plan-chrome helpers (keep in sync with plan-chrome.ts).
  * Usage: node scripts/verify-plan-chrome-logic.mjs
  */
 
 function isPlanRoute(pathname) {
-  if (pathname === "/") return true;
   return (
     pathname.startsWith("/plan/menu") ||
     pathname.startsWith("/plan/shopping-list") ||
@@ -13,10 +12,9 @@ function isPlanRoute(pathname) {
 }
 
 function resolveWizardActiveHref(pathname) {
-  if (pathname.startsWith("/plan/menu")) return "/plan/menu";
   if (pathname.startsWith("/plan/shopping-list")) return "/plan/shopping-list";
   if (pathname.startsWith("/plan/portions")) return "/plan/shopping-list";
-  return "/";
+  return "/plan/menu";
 }
 
 function resolvePrimaryActiveHref(pathname) {
@@ -34,7 +32,7 @@ function check(name, cond) {
   }
 }
 
-check("plan: /", isPlanRoute("/"));
+check("off-plan: /", !isPlanRoute("/"));
 check("plan: menu", isPlanRoute("/plan/menu"));
 check("plan: list", isPlanRoute("/plan/shopping-list"));
 check("plan: portions legacy", isPlanRoute("/plan/portions"));
@@ -42,16 +40,23 @@ check("off-plan: history", !isPlanRoute("/history"));
 check("off-plan: settings", !isPlanRoute("/settings"));
 check("off-plan: login", !isPlanRoute("/auth/login"));
 
-check("wizard active home", resolveWizardActiveHref("/") === "/");
+check(
+  "wizard active home defaults to menu",
+  resolveWizardActiveHref("/") === "/plan/menu",
+);
 check("wizard active menu", resolveWizardActiveHref("/plan/menu") === "/plan/menu");
 check(
   "wizard active list",
   resolveWizardActiveHref("/plan/shopping-list") === "/plan/shopping-list",
 );
+check(
+  "wizard active portions → list",
+  resolveWizardActiveHref("/plan/portions") === "/plan/shopping-list",
+);
 
 check("primary history", resolvePrimaryActiveHref("/history") === "/history");
 check("primary settings", resolvePrimaryActiveHref("/settings") === "/settings");
-check("primary none on plan", resolvePrimaryActiveHref("/") === undefined);
+check("primary none on /", resolvePrimaryActiveHref("/") === undefined);
 check(
   "primary none on menu",
   resolvePrimaryActiveHref("/plan/menu") === undefined,

@@ -5,6 +5,8 @@
 
 import { createClient } from "@supabase/supabase-js";
 
+import { assertAnonDenied } from "./lib/assert-anon-denied.mjs";
+
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const anon = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
@@ -14,12 +16,9 @@ if (!url || !anon) {
 }
 
 const supabase = createClient(url, anon);
-const { data, error } = await supabase.from("snack_ratings").select("id").limit(1);
-
-if (data == null || data.length === 0) {
-  console.log("PASS: anon cannot read snack_ratings");
-  process.exit(0);
-}
-
-console.log("FAIL: anon read snack_ratings", { data, error });
-process.exit(1);
+await assertAnonDenied(
+  supabase,
+  "snack_ratings",
+  "Apply snack_ratings migration first.",
+);
+console.log("All snack_ratings RLS anon checks passed");

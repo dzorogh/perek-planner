@@ -5,6 +5,8 @@
 
 import { createClient } from "@supabase/supabase-js";
 
+import { assertAnonDenied } from "./lib/assert-anon-denied.mjs";
+
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const anon = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
@@ -14,24 +16,14 @@ if (!url || !anon) {
 }
 
 const supabase = createClient(url, anon);
-
-const lists = await supabase.from("shopping_lists").select("id").limit(1);
-const lines = await supabase.from("shopping_list_lines").select("id").limit(1);
-
-let failed = false;
-if (lists.data != null && lists.data.length > 0) {
-  console.log("FAIL: anon read shopping_lists", lists);
-  failed = true;
-} else {
-  console.log("PASS: anon cannot read shopping_lists");
-}
-
-if (lines.data != null && lines.data.length > 0) {
-  console.log("FAIL: anon read shopping_list_lines", lines);
-  failed = true;
-} else {
-  console.log("PASS: anon cannot read shopping_list_lines");
-}
-
-if (failed) process.exit(1);
+await assertAnonDenied(
+  supabase,
+  "shopping_lists",
+  "Apply supabase/migrations/20260720090000_slot_servings_shopping_lists.sql first.",
+);
+await assertAnonDenied(
+  supabase,
+  "shopping_list_lines",
+  "Apply supabase/migrations/20260720090000_slot_servings_shopping_lists.sql first.",
+);
 console.log("All shopping_lists RLS anon checks passed");

@@ -60,3 +60,11 @@
 - DB-level cap on `taste_preferences` row count — app enforces `MAX_TASTE_PREFERENCES`; add trigger if abuse appears.
 - Auth bypass stronger than `NODE_ENV !== production` (e.g. explicit `KEPLO_ENV`) — revisit if deploy misconfig risk rises.
 - `critical_ingredients` UPDATE policy/grant — invent uses insert/delete; add update if in-place edits become a path.
+
+## Deferred from: code review of project-context.md — Chunk 4 Quality (2026-07-20)
+
+- Full sync of `verify-suggestions-logic.mjs` fork with `src/domain/suggestions/` — keep spot-fixing critical helpers; larger import/compile path later.
+- `verify-uj1-gate-logic.mjs` stub vs real `hasSlotEditPassed` (async DB) — expand when UJ-1 regressions appear.
+- Authenticated RLS positive checks (`signIn` + taste_preferences coverage) — extend verify:rls when multi-operator risk rises.
+- Include Playwright in `npm run verify` — keep optional (`test:e2e`) until CI secrets/OpenRouter are stable.
+- Auth middleware fail-open on transient `getUser` — decided keep in Chunk 1.

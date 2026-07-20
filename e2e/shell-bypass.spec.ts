@@ -3,8 +3,21 @@ import { expect, test } from "@playwright/test";
 /**
  * Soft Workshop shell under KEPLO_DEV_BYPASS_AUTH (middleware skips login redirect).
  * Does not require a session — covers navigation / empty states.
+ *
+ * Default `npm run test:e2e` starts webServer with bypass=true.
+ * With PLAYWRIGHT_SKIP_WEBSERVER, the reused `npm run dev` must have bypass set.
  */
 test.describe("App shell (bypass auth)", () => {
+  test.beforeAll(() => {
+    const skippingWebServer = Boolean(process.env.PLAYWRIGHT_SKIP_WEBSERVER);
+    if (skippingWebServer) {
+      test.skip(
+        process.env.KEPLO_DEV_BYPASS_AUTH !== "true",
+        "PLAYWRIGHT_SKIP_WEBSERVER: start npm run dev with KEPLO_DEV_BYPASS_AUTH=true.",
+      );
+    }
+  });
+
   test("W1 chrome: brand, CTA modal, wizard on plan; hidden off-plan", async ({
     page,
   }) => {

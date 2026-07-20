@@ -5,6 +5,8 @@
 
 import { createClient } from "@supabase/supabase-js";
 
+import { assertAnonDenied } from "./lib/assert-anon-denied.mjs";
+
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const anon = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
@@ -14,30 +16,14 @@ if (!url || !anon) {
 }
 
 const supabase = createClient(url, anon);
-
-let failed = 0;
-function check(name, cond) {
-  if (cond) console.log(`PASS: ${name}`);
-  else {
-    console.log(`FAIL: ${name}`);
-    failed += 1;
-  }
-}
-
-const refusals = await supabase.from("recipe_refusals").select("id").limit(1);
-check(
-  "anon cannot read recipe_refusals",
-  refusals.data == null || refusals.data.length === 0,
+await assertAnonDenied(
+  supabase,
+  "recipe_refusals",
+  "Apply supabase/migrations/20260720060000_recipe_refusals_ratings.sql first.",
 );
-
-const ratings = await supabase.from("recipe_ratings").select("id").limit(1);
-check(
-  "anon cannot read recipe_ratings",
-  ratings.data == null || ratings.data.length === 0,
+await assertAnonDenied(
+  supabase,
+  "recipe_ratings",
+  "Apply supabase/migrations/20260720060000_recipe_refusals_ratings.sql first.",
 );
-
-if (failed > 0) {
-  console.log(`${failed} case(s) failed`);
-  process.exit(1);
-}
 console.log("All refusals/ratings RLS anon checks passed");

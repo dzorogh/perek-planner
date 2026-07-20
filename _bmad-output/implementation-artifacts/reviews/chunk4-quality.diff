@@ -1,0 +1,2811 @@
+diff --git a/.env.example b/.env.example
+index 91cdb14..831d01c 100644
+--- a/.env.example
++++ b/.env.example
+@@ -1,4 +1,23 @@
+-# Update these with your Supabase details from your project settings > API
+-# https://app.supabase.com/project/_/settings/api
++# Supabase project settings → API
++# https://supabase.com/dashboard/project/_/settings/api
+ NEXT_PUBLIC_SUPABASE_URL=your-project-url
+ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-publishable-or-anon-key
++
++# Local-only: skip auth redirect to inspect the Soft Workshop shell.
++# Never set this in Dokploy / production. Ignored when NODE_ENV=production.
++# KEPLO_DEV_BYPASS_AUTH=true
++
++# Optional: operator credentials for scripts/verify-rls-*.mjs authenticated RLS checks
++# and Playwright planning-flow e2e (E2E_* aliases also accepted by e2e/planning-flow.spec.ts).
++# SMOKE_OPERATOR_EMAIL=you@example.com
++# SMOKE_OPERATOR_PASSWORD=your-password
++# E2E_OPERATOR_EMAIL=you@example.com
++# E2E_OPERATOR_PASSWORD=your-password
++
++# --- OpenRouter — Next server only; NEVER NEXT_PUBLIC_* ---
++# OPENROUTER_API_KEY=sk-or-...
++# Optional model override (default: openai/gpt-4o-mini:nitro — invent/snacks)
++# OPENROUTER_MODEL=openai/gpt-4o-mini:nitro
++# Optional ranking headers for openrouter.ai
++# OPENROUTER_HTTP_REFERER=http://localhost:3000
++# OPENROUTER_APP_TITLE=Keplo
+diff --git a/e2e/planning-flow.spec.ts b/e2e/planning-flow.spec.ts
+new file mode 100644
+index 0000000..aebc935
+--- /dev/null
++++ b/e2e/planning-flow.spec.ts
+@@ -0,0 +1,88 @@
++import { expect, test } from "@playwright/test";
++
++const email = process.env.E2E_OPERATOR_EMAIL ?? "e2e-operator@keplo.local";
++const password = process.env.E2E_OPERATOR_PASSWORD ?? "E2eTestPass123!";
++
++async function login(page: import("@playwright/test").Page) {
++  await page.goto("/auth/login");
++  await page.getByLabel("Эл. почта").fill(email);
++  await page.getByLabel("Пароль").fill(password);
++  await page.getByRole("button", { name: "Войти" }).click();
++  await expect(page).toHaveURL(/\/history/, { timeout: 30_000 });
++  await expect(page.getByRole("heading", { name: "История" })).toBeVisible();
++}
++
++test.describe("Planning happy path (authenticated)", () => {
++  test("generate → menu → shopping list → history", async ({ page }) => {
++    test.setTimeout(180_000);
++    await login(page);
++
++    await page.getByRole("button", { name: "Создать меню", exact: true }).click();
++    const createDialog = page.locator('[data-component="create-menu-dialog"]');
++    await expect(createDialog).toBeVisible();
++    await createDialog.getByRole("radio", { name: "1 день" }).click();
++    await createDialog.getByRole("radio", { name: "2 чел." }).click();
++    await createDialog.getByRole("button", { name: "Сгенерировать" }).click();
++
++    await expect(page).toHaveURL(/\/plan\/menu\?menuId=/, { timeout: 120_000 });
++    await expect(page.getByRole("heading", { name: "Меню" })).toBeVisible();
++    await expect(page.getByText("День 1")).toBeVisible();
++
++    // Generated snack slot (meal-lane + overflow actions)
++    await expect(page.getByText("Перекус", { exact: true }).first()).toBeVisible();
++    const snackSlot = page.locator('[data-component="snack-slot"]').first();
++    await expect(snackSlot).toBeVisible();
++    await expect(snackSlot).toHaveAttribute("data-empty", "false");
++    await snackSlot.getByRole("button", { name: "Действия со слотом" }).click();
++    await expect(
++      page.getByRole("menuitem", { name: "Заменить" }),
++    ).toBeVisible();
++    await expect(
++      page.getByRole("menuitem", { name: "Никогда не предлагать" }),
++    ).toBeVisible();
++    await page.keyboard.press("Escape");
++
++    // Recipe text dialog
++    const recipeTrigger = page
++      .locator('[data-component="recipe-text-trigger"]')
++      .first();
++    await recipeTrigger.click();
++    await expect(
++      page.locator('[data-component="recipe-text-panel"]'),
++    ).toBeVisible();
++    await page.keyboard.press("Escape");
++    await expect(
++      page.locator('[data-component="recipe-text-panel"]'),
++    ).toHaveCount(0);
++
++    await page.getByRole("button", { name: "К списку покупок →" }).click();
++    await expect(page).toHaveURL(/\/plan\/shopping-list\?menuId=/, {
++      timeout: 20_000,
++    });
++    await expect(
++      page.getByRole("heading", { name: "Список покупок" }),
++    ).toBeVisible();
++    await expect(
++      page.getByRole("button", { name: "Копировать список" }),
++    ).toBeVisible();
++
++    await expect(page.getByText(/\d+\s*(г|мл|шт)/).first()).toBeVisible({
++      timeout: 10_000,
++    });
++    await expect(page.getByRole("heading", { name: "Перекусы" })).toBeVisible();
++
++    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
++    await page.getByRole("button", { name: "Копировать список" }).click();
++    await expect(page.getByText("Список скопирован.")).toBeVisible();
++
++    await page.getByRole("link", { name: "История" }).click();
++    await expect(page.getByRole("heading", { name: "История" })).toBeVisible();
++    await expect(
++      page.locator('[data-component="history-rating-row"]').first(),
++    ).toBeVisible();
++
++    await page.getByRole("link", { name: "Настройки" }).click();
++    await expect(page.getByRole("heading", { name: "Настройки" })).toBeVisible();
++    await expect(page.getByRole("button", { name: "Выйти" }).nth(1)).toBeVisible();
++  });
++});
+diff --git a/e2e/shell-bypass.spec.ts b/e2e/shell-bypass.spec.ts
+new file mode 100644
+index 0000000..9605d0d
+--- /dev/null
++++ b/e2e/shell-bypass.spec.ts
+@@ -0,0 +1,93 @@
++import { expect, test } from "@playwright/test";
++
++/**
++ * Soft Workshop shell under KEPLO_DEV_BYPASS_AUTH (middleware skips login redirect).
++ * Does not require a session — covers navigation / empty states.
++ */
++test.describe("App shell (bypass auth)", () => {
++  test("W1 chrome: brand, CTA modal, wizard on plan; hidden off-plan", async ({
++    page,
++  }) => {
++    await page.goto("/");
++    await expect(page).toHaveURL(/\/history/);
++    await expect(page.getByRole("heading", { name: "История" })).toBeVisible();
++
++    await expect(
++      page.getByRole("link", { name: "Keplo — на главную" }),
++    ).toBeVisible();
++    await expect(
++      page.getByRole("button", { name: "Создать меню", exact: true }),
++    ).toBeVisible();
++    await expect(
++      page.getByRole("navigation", { name: "Шаги планирования" }),
++    ).toHaveCount(0);
++
++    await page.getByRole("button", { name: "Создать меню", exact: true }).click();
++    const createDialog = page.locator('[data-component="create-menu-dialog"]');
++    await expect(createDialog).toBeVisible();
++    await expect(
++      createDialog.getByRole("heading", { name: "Новое меню" }),
++    ).toBeVisible();
++    await expect(
++      createDialog.getByRole("button", { name: "Сгенерировать" }),
++    ).toBeVisible();
++    await page.keyboard.press("Escape");
++    await expect(createDialog).toHaveCount(0);
++
++    await page.goto("/plan/menu");
++    await expect(page.getByRole("heading", { name: "Меню" })).toBeVisible();
++    await expect(
++      page.getByRole("link", { name: "Создать меню" }),
++    ).toBeVisible();
++    const wizard = page.getByRole("navigation", { name: "Шаги планирования" });
++    await expect(wizard).toBeVisible();
++    await expect(
++      wizard.getByRole("link", { name: "Новое меню" }),
++    ).toHaveCount(0);
++    await expect(
++      wizard.getByRole("link", { name: "Состав", exact: true }),
++    ).toBeVisible();
++    await expect(page.getByText("План", { exact: true })).toHaveCount(0);
++
++    // Legacy portions URL redirects home when no menuId
++    await page.goto("/plan/portions");
++    await expect(page).toHaveURL(/\/history/);
++    await expect(
++      page.getByRole("navigation", { name: "Шаги планирования" }),
++    ).toHaveCount(0);
++
++    await page.goto("/plan/shopping-list");
++    await expect(page.getByRole("heading", { name: "Список покупок" })).toBeVisible();
++    await expect(
++      page.getByRole("navigation", { name: "Шаги планирования" }),
++    ).toBeVisible();
++
++    await page
++      .getByRole("navigation", { name: "Основная навигация" })
++      .getByRole("link", { name: "История", exact: true })
++      .click();
++    await expect(page).toHaveURL(/\/history/);
++    await expect(page.getByRole("heading", { name: "История" })).toBeVisible();
++    await expect(
++      page.getByRole("navigation", { name: "Шаги планирования" }),
++    ).toHaveCount(0);
++    await expect(
++      page
++        .getByRole("navigation", { name: "Основная навигация" })
++        .getByRole("link", { name: "История", exact: true }),
++    ).toHaveAttribute("aria-current", "page");
++
++    await page
++      .getByRole("navigation", { name: "Основная навигация" })
++      .getByRole("link", { name: "Настройки", exact: true })
++      .click();
++    await expect(page).toHaveURL(/\/settings/);
++    await expect(page.getByRole("heading", { name: "Настройки" })).toBeVisible();
++    await expect(
++      page.getByRole("navigation", { name: "Шаги планирования" }),
++    ).toHaveCount(0);
++
++    await page.goto("/auth/login");
++    await expect(page.getByRole("button", { name: "Войти" })).toBeVisible();
++  });
++});
+diff --git a/eslint.config.mjs b/eslint.config.mjs
+index c85fb67..e7a7aa9 100644
+--- a/eslint.config.mjs
++++ b/eslint.config.mjs
+@@ -1,16 +1,24 @@
+-import { dirname } from "path";
+-import { fileURLToPath } from "url";
+-import { FlatCompat } from "@eslint/eslintrc";
++import { defineConfig, globalIgnores } from "eslint/config";
++import nextVitals from "eslint-config-next/core-web-vitals";
++import nextTs from "eslint-config-next/typescript";
++import sonarjs from "eslint-plugin-sonarjs";
+ 
+-const __filename = fileURLToPath(import.meta.url);
+-const __dirname = dirname(__filename);
+-
+-const compat = new FlatCompat({
+-  baseDirectory: __dirname,
+-});
+-
+-const eslintConfig = [
+-  ...compat.extends("next/core-web-vitals", "next/typescript"),
+-];
+-
+-export default eslintConfig;
++export default defineConfig([
++  ...nextVitals,
++  ...nextTs,
++  sonarjs.configs.recommended,
++  {
++    rules: {
++      // Hard gate: default Sonar threshold is 15; keep as error (not warn).
++      "sonarjs/cognitive-complexity": ["error", 15],
++    },
++  },
++  globalIgnores([
++    ".next/**",
++    "out/**",
++    "build/**",
++    "next-env.d.ts",
++    ".venv-sync/**",
++    "**/site-packages/**",
++  ]),
++]);
+diff --git a/next.config.ts b/next.config.ts
+index cb651cd..68a6c64 100644
+--- a/next.config.ts
++++ b/next.config.ts
+@@ -1,5 +1,7 @@
+ import type { NextConfig } from "next";
+ 
+-const nextConfig: NextConfig = {};
++const nextConfig: NextConfig = {
++  output: "standalone",
++};
+ 
+ export default nextConfig;
+diff --git a/package.json b/package.json
+index 690d4c6..bbbc340 100644
+--- a/package.json
++++ b/package.json
+@@ -1,17 +1,23 @@
+ {
+-  "name": "perek-planner",
++  "name": "keplo",
+   "private": true,
+   "engines": {
+     "node": ">=22.0.0"
+   },
+   "scripts": {
+-    "dev": "next dev",
++    "dev": "next dev --port 3100",
+     "build": "next build",
+     "start": "next start",
+-    "lint": "eslint ."
++    "lint": "eslint .",
++    "verify:logic": "node scripts/verify-menu-skeleton-logic.mjs && node scripts/verify-fridge-keep-logic.mjs && node scripts/verify-suggestions-logic.mjs && node scripts/verify-uj1-gate-logic.mjs && node scripts/verify-shopping-list-logic.mjs && node scripts/verify-plan-chrome-logic.mjs && node scripts/verify-recipe-value-logic.mjs",
++    "verify:rls": "node --env-file=.env.local scripts/verify-rls-user-settings.mjs && node --env-file=.env.local scripts/verify-rls-menus.mjs && node --env-file=.env.local scripts/verify-rls-refusals-ratings.mjs && node --env-file=.env.local scripts/verify-rls-menu-snacks.mjs && node --env-file=.env.local scripts/verify-rls-shopping-lists.mjs && node --env-file=.env.local scripts/verify-rls-snack-ratings.mjs",
++    "verify": "npm run verify:logic && npm run verify:rls && npm run lint && npm run build",
++    "test:e2e": "playwright test",
++    "test:e2e:ui": "playwright test --ui"
+   },
+   "dependencies": {
+     "@radix-ui/react-checkbox": "^1.3.1",
++    "@radix-ui/react-dialog": "^1.1.20",
+     "@radix-ui/react-dropdown-menu": "^2.1.14",
+     "@radix-ui/react-label": "^2.1.6",
+     "@radix-ui/react-slot": "^1.2.2",
+@@ -23,16 +29,19 @@
+     "next": "16.2.10",
+     "react": "19.2.7",
+     "react-dom": "19.2.7",
++    "server-only": "^0.0.1",
+     "tailwind-merge": "^3.3.0"
+   },
+   "devDependencies": {
+     "@eslint/eslintrc": "^3",
++    "@playwright/test": "^1.57.0",
+     "@tailwindcss/postcss": "4.3.3",
+     "@types/node": "^22",
+     "@types/react": "^19",
+     "@types/react-dom": "^19",
+     "eslint": "^9",
+     "eslint-config-next": "16.2.10",
++    "eslint-plugin-sonarjs": "^4.2.0",
+     "tailwindcss": "4.3.3",
+     "tw-animate-css": "^1.3.4",
+     "typescript": "^5"
+diff --git a/playwright.config.ts b/playwright.config.ts
+new file mode 100644
+index 0000000..6a5caa5
+--- /dev/null
++++ b/playwright.config.ts
+@@ -0,0 +1,33 @@
++import { defineConfig, devices } from "@playwright/test";
++
++const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
++
++export default defineConfig({
++  testDir: "e2e",
++  fullyParallel: false,
++  forbidOnly: !!process.env.CI,
++  retries: process.env.CI ? 1 : 0,
++  workers: 1,
++  timeout: 120_000,
++  expect: { timeout: 15_000 },
++  reporter: [["list"]],
++  use: {
++    baseURL,
++    trace: "on-first-retry",
++    screenshot: "only-on-failure",
++  },
++  projects: [
++    {
++      name: "chromium",
++      use: { ...devices["Desktop Chrome"] },
++    },
++  ],
++  webServer: process.env.PLAYWRIGHT_SKIP_WEBSERVER
++    ? undefined
++    : {
++        command: "npm run dev",
++        url: baseURL,
++        reuseExistingServer: !process.env.CI,
++        timeout: 120_000,
++      },
++});
+diff --git a/proxy.ts b/proxy.ts
+index 503ab12..0d00552 100644
+--- a/proxy.ts
++++ b/proxy.ts
+@@ -1,20 +1,13 @@
+-import { updateSession } from "@/lib/supabase/proxy";
+ import { type NextRequest } from "next/server";
+ 
++import { updateSession } from "@/lib/supabase/middleware";
++
+ export async function proxy(request: NextRequest) {
+   return await updateSession(request);
+ }
+ 
+ export const config = {
+   matcher: [
+-    /*
+-     * Match all request paths except:
+-     * - _next/static (static files)
+-     * - _next/image (image optimization files)
+-     * - favicon.ico (favicon file)
+-     * - images - .svg, .png, .jpg, .jpeg, .gif, .webp
+-     * Feel free to modify this pattern to include more paths.
+-     */
+     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+   ],
+ };
+diff --git a/scripts/verify-fridge-keep-logic.mjs b/scripts/verify-fridge-keep-logic.mjs
+new file mode 100644
+index 0000000..5453e47
+--- /dev/null
++++ b/scripts/verify-fridge-keep-logic.mjs
+@@ -0,0 +1,40 @@
++/**
++ * Pure fridge-keep helpers (no store catalog).
++ * Usage: node scripts/verify-fridge-keep-logic.mjs
++ */
++
++function passesFridgeKeep(fridgeKeepDays, menuDayCount) {
++  return fridgeKeepDays >= menuDayCount;
++}
++
++function shortestFridgeKeepCapsLength(fridgeKeepDaysList) {
++  if (fridgeKeepDaysList.length === 0) return null;
++  return Math.min(...fridgeKeepDaysList);
++}
++
++function maxMenuDaysForRecipes(fridgeKeepDaysList) {
++  const capped = shortestFridgeKeepCapsLength(fridgeKeepDaysList);
++  if (capped === null) return 4;
++  return Math.min(4, Math.max(1, capped));
++}
++
++let failed = 0;
++function check(name, cond) {
++  if (cond) console.log(`PASS: ${name}`);
++  else {
++    console.log(`FAIL: ${name}`);
++    failed += 1;
++  }
++}
++
++check("fridge ok 4>=3", passesFridgeKeep(4, 3));
++check("fridge fail 1<3", !passesFridgeKeep(1, 3));
++check("cap empty → 4", maxMenuDaysForRecipes([]) === 4);
++check("cap [4,2] → 2", maxMenuDaysForRecipes([4, 2]) === 2);
++check("cap [7] → 4", maxMenuDaysForRecipes([7]) === 4);
++
++if (failed > 0) {
++  console.error(`${failed} case(s) failed`);
++  process.exit(1);
++}
++console.log("All fridge-keep logic cases passed");
+diff --git a/scripts/verify-menu-skeleton-logic.mjs b/scripts/verify-menu-skeleton-logic.mjs
+new file mode 100644
+index 0000000..1100419
+--- /dev/null
++++ b/scripts/verify-menu-skeleton-logic.mjs
+@@ -0,0 +1,164 @@
++/**
++ * Pure-logic smoke for Story 2.1 day/slot counts (no DB).
++ * Usage: node scripts/verify-menu-skeleton-logic.mjs
++ */
++
++const MEAL_SLOTS = [
++  "breakfast",
++  "second_breakfast",
++  "lunch",
++  "afternoon_snack",
++  "dinner",
++  "late_dinner",
++];
++const DEFAULT_MEALS = ["breakfast", "lunch", "dinner"];
++
++function isValidDayCount(value) {
++  return Number.isInteger(value) && value >= 1 && value <= 4;
++}
++
++function expectedSlotCount(dayCount, meals = MEAL_SLOTS) {
++  return dayCount * meals.length;
++}
++
++function buildSlotKeys(dayCount, meals = DEFAULT_MEALS) {
++  const keys = [];
++  for (let day = 1; day <= dayCount; day += 1) {
++    for (const meal of meals) {
++      keys.push(`${day}:${meal}`);
++    }
++  }
++  return keys;
++}
++
++const cases = [
++  { day: 1, meals: DEFAULT_MEALS, slots: 3 },
++  { day: 2, meals: DEFAULT_MEALS, slots: 6 },
++  { day: 3, meals: DEFAULT_MEALS, slots: 9 },
++  { day: 4, meals: DEFAULT_MEALS, slots: 12 },
++  {
++    day: 2,
++    meals: [
++      "breakfast",
++      "second_breakfast",
++      "lunch",
++      "afternoon_snack",
++      "dinner",
++      "late_dinner",
++    ],
++    slots: 12,
++  },
++  { day: 3, meals: ["lunch", "dinner"], slots: 6 },
++  { day: 1, meals: [], slots: 0 },
++];
++
++let failed = 0;
++
++for (const c of cases) {
++  if (!isValidDayCount(c.day)) {
++    console.error(`FAIL: ${c.day} should be valid`);
++    failed += 1;
++    continue;
++  }
++  const count = expectedSlotCount(c.day, c.meals);
++  const keys = buildSlotKeys(c.day, c.meals);
++  if (count !== c.slots || keys.length !== c.slots) {
++    console.error(`FAIL day=${c.day}: count=${count} keys=${keys.length}`);
++    failed += 1;
++  } else {
++    console.log(`PASS: day=${c.day} meals=${c.meals.length} → ${c.slots} slots`);
++  }
++}
++
++for (const bad of [0, 5, 1.5, NaN]) {
++  if (isValidDayCount(bad)) {
++    console.error(`FAIL: ${bad} should be invalid`);
++    failed += 1;
++  } else {
++    console.log(`PASS: reject dayCount=${bad}`);
++  }
++}
++
++function summarizeMenuDishes(slots) {
++  const byRecipe = new Map();
++  for (const slot of slots) {
++    if (!slot.recipeId || !slot.recipeName) continue;
++    const entry = byRecipe.get(slot.recipeId) ?? {
++      name: slot.recipeName,
++      days: new Set(),
++    };
++    entry.days.add(slot.dayIndex);
++    byRecipe.set(slot.recipeId, entry);
++  }
++  const out = [];
++  for (const [recipeId, entry] of byRecipe) {
++    const days = [...entry.days].sort((a, b) => a - b);
++    out.push({
++      recipeId,
++      name: entry.name,
++      dayCount: days.length,
++      days,
++    });
++  }
++  out.sort((a, b) => {
++    if (b.dayCount !== a.dayCount) return b.dayCount - a.dayCount;
++    return a.name.localeCompare(b.name, "ru");
++  });
++  return out;
++}
++
++function formatDishDayCount(dayCount) {
++  const n = Math.max(0, Math.floor(dayCount));
++  const mod10 = n % 10;
++  const mod100 = n % 100;
++  if (mod100 >= 11 && mod100 <= 14) return `${n} дней`;
++  if (mod10 === 1) return `${n} день`;
++  if (mod10 >= 2 && mod10 <= 4) return `${n} дня`;
++  return `${n} дней`;
++}
++
++const dishSlots = [
++  { recipeId: "a", recipeName: "Каша", dayIndex: 1 },
++  { recipeId: "a", recipeName: "Каша", dayIndex: 2 },
++  { recipeId: "b", recipeName: "Суп", dayIndex: 1 },
++  { recipeId: "b", recipeName: "Суп", dayIndex: 2 },
++  { recipeId: "b", recipeName: "Суп", dayIndex: 3 },
++  { recipeId: null, recipeName: null, dayIndex: 3 },
++];
++const dishes = summarizeMenuDishes(dishSlots);
++if (
++  dishes.length === 2 &&
++  dishes[0].name === "Суп" &&
++  dishes[0].dayCount === 3 &&
++  dishes[1].name === "Каша" &&
++  dishes[1].dayCount === 2
++) {
++  console.log("PASS: summarizeMenuDishes aggregates day counts");
++} else {
++  console.error("FAIL: summarizeMenuDishes", dishes);
++  failed += 1;
++}
++
++for (const [n, label] of [
++  [1, "1 день"],
++  [2, "2 дня"],
++  [3, "3 дня"],
++  [5, "5 дней"],
++  [11, "11 дней"],
++  [21, "21 день"],
++]) {
++  const got = formatDishDayCount(n);
++  if (got === label) {
++    console.log(`PASS: formatDishDayCount(${n})`);
++  } else {
++    console.error(`FAIL: formatDishDayCount(${n}) → ${got}`);
++    failed += 1;
++  }
++}
++
++if (failed > 0) {
++  console.error(`${failed} case(s) failed`);
++  process.exit(1);
++}
++
++console.log("All menu skeleton logic cases passed");
+diff --git a/scripts/verify-plan-chrome-logic.mjs b/scripts/verify-plan-chrome-logic.mjs
+new file mode 100644
+index 0000000..77bde59
+--- /dev/null
++++ b/scripts/verify-plan-chrome-logic.mjs
+@@ -0,0 +1,64 @@
++/**
++ * Pure-logic smoke for Story 5.1 W1 plan-chrome helpers.
++ * Usage: node scripts/verify-plan-chrome-logic.mjs
++ */
++
++function isPlanRoute(pathname) {
++  if (pathname === "/") return true;
++  return (
++    pathname.startsWith("/plan/menu") ||
++    pathname.startsWith("/plan/shopping-list") ||
++    pathname.startsWith("/plan/portions")
++  );
++}
++
++function resolveWizardActiveHref(pathname) {
++  if (pathname.startsWith("/plan/menu")) return "/plan/menu";
++  if (pathname.startsWith("/plan/shopping-list")) return "/plan/shopping-list";
++  if (pathname.startsWith("/plan/portions")) return "/plan/shopping-list";
++  return "/";
++}
++
++function resolvePrimaryActiveHref(pathname) {
++  if (pathname.startsWith("/history")) return "/history";
++  if (pathname.startsWith("/settings")) return "/settings";
++  return undefined;
++}
++
++let failed = 0;
++function check(name, cond) {
++  if (cond) console.log(`PASS: ${name}`);
++  else {
++    console.log(`FAIL: ${name}`);
++    failed += 1;
++  }
++}
++
++check("plan: /", isPlanRoute("/"));
++check("plan: menu", isPlanRoute("/plan/menu"));
++check("plan: list", isPlanRoute("/plan/shopping-list"));
++check("plan: portions legacy", isPlanRoute("/plan/portions"));
++check("off-plan: history", !isPlanRoute("/history"));
++check("off-plan: settings", !isPlanRoute("/settings"));
++check("off-plan: login", !isPlanRoute("/auth/login"));
++
++check("wizard active home", resolveWizardActiveHref("/") === "/");
++check("wizard active menu", resolveWizardActiveHref("/plan/menu") === "/plan/menu");
++check(
++  "wizard active list",
++  resolveWizardActiveHref("/plan/shopping-list") === "/plan/shopping-list",
++);
++
++check("primary history", resolvePrimaryActiveHref("/history") === "/history");
++check("primary settings", resolvePrimaryActiveHref("/settings") === "/settings");
++check("primary none on plan", resolvePrimaryActiveHref("/") === undefined);
++check(
++  "primary none on menu",
++  resolvePrimaryActiveHref("/plan/menu") === undefined,
++);
++
++if (failed > 0) {
++  console.log(`${failed} case(s) failed`);
++  process.exit(1);
++}
++console.log("All plan-chrome logic cases passed");
+diff --git a/scripts/verify-recipe-value-logic.mjs b/scripts/verify-recipe-value-logic.mjs
+new file mode 100644
+index 0000000..8f0e104
+--- /dev/null
++++ b/scripts/verify-recipe-value-logic.mjs
+@@ -0,0 +1,235 @@
++/**
++ * Pure logic checks for recipe price/KBJU scale + format.
++ * Usage: node scripts/verify-recipe-value-logic.mjs
++ */
++
++function scaleNullable(perServing, servings) {
++  if (perServing == null) return null;
++  if (!Number.isFinite(perServing) || perServing < 0) return null;
++  if (!Number.isFinite(servings) || servings < 1) return null;
++  return perServing * Math.trunc(servings);
++}
++
++function scalePerServing(fields, totalServings) {
++  return {
++    priceCents: scaleNullable(fields.priceCentsPerServing, totalServings),
++    caloriesKcal: scaleNullable(fields.caloriesKcalPerServing, totalServings),
++    proteinG: scaleNullable(fields.proteinGPerServing, totalServings),
++    fatG: scaleNullable(fields.fatGPerServing, totalServings),
++    carbsG: scaleNullable(fields.carbsGPerServing, totalServings),
++  };
++}
++
++function addKnown(acc, next) {
++  if (next == null) return acc;
++  return (acc ?? 0) + next;
++}
++
++function sumMenuTotals(slots) {
++  let priceCents = null;
++  let caloriesKcal = null;
++  let proteinG = null;
++  let fatG = null;
++  let carbsG = null;
++
++  for (const slot of slots) {
++    const servings =
++      Number.isFinite(slot.servings) && slot.servings >= 1
++        ? Math.trunc(slot.servings)
++        : 2;
++    const placements = [];
++    if (slot.recipeId) placements.push(slot.recipeValue);
++    if (slot.companionRecipeId) placements.push(slot.companionRecipeValue);
++    for (const value of placements) {
++      if (!value) continue;
++      const scaled = scalePerServing(value, servings);
++      priceCents = addKnown(priceCents, scaled.priceCents);
++      caloriesKcal = addKnown(caloriesKcal, scaled.caloriesKcal);
++      proteinG = addKnown(proteinG, scaled.proteinG);
++      fatG = addKnown(fatG, scaled.fatG);
++      carbsG = addKnown(carbsG, scaled.carbsG);
++    }
++  }
++
++  return { priceCents, caloriesKcal, proteinG, fatG, carbsG };
++}
++
++function formatPriceRub(priceCents) {
++  if (priceCents == null || !Number.isFinite(priceCents) || priceCents < 0) {
++    return null;
++  }
++  const rub = Math.round(priceCents / 100);
++  return `${rub.toLocaleString("ru-RU")} ₽`;
++}
++
++function formatKbjuLine(totals) {
++  const parts = [];
++  if (totals.caloriesKcal != null && Number.isFinite(totals.caloriesKcal)) {
++    parts.push(`${Math.round(totals.caloriesKcal)} ккал`);
++  }
++  if (totals.proteinG != null) parts.push(`Б ${Math.round(totals.proteinG)}`);
++  if (totals.fatG != null) parts.push(`Ж ${Math.round(totals.fatG)}`);
++  if (totals.carbsG != null) parts.push(`У ${Math.round(totals.carbsG)}`);
++  return parts.length > 0 ? parts.join(" · ") : null;
++}
++
++let failed = 0;
++function assert(name, cond) {
++  if (!cond) {
++    console.error(`FAIL: ${name}`);
++    failed += 1;
++  } else {
++    console.log(`ok: ${name}`);
++  }
++}
++
++const chicken = {
++  priceCentsPerServing: 18000,
++  caloriesKcalPerServing: 450,
++  proteinGPerServing: 35,
++  fatGPerServing: 15,
++  carbsGPerServing: 40,
++};
++const omelette = {
++  priceCentsPerServing: 6000,
++  caloriesKcalPerServing: 220,
++  proteinGPerServing: 14,
++  fatGPerServing: 16,
++  carbsGPerServing: 3,
++};
++const unknown = {
++  priceCentsPerServing: null,
++  caloriesKcalPerServing: null,
++  proteinGPerServing: null,
++  fatGPerServing: null,
++  carbsGPerServing: null,
++};
++
++const scaled2 = scalePerServing(chicken, 2);
++assert("scale price ×2", scaled2.priceCents === 36000);
++assert("scale kcal ×2", scaled2.caloriesKcal === 900);
++assert("null stays null", scalePerServing(unknown, 3).priceCents === null);
++
++const totals = sumMenuTotals([
++  {
++    servings: 2,
++    recipeId: "a",
++    recipeValue: chicken,
++    companionRecipeId: "b",
++    companionRecipeValue: omelette,
++  },
++  {
++    servings: 2,
++    recipeId: "a",
++    recipeValue: chicken,
++    companionRecipeId: null,
++    companionRecipeValue: null,
++  },
++]);
++assert(
++  "menu sum price = 2×chicken + omelette + chicken",
++  totals.priceCents === 18000 * 2 + 6000 * 2 + 18000 * 2,
++);
++assert(
++  "menu sum kcal",
++  totals.caloriesKcal === 450 * 2 + 220 * 2 + 450 * 2,
++);
++
++const partial = sumMenuTotals([
++  {
++    servings: 2,
++    recipeId: "a",
++    recipeValue: chicken,
++  },
++  {
++    servings: 2,
++    recipeId: "x",
++    recipeValue: unknown,
++  },
++]);
++assert("partial sum uses known only", partial.priceCents === 36000);
++assert(
++  "all-null menu totals stay null",
++  sumMenuTotals([
++    { servings: 2, recipeId: "x", recipeValue: unknown },
++  ]).priceCents === null,
++);
++
++assert("format price", formatPriceRub(18000) === "180 ₽");
++assert("format null price", formatPriceRub(null) === null);
++
++/** Mirrors inventPriceToKopecks in invent-recipes.ts */
++function inventPriceToKopecks(row) {
++  const MAX_RUB = 400;
++  const LEGACY_MAX = 5000;
++  const parseInt = (raw) => {
++    const n =
++      typeof raw === "number"
++        ? raw
++        : typeof raw === "string"
++          ? Number(raw)
++          : NaN;
++    if (!Number.isFinite(n) || n < 0 || n === 0) return null;
++    return Math.trunc(n);
++  };
++  const rub = parseInt(row.price_rub_per_serving ?? row.priceRubPerServing);
++  if (rub != null) {
++    if (rub > MAX_RUB) return null;
++    return rub * 100;
++  }
++  const cents = parseInt(
++    row.price_cents_per_serving ?? row.priceCentsPerServing,
++  );
++  if (cents == null) return null;
++  if (cents < LEGACY_MAX) {
++    if (cents > MAX_RUB) return null;
++    return cents * 100;
++  }
++  if (cents > MAX_RUB * 100) return null;
++  return cents;
++}
++
++assert(
++  "invent price_rub → kopecks",
++  inventPriceToKopecks({ price_rub_per_serving: 200 }) === 20000,
++);
++assert(
++  "legacy cents-as-rubles heuristic",
++  inventPriceToKopecks({ price_cents_per_serving: 200 }) === 20000,
++);
++assert(
++  "legacy real kopecks kept",
++  inventPriceToKopecks({ price_cents_per_serving: 18000 }) === 18000,
++);
++assert(
++  "restaurant-like rub omitted",
++  inventPriceToKopecks({ price_rub_per_serving: 900 }) === null,
++);
++assert(
++  "absurd rub omitted",
++  inventPriceToKopecks({ price_rub_per_serving: 9000 }) === null,
++);
++assert(
++  "format kbju",
++  formatKbjuLine({
++    caloriesKcal: 450,
++    proteinG: 35,
++    fatG: 15,
++    carbsG: 40,
++  }) === "450 ккал · Б 35 · Ж 15 · У 40",
++);
++assert(
++  "omit empty kbju",
++  formatKbjuLine({
++    caloriesKcal: null,
++    proteinG: null,
++    fatG: null,
++    carbsG: null,
++  }) === null,
++);
++
++if (failed > 0) {
++  console.error(`\n${failed} failed`);
++  process.exit(1);
++}
++console.log("\nAll recipe-value checks passed.");
+diff --git a/scripts/verify-rls-menu-snacks.mjs b/scripts/verify-rls-menu-snacks.mjs
+new file mode 100644
+index 0000000..475c8d0
+--- /dev/null
++++ b/scripts/verify-rls-menu-snacks.mjs
+@@ -0,0 +1,26 @@
++/**
++ * Anon RLS deny for menu_snacks (Story 2.5).
++ * Usage: node --env-file=.env.local scripts/verify-rls-menu-snacks.mjs
++ */
++
++import { createClient } from "@supabase/supabase-js";
++
++const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
++const anon = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
++
++if (!url || !anon) {
++  console.error("Missing NEXT_PUBLIC_SUPABASE_URL or publishable key");
++  process.exit(1);
++}
++
++const supabase = createClient(url, anon);
++const { data, error } = await supabase.from("menu_snacks").select("id").limit(1);
++
++if (data == null || data.length === 0) {
++  console.log("PASS: anon cannot read menu_snacks");
++  console.log("All menu_snacks RLS anon checks passed");
++  process.exit(0);
++}
++
++console.log("FAIL: anon read menu_snacks", { data, error });
++process.exit(1);
+diff --git a/scripts/verify-rls-menus.mjs b/scripts/verify-rls-menus.mjs
+new file mode 100644
+index 0000000..181bea2
+--- /dev/null
++++ b/scripts/verify-rls-menus.mjs
+@@ -0,0 +1,62 @@
++/**
++ * Smoke-proof Story 2.1 RLS after migration is applied.
++ * Usage: node --env-file=.env.local scripts/verify-rls-menus.mjs
++ *
++ * PASS only when anon gets an explicit permission/RLS denial on menus + menu_slots.
++ */
++import { createClient } from "@supabase/supabase-js";
++
++const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
++const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
++
++if (!url || !key) {
++  console.error("Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
++  process.exit(1);
++}
++
++const anon = createClient(url, key);
++
++function isPermissionDenied(err) {
++  if (!err) return false;
++  if (err.code === "42501") return true;
++  return /permission denied|row-level security|rls/i.test(err.message ?? "");
++}
++
++async function assertAnonDenied(table) {
++  const { data, error } = await anon.from(table).select("*").limit(1);
++
++  if (error) {
++    if (error.code === "PGRST205") {
++      console.error(
++        `Table public.${table} not found. Apply supabase/migrations/20260720040000_menus_menu_slots_recipes.sql first.`,
++      );
++      process.exit(2);
++    }
++    if (isPermissionDenied(error)) {
++      console.log(`PASS: anon cannot read ${table}`);
++      return;
++    }
++    console.error(
++      `FAIL: unexpected anon error on ${table}:`,
++      error.code,
++      error.message,
++    );
++    process.exit(1);
++  }
++
++  if (Array.isArray(data) && data.length === 0) {
++    console.error(
++      `FAIL: anon select on ${table} returned [] without error — cannot prove RLS deny.`,
++    );
++    process.exit(1);
++  }
++
++  console.error(`FAIL: anon unexpectedly read ${table}:`, data);
++  process.exit(1);
++}
++
++await assertAnonDenied("menus");
++await assertAnonDenied("menu_slots");
++await assertAnonDenied("recipes");
++
++console.log("All menu RLS anon checks passed");
+diff --git a/scripts/verify-rls-refusals-ratings.mjs b/scripts/verify-rls-refusals-ratings.mjs
+new file mode 100644
+index 0000000..a7add0a
+--- /dev/null
++++ b/scripts/verify-rls-refusals-ratings.mjs
+@@ -0,0 +1,43 @@
++/**
++ * Anon RLS deny for recipe_refusals / recipe_ratings (Story 2.3).
++ * Usage: node --env-file=.env.local scripts/verify-rls-refusals-ratings.mjs
++ */
++
++import { createClient } from "@supabase/supabase-js";
++
++const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
++const anon = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
++
++if (!url || !anon) {
++  console.error("Missing NEXT_PUBLIC_SUPABASE_URL or publishable key");
++  process.exit(1);
++}
++
++const supabase = createClient(url, anon);
++
++let failed = 0;
++function check(name, cond) {
++  if (cond) console.log(`PASS: ${name}`);
++  else {
++    console.log(`FAIL: ${name}`);
++    failed += 1;
++  }
++}
++
++const refusals = await supabase.from("recipe_refusals").select("id").limit(1);
++check(
++  "anon cannot read recipe_refusals",
++  refusals.data == null || refusals.data.length === 0,
++);
++
++const ratings = await supabase.from("recipe_ratings").select("id").limit(1);
++check(
++  "anon cannot read recipe_ratings",
++  ratings.data == null || ratings.data.length === 0,
++);
++
++if (failed > 0) {
++  console.log(`${failed} case(s) failed`);
++  process.exit(1);
++}
++console.log("All refusals/ratings RLS anon checks passed");
+diff --git a/scripts/verify-rls-shopping-lists.mjs b/scripts/verify-rls-shopping-lists.mjs
+new file mode 100644
+index 0000000..82c2773
+--- /dev/null
++++ b/scripts/verify-rls-shopping-lists.mjs
+@@ -0,0 +1,37 @@
++/**
++ * Anon RLS deny for shopping_lists / shopping_list_lines (Epic 3).
++ * Usage: node --env-file=.env.local scripts/verify-rls-shopping-lists.mjs
++ */
++
++import { createClient } from "@supabase/supabase-js";
++
++const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
++const anon = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
++
++if (!url || !anon) {
++  console.error("Missing NEXT_PUBLIC_SUPABASE_URL or publishable key");
++  process.exit(1);
++}
++
++const supabase = createClient(url, anon);
++
++const lists = await supabase.from("shopping_lists").select("id").limit(1);
++const lines = await supabase.from("shopping_list_lines").select("id").limit(1);
++
++let failed = false;
++if (lists.data != null && lists.data.length > 0) {
++  console.log("FAIL: anon read shopping_lists", lists);
++  failed = true;
++} else {
++  console.log("PASS: anon cannot read shopping_lists");
++}
++
++if (lines.data != null && lines.data.length > 0) {
++  console.log("FAIL: anon read shopping_list_lines", lines);
++  failed = true;
++} else {
++  console.log("PASS: anon cannot read shopping_list_lines");
++}
++
++if (failed) process.exit(1);
++console.log("All shopping_lists RLS anon checks passed");
+diff --git a/scripts/verify-rls-snack-ratings.mjs b/scripts/verify-rls-snack-ratings.mjs
+new file mode 100644
+index 0000000..a53aeff
+--- /dev/null
++++ b/scripts/verify-rls-snack-ratings.mjs
+@@ -0,0 +1,25 @@
++/**
++ * Anon RLS deny for snack_ratings (Epic 4).
++ * Usage: node --env-file=.env.local scripts/verify-rls-snack-ratings.mjs
++ */
++
++import { createClient } from "@supabase/supabase-js";
++
++const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
++const anon = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
++
++if (!url || !anon) {
++  console.error("Missing NEXT_PUBLIC_SUPABASE_URL or publishable key");
++  process.exit(1);
++}
++
++const supabase = createClient(url, anon);
++const { data, error } = await supabase.from("snack_ratings").select("id").limit(1);
++
++if (data == null || data.length === 0) {
++  console.log("PASS: anon cannot read snack_ratings");
++  process.exit(0);
++}
++
++console.log("FAIL: anon read snack_ratings", { data, error });
++process.exit(1);
+diff --git a/scripts/verify-rls-user-settings.mjs b/scripts/verify-rls-user-settings.mjs
+new file mode 100644
+index 0000000..5933861
+--- /dev/null
++++ b/scripts/verify-rls-user-settings.mjs
+@@ -0,0 +1,56 @@
++/**
++ * Smoke-proof Story 1.2 RLS after migration is applied.
++ * Usage: node --env-file=.env.local scripts/verify-rls-user-settings.mjs
++ *
++ * PASS only when anon gets an explicit permission/RLS denial.
++ * Empty `[]` without error is FAIL (cannot distinguish open SELECT on empty table).
++ */
++import { createClient } from "@supabase/supabase-js";
++
++const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
++const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
++
++if (!url || !key) {
++  console.error("Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
++  process.exit(1);
++}
++
++const anon = createClient(url, key);
++
++const { data, error } = await anon.from("user_settings").select("*");
++
++function isPermissionDenied(err) {
++  if (!err) return false;
++  if (err.code === "42501") return true;
++  return /permission denied|row-level security|rls/i.test(err.message ?? "");
++}
++
++if (error) {
++  console.log("anon_select_error:", error.code, error.message);
++  if (error.code === "PGRST205") {
++    console.error(
++      "Table public.user_settings not found. Apply supabase/migrations/20260720010000_user_settings_rls.sql first.",
++    );
++    process.exit(2);
++  }
++  if (isPermissionDenied(error)) {
++    console.log("PASS: anon/unauthenticated cannot read user_settings");
++    process.exit(0);
++  }
++  console.error(
++    "FAIL: unexpected anon error (not a permission/RLS deny):",
++    error.code,
++    error.message,
++  );
++  process.exit(1);
++}
++
++if (Array.isArray(data) && data.length === 0) {
++  console.error(
++    "FAIL: anon select returned zero rows without error — cannot prove RLS deny (table may be empty with open SELECT).",
++  );
++  process.exit(1);
++}
++
++console.error("FAIL: anon unexpectedly read rows:", data);
++process.exit(1);
+diff --git a/scripts/verify-shopping-list-logic.mjs b/scripts/verify-shopping-list-logic.mjs
+new file mode 100644
+index 0000000..5f50d02
+--- /dev/null
++++ b/scripts/verify-shopping-list-logic.mjs
+@@ -0,0 +1,156 @@
++/**
++ * Pure logic checks for Shopping list quantity formatting + copy.
++ * Usage: node scripts/verify-shopping-list-logic.mjs
++ */
++
++const UNIT_LABEL_RU = {
++  g: "г",
++  ml: "мл",
++  pcs: "шт",
++  tsp: "ч. л.",
++  tbsp: "ст. л.",
++};
++
++function roundQuantity(amount, unit) {
++  if (unit === "pcs") return Math.max(1, Math.ceil(amount));
++  if (unit === "tsp" || unit === "tbsp") return Math.round(amount * 2) / 2;
++  if (amount >= 100) return Math.round(amount / 5) * 5;
++  if (amount >= 10) return Math.round(amount);
++  return Math.round(amount * 10) / 10;
++}
++
++function formatQuantity(amount, unit) {
++  if (amount == null || unit == null) return null;
++  if (!(amount > 0)) return null;
++  const rounded = roundQuantity(amount, unit);
++  const num =
++    Number.isInteger(rounded) || rounded >= 10
++      ? String(Math.round(rounded))
++      : String(rounded).replace(".", ",");
++  return `${num} ${UNIT_LABEL_RU[unit]}`;
++}
++
++function formatLineLabel(ingredientName, amount, unit) {
++  const qty = formatQuantity(amount, unit);
++  return qty ? `${ingredientName} — ${qty}` : ingredientName;
++}
++
++function formatShoppingListCopy(list) {
++  if (list.lines.length === 0) {
++    return "Список покупок пуст.";
++  }
++  const sections = {
++    ingredient: [],
++    pantry: [],
++    snack: [],
++  };
++  for (const line of list.lines) {
++    sections[line.lineKind].push(
++      `• ${formatLineLabel(line.ingredientName, line.quantityAmount, line.quantityUnit)}`,
++    );
++  }
++  const parts = ["Список покупок"];
++  if (sections.ingredient.length) {
++    parts.push("", "Блюда:", ...sections.ingredient);
++  }
++  if (sections.pantry.length) {
++    parts.push("", "Базовые продукты:", ...sections.pantry);
++  }
++  if (sections.snack.length) {
++    parts.push("", "Перекусы:", ...sections.snack);
++  }
++  return parts.join("\n");
++}
++
++/** Aggregate amount_per_serving × servings by name+unit. */
++function aggregateLines(slots, ingredientsByRecipe) {
++  const byKey = new Map();
++  for (const slot of slots) {
++    const ings = ingredientsByRecipe[slot.recipe_id] ?? [];
++    for (const row of ings) {
++      const scaled =
++        row.unit && row.amount_per_serving > 0
++          ? row.amount_per_serving * slot.servings
++          : null;
++      const key =
++        scaled != null
++          ? `${row.kind}|${row.name.toLowerCase()}|${row.unit}`
++          : `${row.kind}|${row.name.toLowerCase()}|`;
++      const existing = byKey.get(key);
++      if (!existing) {
++        byKey.set(key, {
++          ingredientName: row.name,
++          lineKind: row.kind === "pantry" ? "pantry" : "ingredient",
++          quantityAmount: scaled,
++          quantityUnit: scaled != null ? row.unit : null,
++        });
++      } else if (
++        existing.quantityAmount != null &&
++        scaled != null &&
++        existing.quantityUnit === row.unit
++      ) {
++        existing.quantityAmount += scaled;
++      }
++    }
++  }
++  return [...byKey.values()];
++}
++
++const empty = formatShoppingListCopy({ lines: [] });
++if (empty !== "Список покупок пуст.") {
++  console.error("FAIL empty", empty);
++  process.exit(1);
++}
++
++const text = formatShoppingListCopy({
++  lines: [
++    {
++      ingredientName: "курица",
++      lineKind: "ingredient",
++      quantityAmount: 360,
++      quantityUnit: "g",
++    },
++    {
++      ingredientName: "соль",
++      lineKind: "pantry",
++      quantityAmount: 4,
++      quantityUnit: "g",
++    },
++    {
++      ingredientName: "йогурт",
++      lineKind: "snack",
++      quantityAmount: null,
++      quantityUnit: null,
++    },
++  ],
++});
++
++if (!text.includes("курица — 360 г") || !text.includes("соль — 4 г")) {
++  console.error("FAIL qty copy", text);
++  process.exit(1);
++}
++if (!text.includes("йогурт") || text.includes("йогурт —")) {
++  console.error("FAIL snack no qty", text);
++  process.exit(1);
++}
++
++const agg = aggregateLines(
++  [
++    { recipe_id: "a", servings: 2 },
++    { recipe_id: "a", servings: 2 },
++  ],
++  {
++    a: [{ name: "курица", kind: "critical", amount_per_serving: 120, unit: "g" }],
++  },
++);
++if (agg.length !== 1 || agg[0].quantityAmount !== 480) {
++  console.error("FAIL aggregate", agg);
++  process.exit(1);
++}
++
++if (formatQuantity(2.4, "pcs") !== "3 шт") {
++  console.error("FAIL pcs ceil", formatQuantity(2.4, "pcs"));
++  process.exit(1);
++}
++
++console.log("PASS: shopping list quantity + copy logic");
+diff --git a/scripts/verify-snack-pool-logic.mjs b/scripts/verify-snack-pool-logic.mjs
+new file mode 100644
+index 0000000..12d488e
+--- /dev/null
++++ b/scripts/verify-snack-pool-logic.mjs
+@@ -0,0 +1,126 @@
++/**
++ * Pure checks for snack label normalize / AI JSON parse (no fixed pool).
++ * Usage: node scripts/verify-snack-pool-logic.mjs
++ */
++
++function normalizeSnackLabel(label) {
++  return label.trim().toLocaleLowerCase("ru");
++}
++
++function formatSnackLabel(label) {
++  const trimmed = label.trim().replace(/\s+/g, " ");
++  if (!trimmed) return trimmed;
++  return trimmed.charAt(0).toLocaleUpperCase("ru") + trimmed.slice(1);
++}
++
++function parseOptionalNonNegInt(raw) {
++  const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : NaN;
++  if (!Number.isFinite(n) || n < 0 || n === 0) return null;
++  return Math.trunc(n);
++}
++
++function inventPriceToKopecks(row) {
++  const rub = parseOptionalNonNegInt(row.price_rub_per_serving);
++  if (rub != null) {
++    if (rub > 400) return null;
++    return rub * 100;
++  }
++  return null;
++}
++
++function parseSnackItem(item) {
++  if (typeof item === "string") {
++    const label = formatSnackLabel(item);
++    if (!label || label.length > 80) return null;
++    return {
++      label,
++      priceCentsPerServing: null,
++      caloriesKcalPerServing: null,
++    };
++  }
++  if (!item || typeof item !== "object") return null;
++  const rawName = item.name ?? item.label;
++  if (typeof rawName !== "string") return null;
++  const label = formatSnackLabel(rawName);
++  if (!label || label.length > 80) return null;
++  const nutrition =
++    item.nutrition_per_serving && typeof item.nutrition_per_serving === "object"
++      ? item.nutrition_per_serving
++      : null;
++  return {
++    label,
++    priceCentsPerServing: inventPriceToKopecks(item),
++    caloriesKcalPerServing: parseOptionalNonNegInt(nutrition?.kcal),
++  };
++}
++
++function parseSnacksJson(content, count, disliked) {
++  let parsed;
++  try {
++    parsed = JSON.parse(content.trim());
++  } catch {
++    return [];
++  }
++  if (!Array.isArray(parsed.snacks)) return [];
++  const out = [];
++  const seen = new Set();
++  for (const item of parsed.snacks) {
++    const draft = parseSnackItem(item);
++    if (!draft) continue;
++    const key = normalizeSnackLabel(draft.label);
++    if (disliked.has(key) || seen.has(key)) continue;
++    seen.add(key);
++    out.push(draft);
++    if (out.length >= count) break;
++  }
++  return out;
++}
++
++if (normalizeSnackLabel("  Йогурт ") !== "йогурт") {
++  console.error("FAIL normalize");
++  process.exit(1);
++}
++
++if (formatSnackLabel("овощные палочки с хумусом") !== "Овощные палочки с хумусом") {
++  console.error("FAIL formatSnackLabel");
++  process.exit(1);
++}
++
++const parsed = parseSnacksJson(
++  JSON.stringify({
++    snacks: [
++      "Хумус с хлебцами",
++      "йогурт",
++      "хумус с хлебцами",
++      {
++        name: "ряженка",
++        price_rub_per_serving: 55,
++        nutrition_per_serving: { kcal: 140 },
++      },
++    ],
++  }),
++  2,
++  new Set(["йогурт"]),
++);
++if (
++  parsed.length !== 2 ||
++  parsed[0].label !== "Хумус с хлебцами" ||
++  parsed[1].label !== "Ряженка" ||
++  parsed[1].priceCentsPerServing !== 5500 ||
++  parsed[1].caloriesKcalPerServing !== 140
++) {
++  console.error("FAIL parse", parsed);
++  process.exit(1);
++}
++
++const filtered = parseSnacksJson(
++  JSON.stringify({ snacks: ["банан", "орехи"] }),
++  2,
++  new Set(["банан", "орехи"]),
++);
++if (filtered.length !== 0) {
++  console.error("FAIL avoid filter", filtered);
++  process.exit(1);
++}
++
++console.log("PASS: snack generate/parse logic");
+diff --git a/scripts/verify-suggestions-logic.mjs b/scripts/verify-suggestions-logic.mjs
+new file mode 100644
+index 0000000..d5839c9
+--- /dev/null
++++ b/scripts/verify-suggestions-logic.mjs
+@@ -0,0 +1,1266 @@
++/**
++ * Pure-logic smoke for Story 2.3 suggestion predicates (no DB / no OpenRouter).
++ * Usage: node scripts/verify-suggestions-logic.mjs
++ */
++
++const LONG_IDLE_DAYS = 14;
++const RATING_WEIGHT = { like: 3, medium: 2, none: 1, dislike: 0 };
++
++function isLongIdle(lastAssignedAt, now, idleDays = LONG_IDLE_DAYS) {
++  if (!lastAssignedAt) return true;
++  const ms = idleDays * 24 * 60 * 60 * 1000;
++  return now.getTime() - lastAssignedAt.getTime() >= ms;
++}
++
++function isHardSuppressed(recipeId, sets) {
++  return sets.refusedIds.has(recipeId) || sets.dislikedIds.has(recipeId);
++}
++
++function ratingWeight(rating) {
++  return RATING_WEIGHT[rating];
++}
++
++function rankCandidates(candidates) {
++  return [...candidates].sort((a, b) => {
++    if (a.recentlyUsed !== b.recentlyUsed) return a.recentlyUsed ? 1 : -1;
++    if (a.longIdle !== b.longIdle) return a.longIdle ? -1 : 1;
++    const wa = RATING_WEIGHT[a.rating];
++    const wb = RATING_WEIGHT[b.rating];
++    if (wa !== wb) return wb - wa;
++    return a.name.localeCompare(b.name, "ru");
++  });
++}
++
++function preferFreshCandidates(candidates, minFresh) {
++  const fresh = candidates.filter((c) => !c.recentlyUsed);
++  return fresh.length >= minFresh ? fresh : candidates;
++}
++
++function candidateDeficitThreshold(slotCount) {
++  return Math.max(5, Math.ceil(slotCount * 0.6));
++}
++
++function inventCountForDeficit(freshCount, slotCount, buffer = 3) {
++  const threshold = candidateDeficitThreshold(slotCount);
++  if (freshCount >= threshold) return 0;
++  return threshold - freshCount + buffer;
++}
++
++function inventCountPerMenu(slotCount, meals = []) {
++  const mealBonus = meals.length > 0 ? Math.min(2, meals.length) : 0;
++  return Math.max(5, Math.ceil(slotCount * 0.55) + mealBonus) + 2;
++}
++
++const MEAL_SLOTS = [
++  "breakfast",
++  "second_breakfast",
++  "lunch",
++  "afternoon_snack",
++  "dinner",
++  "late_dinner",
++];
++
++function mealAllowsCompanion(meal) {
++  return meal === "lunch" || meal === "dinner" || meal === "late_dinner";
++}
++
++function mealOrderIndex(meal) {
++  const idx = MEAL_SLOTS.indexOf(meal);
++  return idx >= 0 ? idx : 99;
++}
++
++function preferInventedCandidates(candidates, inventedIds, minNeeded) {
++  if (inventedIds.size > 0) {
++    const invented = candidates.filter((c) => inventedIds.has(c.recipeId));
++    if (invented.length >= Math.min(minNeeded, inventedIds.size)) {
++      return invented.length >= minNeeded
++        ? invented
++        : [
++            ...invented,
++            ...candidates.filter((c) => !inventedIds.has(c.recipeId)),
++          ];
++    }
++  }
++  return preferFreshCandidates(candidates, minNeeded);
++}
++
++function extractJsonObject(text) {
++  const trimmed = text.trim();
++  if (trimmed.startsWith("{")) return trimmed;
++  const start = trimmed.indexOf("{");
++  const end = trimmed.lastIndexOf("}");
++  if (start >= 0 && end > start) return trimmed.slice(start, end + 1);
++  return trimmed;
++}
++
++function parseAssignmentsJson(
++  content,
++  allowedRecipeIds,
++  allowedSlotIds,
++  mealBySlot = new Map(),
++) {
++  let parsed;
++  try {
++    parsed = JSON.parse(extractJsonObject(content));
++  } catch {
++    return [];
++  }
++  if (!Array.isArray(parsed.assignments)) return [];
++  const out = [];
++  const seenSlots = new Set();
++  for (const item of parsed.assignments) {
++    if (!item || typeof item !== "object") continue;
++    const { slotId, recipeId, companionRecipeId: rawCompanion } = item;
++    if (typeof slotId !== "string" || typeof recipeId !== "string") continue;
++    if (!allowedSlotIds.has(slotId) || !allowedRecipeIds.has(recipeId)) continue;
++    if (seenSlots.has(slotId)) continue;
++    seenSlots.add(slotId);
++    let companionRecipeId = null;
++    const meal = mealBySlot.get(slotId);
++    if (
++      meal &&
++      mealAllowsCompanion(meal) &&
++      typeof rawCompanion === "string" &&
++      allowedRecipeIds.has(rawCompanion) &&
++      rawCompanion !== recipeId
++    ) {
++      companionRecipeId = rawCompanion;
++    }
++    out.push({ slotId, recipeId, companionRecipeId });
++  }
++  return out;
++}
++
++let failed = 0;
++function check(name, cond) {
++  if (cond) {
++    console.log(`PASS: ${name}`);
++  } else {
++    console.log(`FAIL: ${name}`);
++    failed += 1;
++  }
++}
++
++const now = new Date("2026-07-20T12:00:00Z");
++const d15 = new Date("2026-07-05T12:00:00Z");
++const d7 = new Date("2026-07-13T12:00:00Z");
++
++check("long-idle never cooked", isLongIdle(undefined, now));
++check("long-idle 15d ago", isLongIdle(d15, now));
++check("not long-idle 7d ago", !isLongIdle(d7, now));
++
++const sets = {
++  refusedIds: new Set(["r1"]),
++  dislikedIds: new Set(["r2"]),
++};
++check("refuse hard-suppress", isHardSuppressed("r1", sets));
++check("dislike hard-suppress", isHardSuppressed("r2", sets));
++check("ok not suppressed", !isHardSuppressed("r3", sets));
++
++check("like > medium weight", ratingWeight("like") > ratingWeight("medium"));
++check("medium > none weight", ratingWeight("medium") > ratingWeight("none"));
++
++const ranked = rankCandidates([
++  { recipeId: "a", name: "А", longIdle: false, recentlyUsed: false, rating: "like" },
++  { recipeId: "b", name: "Б", longIdle: true, recentlyUsed: false, rating: "medium" },
++  { recipeId: "c", name: "В", longIdle: true, recentlyUsed: false, rating: "like" },
++]);
++check(
++  "rank long-idle like first",
++  ranked[0].recipeId === "c" && ranked[1].recipeId === "b",
++);
++
++const rankedFresh = rankCandidates([
++  { recipeId: "old", name: "Старое", longIdle: true, recentlyUsed: true, rating: "like" },
++  { recipeId: "new", name: "Новое", longIdle: false, recentlyUsed: false, rating: "none" },
++]);
++check(
++  "rank prefers not-recently-used over long-idle recent",
++  rankedFresh[0].recipeId === "new",
++);
++
++const pool = preferFreshCandidates(
++  [
++    { recipeId: "r1", recentlyUsed: true },
++    { recipeId: "r2", recentlyUsed: false },
++    { recipeId: "r3", recentlyUsed: false },
++    { recipeId: "r4", recentlyUsed: false },
++    { recipeId: "r5", recentlyUsed: false },
++    { recipeId: "r6", recentlyUsed: false },
++  ],
++  5,
++);
++check(
++  "preferFreshCandidates drops recent when enough fresh",
++  pool.length === 5 && pool.every((c) => !c.recentlyUsed),
++);
++check(
++  "invent when fresh pool is empty",
++  inventCountForDeficit(0, 9) >= 5,
++);
++check(
++  "no invent when enough fresh",
++  inventCountForDeficit(8, 9) === 0,
++);
++check(
++  "always invent full AI dish set per menu",
++  inventCountPerMenu(9, ["breakfast", "lunch", "dinner"]) >= 6,
++);
++check(
++  "preferInventedCandidates picks new ids",
++  preferInventedCandidates(
++    [
++      { recipeId: "old", recentlyUsed: false },
++      { recipeId: "new1", recentlyUsed: false },
++      { recipeId: "new2", recentlyUsed: false },
++    ],
++    new Set(["new1", "new2"]),
++    2,
++  ).every((c) => c.recipeId.startsWith("new")),
++);
++
++const allowedR = new Set(["rec-a", "rec-b", "rec-side"]);
++const allowedS = new Set(["s1", "s2", "s3"]);
++const mealBySlot = new Map([
++  ["s1", "lunch"],
++  ["s2", "breakfast"],
++  ["s3", "dinner"],
++]);
++const parsed = parseAssignmentsJson(
++  '{"assignments":[{"slotId":"s1","recipeId":"rec-a"},{"slotId":"s2","recipeId":"evil"}]}',
++  allowedR,
++  allowedS,
++  mealBySlot,
++);
++check("reject unknown recipe id", parsed.length === 1 && parsed[0].recipeId === "rec-a");
++
++const fence = parseAssignmentsJson(
++  '```json\n{"assignments":[{"slotId":"s1","recipeId":"rec-b"}]}\n```',
++  allowedR,
++  allowedS,
++  mealBySlot,
++);
++check("parse fenced json", fence.length === 1 && fence[0].recipeId === "rec-b");
++
++const withCompanion = parseAssignmentsJson(
++  JSON.stringify({
++    assignments: [
++      { slotId: "s1", recipeId: "rec-a", companionRecipeId: "rec-side" },
++      { slotId: "s2", recipeId: "rec-b", companionRecipeId: "rec-side" },
++      { slotId: "s3", recipeId: "rec-a", companionRecipeId: "rec-a" },
++    ],
++  }),
++  allowedR,
++  allowedS,
++  mealBySlot,
++);
++check(
++  "companion kept for lunch",
++  withCompanion.find((a) => a.slotId === "s1")?.companionRecipeId === "rec-side",
++);
++check(
++  "companion stripped for breakfast",
++  withCompanion.find((a) => a.slotId === "s2")?.companionRecipeId == null,
++);
++check(
++  "companion stripped when equals main",
++  withCompanion.find((a) => a.slotId === "s3")?.companionRecipeId == null,
++);
++
++function isBreakfastMeal(meal) {
++  return meal === "breakfast" || meal === "second_breakfast";
++}
++
++function resolvePlateKind(proposal) {
++  if (proposal.plateKind === "complete") return "complete";
++  if (proposal.plateKind === "needs_companion") return "needs_companion";
++  if (proposal.companionRecipeId) return "needs_companion";
++  return "complete";
++}
++
++function normalizePlateAssignments(slots, proposals, candidates) {
++  const mealBySlot = new Map(slots.map((s) => [s.slotId, s.meal]));
++  const dayBySlot = new Map(slots.map((s) => [s.slotId, s.dayIndex]));
++  const used = new Set();
++  for (const p of proposals) {
++    if (p.companionRecipeId) used.add(p.companionRecipeId);
++  }
++  const breakfastMains = new Set();
++  for (const p of proposals) {
++    const meal = mealBySlot.get(p.slotId);
++    if (meal && isBreakfastMeal(meal)) breakfastMains.add(p.recipeId);
++  }
++  const usedOnDay = new Map();
++  for (const p of proposals) {
++    const day = dayBySlot.get(p.slotId);
++    if (day == null) continue;
++    const set = usedOnDay.get(day) ?? new Set();
++    set.add(p.recipeId);
++    usedOnDay.set(day, set);
++  }
++  const ordered = [...proposals].sort((a, b) => {
++    const dayA = dayBySlot.get(a.slotId) ?? 0;
++    const dayB = dayBySlot.get(b.slotId) ?? 0;
++    if (dayA !== dayB) return dayA - dayB;
++    return (
++      mealOrderIndex(mealBySlot.get(a.slotId)) -
++      mealOrderIndex(mealBySlot.get(b.slotId))
++    );
++  });
++  const outBySlot = new Map();
++  for (const proposal of ordered) {
++    const meal = mealBySlot.get(proposal.slotId);
++    if (!meal || !mealAllowsCompanion(meal)) {
++      outBySlot.set(proposal.slotId, {
++        slotId: proposal.slotId,
++        recipeId: proposal.recipeId,
++        companionRecipeId: null,
++      });
++      continue;
++    }
++    const kind = resolvePlateKind(proposal);
++    if (kind === "complete") {
++      outBySlot.set(proposal.slotId, {
++        slotId: proposal.slotId,
++        recipeId: proposal.recipeId,
++        companionRecipeId: null,
++      });
++      continue;
++    }
++    const day = dayBySlot.get(proposal.slotId);
++    const dayUsed = day != null ? (usedOnDay.get(day) ?? new Set()) : new Set();
++    const avoidAsCompanion = new Set([...breakfastMains, ...dayUsed]);
++    let companion =
++      proposal.companionRecipeId &&
++      proposal.companionRecipeId !== proposal.recipeId &&
++      !avoidAsCompanion.has(proposal.companionRecipeId) &&
++      candidates.some((c) => c.recipeId === proposal.companionRecipeId)
++        ? proposal.companionRecipeId
++        : null;
++    if (!companion) {
++      companion = pickCompanionCandidate(
++        candidates,
++        proposal.recipeId,
++        used,
++        avoidAsCompanion,
++      );
++    }
++    if (companion) {
++      used.add(companion);
++      if (day != null) {
++        const set = usedOnDay.get(day) ?? new Set();
++        set.add(companion);
++        usedOnDay.set(day, set);
++      }
++    }
++    outBySlot.set(proposal.slotId, {
++      slotId: proposal.slotId,
++      recipeId: proposal.recipeId,
++      companionRecipeId: companion,
++    });
++  }
++  return proposals.map(
++    (p) =>
++      outBySlot.get(p.slotId) ?? {
++        slotId: p.slotId,
++        recipeId: p.recipeId,
++        companionRecipeId: null,
++      },
++  );
++}
++
++const plateSlots = [
++  { slotId: "s1", dayIndex: 1, meal: "lunch" },
++  { slotId: "s2", dayIndex: 1, meal: "dinner" },
++];
++const plateCands = [
++  { recipeId: "main-a", name: "Куриное филе" },
++  { recipeId: "side-a", name: "Пюре" },
++  { recipeId: "plov", name: "Плов с курицей" },
++];
++const filledBare = normalizePlateAssignments(
++  plateSlots,
++  [
++    {
++      slotId: "s1",
++      recipeId: "main-a",
++      companionRecipeId: null,
++      plateKind: "needs_companion",
++    },
++    {
++      slotId: "s2",
++      recipeId: "plov",
++      companionRecipeId: "side-a",
++      plateKind: "complete",
++    },
++  ],
++  plateCands,
++);
++check(
++  "normalize fills needs_companion lunch when AI omitted companion id",
++  filledBare.find((a) => a.slotId === "s1")?.companionRecipeId === "side-a",
++);
++check(
++  "normalize trusts plateKind=complete and strips companion",
++  filledBare.find((a) => a.slotId === "s2")?.companionRecipeId == null,
++);
++check(
++  "normalize does not invent companion without AI plateKind/companion",
++  normalizePlateAssignments(
++    [{ slotId: "d1", dayIndex: 1, meal: "dinner" }],
++    [{ slotId: "d1", recipeId: "plov", companionRecipeId: null }],
++    plateCands,
++  ).find((a) => a.slotId === "d1")?.companionRecipeId == null,
++);
++check(
++  "normalize honors AI needs_companion pairing (no keyword override)",
++  normalizePlateAssignments(
++    [{ slotId: "d3", dayIndex: 3, meal: "dinner" }],
++    [
++      {
++        slotId: "d3",
++        recipeId: "plov",
++        companionRecipeId: "side-a",
++        plateKind: "needs_companion",
++      },
++    ],
++    plateCands,
++  ).find((a) => a.slotId === "d3")?.companionRecipeId === "side-a",
++);
++
++function groupSlotsByMeal(slots) {
++  const map = new Map();
++  for (const slot of slots) {
++    const list = map.get(slot.meal) ?? [];
++    list.push(slot);
++    map.set(slot.meal, list);
++  }
++  for (const list of map.values()) {
++    list.sort((a, b) => a.dayIndex - b.dayIndex);
++  }
++  return map;
++}
++
++function sortedDayIndexes(slots) {
++  return [...new Set(slots.map((s) => s.dayIndex))].sort((a, b) => a - b);
++}
++
++function daySignature(dayIndex, slots, bySlot) {
++  return slots
++    .filter((s) => s.dayIndex === dayIndex)
++    .slice()
++    .sort((a, b) => a.meal.localeCompare(b.meal))
++    .map((s) => `${s.meal}:${bySlot.get(s.slotId) ?? ""}`)
++    .join("|");
++}
++
++function isMenuUniformAcrossDays(slots, proposals) {
++  const bySlot = new Map(proposals.map((p) => [p.slotId, p.recipeId]));
++  const days = sortedDayIndexes(slots);
++  if (days.length < 2) return false;
++  const byMeal = groupSlotsByMeal(slots);
++  let sawMultiDayMeal = false;
++  for (const mealSlots of byMeal.values()) {
++    if (mealSlots.length < 2) continue;
++    sawMultiDayMeal = true;
++    const ids = mealSlots.map((s) => bySlot.get(s.slotId));
++    if (ids.some((id) => id == null)) return false;
++    const first = ids[0];
++    if (ids.some((id) => id !== first)) return false;
++  }
++  return sawMultiDayMeal;
++}
++
++function findDuplicateDayPair(slots, bySlot) {
++  const days = sortedDayIndexes(slots);
++  if (days.length < 2) return null;
++  const signatures = new Map();
++  for (const day of days) signatures.set(day, daySignature(day, slots, bySlot));
++  for (let i = 0; i < days.length; i++) {
++    for (let j = i + 1; j < days.length; j++) {
++      const a = days[i];
++      const b = days[j];
++      if (signatures.get(a) && signatures.get(a) === signatures.get(b)) {
++        return [a, b];
++      }
++    }
++  }
++  return null;
++}
++
++function hasDuplicateDayMenus(slots, proposals) {
++  const bySlot = new Map(proposals.map((p) => [p.slotId, p.recipeId]));
++  return findDuplicateDayPair(slots, bySlot) != null;
++}
++
++function isMealUniform(mealSlots, bySlot) {
++  if (mealSlots.length < 2) return false;
++  const ids = mealSlots.map((s) => bySlot.get(s.slotId));
++  if (ids.some((id) => id == null)) return false;
++  return ids.every((id) => id === ids[0]);
++}
++
++const MIN_BATCH_SLOT_RATIO = 0.5;
++
++function batchSlotRatio(slots, proposals) {
++  const days = sortedDayIndexes(slots);
++  if (days.length < 2) return 1;
++  const bySlot = new Map(proposals.map((p) => [p.slotId, p.recipeId]));
++  const recipeDays = new Map();
++  for (const slot of slots) {
++    const recipeId = bySlot.get(slot.slotId);
++    if (!recipeId) continue;
++    const set = recipeDays.get(recipeId) ?? new Set();
++    set.add(slot.dayIndex);
++    recipeDays.set(recipeId, set);
++  }
++  let total = 0;
++  let batched = 0;
++  for (const slot of slots) {
++    const recipeId = bySlot.get(slot.slotId);
++    if (!recipeId) continue;
++    total += 1;
++    if ((recipeDays.get(recipeId)?.size ?? 0) >= 2) batched += 1;
++  }
++  return total === 0 ? 1 : batched / total;
++}
++
++function toProposals(slots, bySlot) {
++  return slots
++    .filter((s) => bySlot.has(s.slotId))
++    .map((s) => ({ slotId: s.slotId, recipeId: bySlot.get(s.slotId) }));
++}
++
++function trySetRecipe(slots, bySlot, slotId, recipeId) {
++  const prev = bySlot.get(slotId);
++  if (prev === recipeId) return false;
++  bySlot.set(slotId, recipeId);
++  if (findDuplicateDayPair(slots, bySlot)) {
++    if (prev == null) bySlot.delete(slotId);
++    else bySlot.set(slotId, prev);
++    return false;
++  }
++  return true;
++}
++
++function diversifyDay(slots, bySlot, byMeal, dayIndex, candidateIds) {
++  const daySlots = slots
++    .filter((s) => s.dayIndex === dayIndex)
++    .sort((a, b) => a.meal.localeCompare(b.meal));
++  const ordered = [...daySlots].sort((a, b) => {
++    const aClone = isMealUniform(byMeal.get(a.meal) ?? [], bySlot) ? 0 : 1;
++    const bClone = isMealUniform(byMeal.get(b.meal) ?? [], bySlot) ? 0 : 1;
++    return aClone - bClone;
++  });
++  for (const slot of ordered) {
++    const current = bySlot.get(slot.slotId);
++    if (!current) continue;
++    const siblingIds = new Set(
++      (byMeal.get(slot.meal) ?? [])
++        .filter((s) => s.slotId !== slot.slotId)
++        .map((s) => bySlot.get(s.slotId))
++        .filter(Boolean),
++    );
++    const alternate =
++      [...siblingIds].find((id) => id !== current) ??
++      candidateIds.find((id) => id !== current);
++    if (!alternate) continue;
++    bySlot.set(slot.slotId, alternate);
++    if (dayStillDuplicated(slots, bySlot, dayIndex)) {
++      bySlot.set(slot.slotId, current);
++      continue;
++    }
++    return true;
++  }
++  return false;
++}
++
++function dayStillDuplicated(slots, bySlot, dayIndex) {
++  const sig = daySignature(dayIndex, slots, bySlot);
++  if (!sig) return false;
++  for (const day of sortedDayIndexes(slots)) {
++    if (day === dayIndex) continue;
++    if (daySignature(day, slots, bySlot) === sig) return true;
++  }
++  return false;
++}
++
++function raiseBatchRatio(slots, bySlot, byMeal) {
++  for (let guard = 0; guard < 24; guard++) {
++    if (batchSlotRatio(slots, toProposals(slots, bySlot)) >= MIN_BATCH_SLOT_RATIO) {
++      return;
++    }
++    let progressed = false;
++    for (const mealSlots of byMeal.values()) {
++      if (mealSlots.length < 2) continue;
++      for (let i = 0; i < mealSlots.length - 1; i++) {
++        const left = mealSlots[i];
++        const right = mealSlots[i + 1];
++        const leftId = bySlot.get(left.slotId);
++        const rightId = bySlot.get(right.slotId);
++        if (!leftId || !rightId || leftId === rightId) continue;
++        if (trySetRecipe(slots, bySlot, right.slotId, leftId)) {
++          progressed = true;
++          break;
++        }
++        if (trySetRecipe(slots, bySlot, left.slotId, rightId)) {
++          progressed = true;
++          break;
++        }
++      }
++      if (progressed) break;
++    }
++    if (!progressed) return;
++  }
++}
++
++function normalizeDishName(name) {
++  return name
++    .trim()
++    .toLowerCase()
++    .replaceAll("ё", "е")
++    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
++    .replace(/\s+/g, " ")
++    .trim();
++}
++
++function namesEqual(a, b) {
++  const na = normalizeDishName(a);
++  const nb = normalizeDishName(b);
++  return !!na && !!nb && na === nb;
++}
++
++/** Cookable slots ≠ menu_snacks: reject snack-like recipe labels. */
++function looksLikeNoCookSnack(name) {
++  const n = normalizeDishName(name);
++  if (!n) return false;
++  if (n.includes("перекус")) return true;
++  if (/(^|\s)(снек|snack)(ы|а|ов)?(\s|$)/.test(n)) return true;
++  return false;
++}
++
++function looksLikeBreakfastDish(name) {
++  const n = normalizeDishName(name);
++  if (!n) return false;
++  if (
++    /(^|\s)(каш[аиуе]|овсян|овсянк|гречнев\w*\s+каш|пшенн\w*\s+каш|пш[её]нн)/.test(
++      n,
++    )
++  ) {
++    return true;
++  }
++  if (/(^|\s)(яичниц|омлет|скрэмбл|шакшук)/.test(n)) return true;
++  if (/(^|\s)(сырник|оладь|блинчик|блин(?!н)|драник|панкейк)/.test(n)) {
++    return true;
++  }
++  if (/(^|\s)(творож|творог)/.test(n)) return true;
++  if (/(^|\s)(тост|гранол|мюсли|круассан|вафл|бутерброд)/.test(n)) return true;
++  if (/(творож|яичн|манн|рисовая|пшенн|овсян)\w*\s+запеканк/.test(n)) {
++    return true;
++  }
++  if (/запеканк\w*\s+(из\s+)?(творог|яиц|манк)/.test(n)) return true;
++  return false;
++}
++
++function looksLikeLunchDinnerOnlyMain(name) {
++  const n = normalizeDishName(name);
++  if (!n) return false;
++  if (looksLikeBreakfastDish(n)) return false;
++  if (
++    /(^|\s)(борщ|щи|солянка|харчо|уха|бульон|суп|похлебк|окрошк|свекольник)/.test(
++      n,
++    )
++  ) {
++    return true;
++  }
++  if (
++    /(^|\s)(плов|лазань|гуляш|бефстроган|шашлык|стейк|рагу|жаркое|голубц|пельмен|манты)/.test(
++      n,
++    )
++  ) {
++    return true;
++  }
++  if (
++    /(^|\s)(котлет|тефтел|фрикадель|отбивн|шницел|бифштекс|зразы|люля)/.test(
++      n,
++    )
++  ) {
++    return true;
++  }
++  if (
++    /(запеч[её]нн|жар[её]нн|туш[её]нн)\w*\s+(курица|куриц|цыпл|утка|гусь|индейк)/.test(
++      n,
++    )
++  ) {
++    return true;
++  }
++  if (
++    /(^|\s)(курица|куриц|цыпл)\w*.*(запеч|жар|тушен|лимон|трав|чеснок)/.test(
++      n,
++    )
++  ) {
++    return true;
++  }
++  if (
++    /(^|\s)(куриная|куриное|куриный|индюшин)\w*\s+(грудк|филе|окороч)/.test(
++      n,
++    )
++  ) {
++    return true;
++  }
++  if (/(^|\s)(грудк|филе|окороч|стейк)\w*\s/.test(n)) return true;
++  if (/(^|\s)(паста|спагетти|лапша|макарон)/.test(n)) return true;
++  if (
++    /(запеч[её]нн|жар[её]нн|туш[её]нн)\w*\s+(рыб|лосос|форел|треск|минтай)/.test(
++      n,
++    )
++  ) {
++    return true;
++  }
++  return false;
++}
++
++function looksLikeCompanionOnly(name) {
++  const n = normalizeDishName(name);
++  if (!n) return false;
++  // \b is ASCII-only in JS — use explicit edges for Cyrillic tokens.
++  if (/(^|\s)соус(ы|а|ом|ами)?(\s|$)/.test(n)) return true;
++  if (/(^|\s)заправк/.test(n)) return true;
++  if (/(^|\s)подлив/.test(n)) return true;
++  if (/(^|\s)гарнир(\s|$)/.test(n)) return true;
++  if (
++    /(^|\s)к\s+(пасте|макаронам|мясу|рыбе|курице|грудке|стейку|котлетам|гарниру)(\s|$)/.test(
++      n,
++    )
++  ) {
++    return true;
++  }
++  return false;
++}
++
++function isSuitableAsBreakfastMain(name) {
++  if (looksLikeCompanionOnly(name) || looksLikeNoCookSnack(name)) return false;
++  if (looksLikeLunchDinnerOnlyMain(name)) return false;
++  return true;
++}
++
++function mainsForMeal(meal, named) {
++  const mains = named.filter((c) => !looksLikeCompanionOnly(c.name));
++  const base = mains.length > 0 ? mains : [...named];
++  if (!isBreakfastMeal(meal)) return base;
++  const morning = base.filter((c) => looksLikeBreakfastDish(c.name));
++  if (morning.length > 0) return morning;
++  const ok = base.filter((c) => isSuitableAsBreakfastMain(c.name));
++  if (ok.length > 0) return ok;
++  return base;
++}
++
++function stripHardcodedPairing(name) {
++  const cleaned = name
++    .replace(
++      /\s+к\s+(пасте|макаронам|мясу|рыбе|курице|грудке|стейку|котлетам|гарниру)\s*$/iu,
++      "",
++    )
++    .trim();
++  return cleaned.length > 0 ? cleaned : name.trim();
++}
++
++function pickUnusedCandidate(candidates, excludeIds) {
++  for (const c of candidates) {
++    if (excludeIds.has(c.recipeId)) continue;
++    return c;
++  }
++  return null;
++}
++
++function pickCompanionCandidate(
++  candidates,
++  mainRecipeId,
++  alreadyUsed = new Set(),
++  avoidIds = new Set(),
++) {
++  const others = candidates.filter(
++    (c) => c.recipeId !== mainRecipeId && !avoidIds.has(c.recipeId),
++  );
++  const pool =
++    others.length > 0
++      ? others
++      : candidates.filter((c) => c.recipeId !== mainRecipeId);
++  if (pool.length === 0) return null;
++  const unused = pool.find((c) => !alreadyUsed.has(c.recipeId));
++  return (unused ?? pool[0])?.recipeId ?? null;
++}
++
++function assignWithBatchVariety(slots, candidates) {
++  if (candidates.length === 0) return [];
++  const byMeal = groupSlotsByMeal(slots);
++  const mealOrder = [...byMeal.keys()];
++  const out = [];
++  const usedIds = new Set();
++  const named = candidates.map((c) => ({
++    recipeId: c.recipeId,
++    name: c.name,
++  }));
++  const pickForMeal = (pool) => {
++    const primary = pickUnusedCandidate(pool, usedIds) ?? pool[0];
++    usedIds.add(primary.recipeId);
++    const secondary =
++      pickUnusedCandidate(pool, usedIds) ??
++      pool.find((c) => c.recipeId !== primary.recipeId) ??
++      pickUnusedCandidate(named, usedIds) ??
++      named.find((c) => c.recipeId !== primary.recipeId) ??
++      primary;
++    if (secondary.recipeId !== primary.recipeId) {
++      usedIds.add(secondary.recipeId);
++    }
++    return { primary: primary.recipeId, secondary: secondary.recipeId };
++  };
++  mealOrder.forEach((meal, mealIndex) => {
++    const mealSlots = byMeal.get(meal);
++    const pool = mainsForMeal(meal, named);
++    const { primary, secondary } = pickForMeal(pool);
++    for (let i = 0; i < mealSlots.length; i++) {
++      const slot = mealSlots[i];
++      let recipeId = primary;
++      if (candidates.length >= 2 && mealSlots.length >= 2) {
++        if (mealIndex % 2 === 0) {
++          recipeId = i === mealSlots.length - 1 ? secondary : primary;
++        } else {
++          recipeId = i === 0 ? primary : secondary;
++        }
++      }
++      out.push({ slotId: slot.slotId, recipeId });
++    }
++  });
++  return out;
++}
++
++function hasSameDayMainReuse(slots, proposals) {
++  return findSameDayMainConflict(
++    slots,
++    new Map(proposals.map((p) => [p.slotId, p.recipeId])),
++  ) != null;
++}
++
++function findSameDayMainConflict(slots, bySlot) {
++  for (const day of sortedDayIndexes(slots)) {
++    const conflictSlotId = sameDayReuseSlotId(slots, bySlot, day);
++    if (conflictSlotId) return { dayIndex: day, slotId: conflictSlotId };
++  }
++  return null;
++}
++
++function dayHasSameDayMainReuse(slots, bySlot, dayIndex) {
++  return sameDayReuseSlotId(slots, bySlot, dayIndex) != null;
++}
++
++function sameDayReuseSlotId(slots, bySlot, dayIndex) {
++  const daySlots = slots
++    .filter((s) => s.dayIndex === dayIndex)
++    .slice()
++    .sort((a, b) => mealOrderIndex(a.meal) - mealOrderIndex(b.meal));
++  const seen = new Set();
++  for (const slot of daySlots) {
++    const recipeId = bySlot.get(slot.slotId);
++    if (!recipeId) continue;
++    if (seen.has(recipeId)) return slot.slotId;
++    seen.add(recipeId);
++  }
++  return null;
++}
++
++function breakSameDayMainReuse(slots, bySlot, candidateIds) {
++  if (candidateIds.length < 2) return;
++  for (let guard = 0; guard < 24; guard++) {
++    const conflict = findSameDayMainConflict(slots, bySlot);
++    if (!conflict) return;
++    const dayUsed = new Set();
++    for (const slot of slots) {
++      if (slot.dayIndex !== conflict.dayIndex) continue;
++      if (slot.slotId === conflict.slotId) continue;
++      const id = bySlot.get(slot.slotId);
++      if (id) dayUsed.add(id);
++    }
++    const current = bySlot.get(conflict.slotId);
++    if (!current) return;
++    const alternates = candidateIds.filter(
++      (id) => id !== current && !dayUsed.has(id),
++    );
++    const fallback = candidateIds.filter((id) => id !== current);
++    const tryIds = alternates.length > 0 ? alternates : fallback;
++    let changed = false;
++    for (const alternate of tryIds) {
++      bySlot.set(conflict.slotId, alternate);
++      if (
++        findDuplicateDayPair(slots, bySlot) ||
++        dayHasSameDayMainReuse(slots, bySlot, conflict.dayIndex)
++      ) {
++        bySlot.set(conflict.slotId, current);
++        continue;
++      }
++      changed = true;
++      break;
++    }
++    if (!changed) return;
++  }
++}
++
++function enforceDayVariety(slots, proposals, candidates) {
++  if (slots.length === 0) return proposals;
++  const bySlot = new Map(proposals.map((p) => [p.slotId, p.recipeId]));
++  const byMeal = groupSlotsByMeal(slots);
++  const candidateIds = candidates.map((c) => c.recipeId);
++  if (candidateIds.length >= 2) {
++    for (let guard = 0; guard < 12; guard++) {
++      const pair = findDuplicateDayPair(slots, bySlot);
++      if (!pair) break;
++      const changed = diversifyDay(slots, bySlot, byMeal, pair[1], candidateIds);
++      if (!changed) break;
++    }
++  }
++  breakSameDayMainReuse(slots, bySlot, candidateIds);
++  if (sortedDayIndexes(slots).length >= 2 && candidates.length >= 1) {
++    raiseBatchRatio(slots, bySlot, byMeal);
++    breakSameDayMainReuse(slots, bySlot, candidateIds);
++    const current = toProposals(slots, bySlot);
++    if (batchSlotRatio(slots, current) < MIN_BATCH_SLOT_RATIO) {
++      const fallback = assignWithBatchVariety(slots, candidates);
++      if (
++        batchSlotRatio(slots, fallback) >= MIN_BATCH_SLOT_RATIO &&
++        !hasDuplicateDayMenus(slots, fallback) &&
++        !hasSameDayMainReuse(slots, fallback)
++      ) {
++        return fallback;
++      }
++    }
++  }
++  return toProposals(slots, bySlot);
++}
++
++function deterministicAssignments(slots, candidates) {
++  return assignWithBatchVariety(slots, candidates);
++}
++
++function mergeWithDeterministicFill(slots, proposals, candidates) {
++  const covered = new Set(proposals.map((p) => p.slotId));
++  const remaining = slots.filter((s) => !covered.has(s.slotId));
++  if (remaining.length === 0) return proposals;
++  return [...proposals, ...deterministicAssignments(remaining, candidates)];
++}
++
++const slots3 = [
++  { slotId: "s1", dayIndex: 1, meal: "breakfast" },
++  { slotId: "s2", dayIndex: 1, meal: "lunch" },
++  { slotId: "s3", dayIndex: 1, meal: "dinner" },
++];
++const cands = [
++  { recipeId: "rec-a", name: "A", longIdle: true, rating: "none" },
++  { recipeId: "rec-b", name: "B", longIdle: true, rating: "none" },
++];
++const merged = mergeWithDeterministicFill(
++  slots3,
++  [{ slotId: "s1", recipeId: "rec-a" }],
++  cands,
++);
++check(
++  "deterministic fills remaining slots",
++  merged.length === 3 &&
++    merged[0].slotId === "s1" &&
++    merged.some((p) => p.slotId === "s2") &&
++    merged.some((p) => p.slotId === "s3"),
++);
++
++const slots9 = [
++  { slotId: "d1b", dayIndex: 1, meal: "breakfast" },
++  { slotId: "d1l", dayIndex: 1, meal: "lunch" },
++  { slotId: "d1d", dayIndex: 1, meal: "dinner" },
++  { slotId: "d2b", dayIndex: 2, meal: "breakfast" },
++  { slotId: "d2l", dayIndex: 2, meal: "lunch" },
++  { slotId: "d2d", dayIndex: 2, meal: "dinner" },
++  { slotId: "d3b", dayIndex: 3, meal: "breakfast" },
++  { slotId: "d3l", dayIndex: 3, meal: "lunch" },
++  { slotId: "d3d", dayIndex: 3, meal: "dinner" },
++];
++const cands3 = [
++  { recipeId: "rec-a", name: "A", longIdle: true, rating: "none" },
++  { recipeId: "rec-b", name: "B", longIdle: true, rating: "none" },
++  { recipeId: "rec-c", name: "C", longIdle: true, rating: "none" },
++];
++const batch = deterministicAssignments(slots9, cands3);
++check(
++  "batch variety is not a full 3-day clone",
++  !isMenuUniformAcrossDays(slots9, batch),
++);
++check(
++  "batch variety has no duplicate calendar days",
++  !hasDuplicateDayMenus(slots9, batch),
++);
++check(
++  "batch variety meets 50% multi-day slot floor",
++  batchSlotRatio(slots9, batch) >= MIN_BATCH_SLOT_RATIO,
++);
++
++const uniformClone = slots9.map((s) => ({
++  slotId: s.slotId,
++  recipeId:
++    s.meal === "breakfast" ? "rec-a" : s.meal === "lunch" ? "rec-b" : "rec-c",
++}));
++check("detects uniform day clone", isMenuUniformAcrossDays(slots9, uniformClone));
++const enforced = enforceDayVariety(slots9, uniformClone, cands3);
++check(
++  "enforceDayVariety breaks full day clone",
++  !isMenuUniformAcrossDays(slots9, enforced) &&
++    !hasDuplicateDayMenus(slots9, enforced),
++);
++check(
++  "enforceDayVariety keeps 50% batch after clone break",
++  batchSlotRatio(slots9, enforced) >= MIN_BATCH_SLOT_RATIO,
++);
++
++// Screenshot-like A–B–A: day1 === day3, middle day differs.
++const abaClone = slots9.map((s) => {
++  if (s.meal === "breakfast") return { slotId: s.slotId, recipeId: "rec-a" };
++  if (s.dayIndex === 2) {
++    return {
++      slotId: s.slotId,
++      recipeId: s.meal === "lunch" ? "rec-x" : "rec-y",
++    };
++  }
++  return {
++    slotId: s.slotId,
++    recipeId: s.meal === "lunch" ? "rec-b" : "rec-c",
++  };
++});
++const abaCands = [
++  ...cands3,
++  { recipeId: "rec-x", name: "X", longIdle: true, rating: "none" },
++  { recipeId: "rec-y", name: "Y", longIdle: true, rating: "none" },
++];
++check("detects A-B-A duplicate bookend days", hasDuplicateDayMenus(slots9, abaClone));
++const abaFixed = enforceDayVariety(slots9, abaClone, abaCands);
++check(
++  "enforceDayVariety breaks A-B-A bookend clone",
++  !hasDuplicateDayMenus(slots9, abaFixed),
++);
++check(
++  "enforceDayVariety keeps 50% batch after A-B-A fix",
++  batchSlotRatio(slots9, abaFixed) >= MIN_BATCH_SLOT_RATIO,
++);
++
++// All-unique LLM plan (0% repeats) must be raised to >= 50% batch slots.
++const allUnique = slots9.map((s, i) => ({
++  slotId: s.slotId,
++  recipeId: `rec-u${i}`,
++}));
++const uniqueCands = allUnique.map((p, i) => ({
++  recipeId: p.recipeId,
++  name: `U${i}`,
++  longIdle: true,
++  rating: "none",
++}));
++check("all-unique plan has 0% batch", batchSlotRatio(slots9, allUnique) === 0);
++const uniqueFixed = enforceDayVariety(slots9, allUnique, uniqueCands);
++check(
++  "enforceDayVariety raises all-unique to 50% batch",
++  batchSlotRatio(slots9, uniqueFixed) >= MIN_BATCH_SLOT_RATIO &&
++    !hasDuplicateDayMenus(slots9, uniqueFixed),
++);
++
++// Exact-name helpers only — near-duplicate variety is owned by the AI.
++check("namesEqual: ё/е and case", namesEqual("Борщ", "борщ"));
++check(
++  "namesEqual: punctuation ignored",
++  namesEqual("Омлет с сыром!", "омлет с сыром"),
++);
++check(
++  "namesEqual: near-variants are NOT equal in code",
++  !namesEqual("Творожные оладьи", "Творожные панкейки"),
++);
++check(
++  "pickUnusedCandidate skips used ids",
++  pickUnusedCandidate(
++    [
++      { recipeId: "a", name: "A" },
++      { recipeId: "b", name: "B" },
++    ],
++    new Set(["a"]),
++  )?.recipeId === "b",
++);
++
++check(
++  "looksLikeNoCookSnack: перекус in name",
++  looksLikeNoCookSnack(
++    "Творожный перекус с медом и орехами (удобный к употреблению)",
++  ),
++);
++check(
++  "looksLikeNoCookSnack: cooked breakfast stays",
++  !looksLikeNoCookSnack("Пшеничная каша с яблоками и корицей") &&
++    !looksLikeNoCookSnack("Творожные сырники"),
++);
++
++check(
++  "looksLikeBreakfastDish: morning food",
++  looksLikeBreakfastDish("Пшённая каша") &&
++    looksLikeBreakfastDish("Творожные сырники") &&
++    looksLikeBreakfastDish("Яичница с беконом") &&
++    !looksLikeBreakfastDish("Запечённая курица с лимоном и травами"),
++);
++check(
++  "looksLikeLunchDinnerOnlyMain: roast chicken / soup / plov",
++  looksLikeLunchDinnerOnlyMain("Запечённая курица с лимоном и травами") &&
++    looksLikeLunchDinnerOnlyMain("Куриный бульон с овощами") &&
++    looksLikeLunchDinnerOnlyMain("Плов с курицей и морковью") &&
++    !looksLikeLunchDinnerOnlyMain("Омлет с сыром") &&
++    !looksLikeLunchDinnerOnlyMain("Пшённая каша"),
++);
++
++check(
++  "looksLikeCompanionOnly: sauce and hardcoded pairing",
++  looksLikeCompanionOnly("Грибной соус к пасте") &&
++    looksLikeCompanionOnly("Грибной соус") &&
++    !looksLikeCompanionOnly("Запечённая куриная грудка с лимоном"),
++);
++check(
++  "stripHardcodedPairing: drops к пасте",
++  stripHardcodedPairing("Грибной соус к пасте") === "Грибной соус",
++);
++
++{
++  const mixSlots = [
++    { slotId: "b1", dayIndex: 1, meal: "breakfast" },
++    { slotId: "l1", dayIndex: 1, meal: "lunch" },
++  ];
++  const mixCands = [
++    { recipeId: "sauce", name: "Грибной соус к пасте" },
++    { recipeId: "chicken", name: "Запечённая куриная грудка с лимоном" },
++    { recipeId: "kasha", name: "Пшённая каша" },
++  ];
++  const mains = assignWithBatchVariety(mixSlots, mixCands);
++  const breakfastMain = mains.find((a) => a.slotId === "b1")?.recipeId;
++  const lunchMain = mains.find((a) => a.slotId === "l1")?.recipeId;
++  check(
++    "assign skips sauce as breakfast/lunch main",
++    breakfastMain !== "sauce" && lunchMain !== "sauce",
++  );
++  check(
++    "assign puts porridge on breakfast, not roast chicken",
++    breakfastMain === "kasha",
++  );
++  const plated = normalizePlateAssignments(
++    mixSlots,
++    mains.map((p) =>
++      p.slotId === "l1"
++        ? {
++            ...p,
++            plateKind: "needs_companion",
++            companionRecipeId: "sauce",
++          }
++        : p,
++    ),
++    mixCands,
++  );
++  const lunchCompanion = plated.find((a) => a.slotId === "l1")?.companionRecipeId;
++  check(
++    "normalize keeps AI sauce companion and clears breakfast companion",
++    lunchCompanion === "sauce" &&
++      plated.find((a) => a.slotId === "b1")?.companionRecipeId == null,
++  );
++}
++
++// Screenshot bug: roast chicken must not fill breakfast when morning food exists.
++{
++  const brSlots = [
++    { slotId: "b1", dayIndex: 1, meal: "breakfast" },
++    { slotId: "b2", dayIndex: 2, meal: "breakfast" },
++    { slotId: "l1", dayIndex: 1, meal: "lunch" },
++  ];
++  const brCands = [
++    {
++      recipeId: "roast",
++      name: "Запечённая курица с лимоном и травами",
++    },
++    { recipeId: "plov", name: "Плов с курицей и морковью" },
++    { recipeId: "syrniki", name: "Творожные сырники" },
++    { recipeId: "omlet", name: "Омлет с зеленью" },
++  ];
++  const brAssign = assignWithBatchVariety(brSlots, brCands);
++  const b1 = brAssign.find((a) => a.slotId === "b1")?.recipeId;
++  const b2 = brAssign.find((a) => a.slotId === "b2")?.recipeId;
++  const l1 = brAssign.find((a) => a.slotId === "l1")?.recipeId;
++  check(
++    "breakfast never gets roast chicken / plov when morning dishes exist",
++    (b1 === "syrniki" || b1 === "omlet") &&
++      (b2 === "syrniki" || b2 === "omlet") &&
++      (l1 === "roast" || l1 === "plov"),
++  );
++}
++
++// Screenshot bug: lunch potatoes+chicken / dinner chicken+potatoes on one day.
++{
++  const swapSlots = [
++    { slotId: "l1", dayIndex: 1, meal: "lunch" },
++    { slotId: "d1", dayIndex: 1, meal: "dinner" },
++  ];
++  const swapCands = [
++    { recipeId: "potato", name: "Картофельное пюре" },
++    { recipeId: "chicken", name: "Куриные грудки в соусе терияки" },
++    { recipeId: "rice", name: "Тушеный рис с овощами" },
++    { recipeId: "fish", name: "Запечённая рыба с лимоном" },
++  ];
++  const swapped = normalizePlateAssignments(
++    swapSlots,
++    [
++      { slotId: "l1", recipeId: "potato", companionRecipeId: "chicken" },
++      { slotId: "d1", recipeId: "chicken", companionRecipeId: "potato" },
++    ],
++    swapCands,
++  );
++  const lunch = swapped.find((a) => a.slotId === "l1");
++  const dinner = swapped.find((a) => a.slotId === "d1");
++  const dayIds = [
++    lunch?.recipeId,
++    lunch?.companionRecipeId,
++    dinner?.recipeId,
++    dinner?.companionRecipeId,
++  ].filter(Boolean);
++  check(
++    "normalize rejects same-day potato/chicken swap",
++    new Set(dayIds).size === dayIds.length &&
++      lunch?.companionRecipeId !== "chicken" &&
++      dinner?.companionRecipeId !== "potato",
++  );
++}
++
++{
++  const sameMain = slots9.map((s) => ({
++    slotId: s.slotId,
++    recipeId:
++      s.meal === "breakfast"
++        ? "rec-a"
++        : s.meal === "lunch"
++          ? "rec-b"
++          : s.dayIndex === 1
++            ? "rec-b"
++            : "rec-c",
++  }));
++  check(
++    "detects same-day lunch/dinner main reuse",
++    hasSameDayMainReuse(slots9, sameMain),
++  );
++  const fixedSameDay = enforceDayVariety(slots9, sameMain, [
++    ...cands3,
++    { recipeId: "rec-d", name: "D", longIdle: true, rating: "none" },
++  ]);
++  check(
++    "enforceDayVariety breaks same-day main reuse",
++    !hasSameDayMainReuse(slots9, fixedSameDay) &&
++      !hasDuplicateDayMenus(slots9, fixedSameDay),
++  );
++}
++
++if (failed > 0) {
++  console.log(`${failed} case(s) failed`);
++  process.exit(1);
++}
++console.log("All suggestions logic cases passed");
+diff --git a/scripts/verify-uj1-gate-logic.mjs b/scripts/verify-uj1-gate-logic.mjs
+new file mode 100644
+index 0000000..f44ec99
+--- /dev/null
++++ b/scripts/verify-uj1-gate-logic.mjs
+@@ -0,0 +1,30 @@
++/**
++ * Pure-logic smoke for Story 2.4 UJ-1 gate predicates.
++ * Usage: node scripts/verify-uj1-gate-logic.mjs
++ */
++
++function shoppingListAllowed(slotEditPassedAt) {
++  return slotEditPassedAt != null;
++}
++
++let failed = 0;
++function check(name, cond) {
++  if (cond) console.log(`PASS: ${name}`);
++  else {
++    console.log(`FAIL: ${name}`);
++    failed += 1;
++  }
++}
++
++check("blocked when null", !shoppingListAllowed(null));
++check("blocked when undefined", !shoppingListAllowed(undefined));
++check(
++  "allowed when timestamp set",
++  shoppingListAllowed("2026-07-20T02:00:00.000Z"),
++);
++
++if (failed > 0) {
++  console.log(`${failed} case(s) failed`);
++  process.exit(1);
++}
++console.log("All UJ-1 gate logic cases passed");

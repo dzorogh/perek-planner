@@ -1,7 +1,13 @@
 import { expect, test } from "@playwright/test";
 
-const email = process.env.E2E_OPERATOR_EMAIL ?? "e2e-operator@keplo.local";
-const password = process.env.E2E_OPERATOR_PASSWORD ?? "E2eTestPass123!";
+const email =
+  process.env.E2E_OPERATOR_EMAIL?.trim() ||
+  process.env.SMOKE_OPERATOR_EMAIL?.trim() ||
+  "";
+const password =
+  process.env.E2E_OPERATOR_PASSWORD?.trim() ||
+  process.env.SMOKE_OPERATOR_PASSWORD?.trim() ||
+  "";
 
 async function login(page: import("@playwright/test").Page) {
   await page.goto("/auth/login");
@@ -13,6 +19,17 @@ async function login(page: import("@playwright/test").Page) {
 }
 
 test.describe("Planning happy path (authenticated)", () => {
+  test.beforeAll(() => {
+    test.skip(
+      !email || !password,
+      "Set E2E_OPERATOR_EMAIL/PASSWORD or SMOKE_OPERATOR_* in .env.local",
+    );
+    test.skip(
+      !process.env.OPENROUTER_API_KEY?.trim(),
+      "OPENROUTER_API_KEY required for menu generation",
+    );
+  });
+
   test("generate → menu → shopping list → history", async ({ page }) => {
     test.setTimeout(180_000);
     await login(page);

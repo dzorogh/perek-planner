@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
+/** Match `npm run dev` (--port 3100). Override with PLAYWRIGHT_BASE_URL if needed. */
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
 
 export default defineConfig({
   testDir: "e2e",
@@ -18,10 +19,18 @@ export default defineConfig({
   },
   projects: [
     {
-      name: "chromium",
+      name: "shell",
+      testMatch: /shell-bypass\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "planning",
+      testMatch: /planning-flow\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] },
     },
   ],
+  // One server for both projects: bypass enables shell without a session;
+  // planning-flow still signs in with operator credentials.
   webServer: process.env.PLAYWRIGHT_SKIP_WEBSERVER
     ? undefined
     : {
@@ -29,5 +38,9 @@ export default defineConfig({
         url: baseURL,
         reuseExistingServer: !process.env.CI,
         timeout: 120_000,
+        env: {
+          ...process.env,
+          KEPLO_DEV_BYPASS_AUTH: "true",
+        },
       },
 });
