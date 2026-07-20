@@ -15,6 +15,7 @@ function SubmitButton() {
   return (
     <Button
       type="submit"
+      data-component="continue-to-shopping"
       className="w-full rounded-sm sm:w-auto"
       disabled={pending}
       aria-disabled={pending}

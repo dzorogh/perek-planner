@@ -8,7 +8,8 @@ type PlanPortionsPageProps = {
 export default async function PlanPortionsPage({
   searchParams,
 }: PlanPortionsPageProps) {
-  const { menuId } = await searchParams;
+  const { menuId: rawMenuId } = await searchParams;
+  const menuId = rawMenuId?.trim() ?? "";
   if (menuId) {
     redirect(`/plan/shopping-list?menuId=${encodeURIComponent(menuId)}`);
   }

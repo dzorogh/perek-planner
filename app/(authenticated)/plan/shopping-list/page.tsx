@@ -5,7 +5,7 @@ import { RecipeTextPanel } from "@/components/recipes/recipe-text-panel";
 import { MenuTotalsBar } from "@/components/recipes/recipe-value-line";
 import { ShoppingListClient } from "@/components/shopping/shopping-list-view";
 import { loadMenuSkeleton } from "@/domain/menu/load-menu";
-import { hasSlotEditPassed, UJ1_GATE_RU } from "@/domain/menu/uj1-gate";
+import { hasSlotEditPassed } from "@/domain/menu/uj1-gate";
 import { recipeBatchScale } from "@/domain/recipes/batch-scale";
 import type { RecipeIngredientView } from "@/domain/recipes/load-recipe";
 import {

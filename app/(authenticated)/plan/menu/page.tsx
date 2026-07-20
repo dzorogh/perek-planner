@@ -14,7 +14,8 @@ type PlanMenuPageProps = {
 };
 
 export default async function PlanMenuPage({ searchParams }: PlanMenuPageProps) {
-  const { menuId, error: errorParam } = await searchParams;
+  const { menuId: rawMenuId, error: errorParam } = await searchParams;
+  const menuId = rawMenuId?.trim() ?? "";
 
   if (!menuId) {
     return (

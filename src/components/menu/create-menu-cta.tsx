@@ -28,6 +28,7 @@ export function CreateMenuCta() {
       <Button
         type="button"
         size="sm"
+        data-component="create-menu-cta"
         className={cn(open && "ring-2 ring-primary/25")}
         onClick={() => setOpen(true)}
       >

@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 
 import { DayLengthPicker } from "@/components/menu/day-length-picker";
 import {
@@ -20,7 +20,11 @@ import {
   DEFAULT_SERVINGS_PER_MEAL,
 } from "@/domain/menu/constants";
 
-export function CreateMenuForm() {
+type CreateMenuFormProps = {
+  onPendingChange?: (pending: boolean) => void;
+};
+
+export function CreateMenuForm({ onPendingChange }: CreateMenuFormProps = {}) {
   const [dayCount, setDayCount] = useState(DEFAULT_DAY_COUNT);
   const [peopleCount, setPeopleCount] = useState(DEFAULT_SERVINGS_PER_MEAL);
   const [mealTypes, setMealTypes] = useState<MealTypesSelection>(
@@ -30,6 +34,10 @@ export function CreateMenuForm() {
     CreateMenuSkeletonActionState,
     FormData
   >(createMenuSkeletonAction, null);
+
+  useEffect(() => {
+    onPendingChange?.(isPending);
+  }, [isPending, onPendingChange]);
 
   const mealsCsv = selectedMealSlots(mealTypes).join(",");
 

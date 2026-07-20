@@ -29,9 +29,13 @@ export function PillNav({ activeHref = "/plan/menu" }: PillNavProps) {
   useEffect(() => {
     if (!menuId) return;
     let cancelled = false;
-    void getSlotEditPassedAction(menuId).then((passed) => {
-      if (!cancelled) setFetched({ menuId, passed });
-    });
+    void getSlotEditPassedAction(menuId)
+      .then((passed) => {
+        if (!cancelled) setFetched({ menuId, passed });
+      })
+      .catch(() => {
+        if (!cancelled) setFetched({ menuId, passed: false });
+      });
     return () => {
       cancelled = true;
     };
@@ -58,12 +62,21 @@ export function PillNav({ activeHref = "/plan/menu" }: PillNavProps) {
           return (
             <span
               key={step.href}
+              role="link"
+              tabIndex={0}
+              aria-disabled="true"
+              aria-current={isActive ? "page" : undefined}
+              aria-describedby="plan-wizard-list-blocked"
               className={cn(
                 "cursor-not-allowed rounded-full px-3.5 py-1.5 text-[13px] text-muted-foreground/50",
                 isActive && "bg-surface font-semibold text-primary shadow-sm",
               )}
               title={UJ1_TITLE}
-              aria-disabled="true"
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                }
+              }}
             >
               {step.label}
             </span>
@@ -86,6 +99,9 @@ export function PillNav({ activeHref = "/plan/menu" }: PillNavProps) {
           </Link>
         );
       })}
+      <span id="plan-wizard-list-blocked" className="sr-only">
+        {UJ1_TITLE}
+      </span>
     </nav>
   );
 }

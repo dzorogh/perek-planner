@@ -14,20 +14,23 @@ const KIND_LABEL: Record<ShoppingListView["lines"][number]["lineKind"], string> 
 {
   ingredient: "Блюда",
   pantry: "Базовые продукты",
-  snack: "Snacks",
+  snack: "Перекусы",
 };
 
 export function ShoppingListClient({ list }: ShoppingListViewProps) {
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
 
   async function onCopy() {
     const text = formatShoppingListCopy(list);
+    setCopyError(null);
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2500);
     } catch {
       setCopied(false);
+      setCopyError("Не удалось скопировать список. Скопируйте вручную.");
     }
   }
 
@@ -55,10 +58,15 @@ export function ShoppingListClient({ list }: ShoppingListViewProps) {
           Список скопирован.
         </p>
       ) : null}
+      {copyError ? (
+        <p className="mt-3 text-sm text-warning-fg" role="alert">
+          {copyError}
+        </p>
+      ) : null}
 
       {list.lines.length === 0 ? (
         <p className="mt-6 text-sm text-muted-foreground">
-          Список пуст — добавьте блюда или Snacks в меню.
+          Список пуст — добавьте блюда или перекусы в меню.
         </p>
       ) : (
         <div className="mt-6 space-y-5">

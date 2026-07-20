@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 import { CreateMenuForm } from "@/components/menu/create-menu-form";
 import {
   Dialog,
@@ -17,8 +19,16 @@ export function CreateMenuDialog({
   open,
   onOpenChange,
 }: CreateMenuDialogProps) {
+  const [pending, setPending] = useState(false);
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && pending) return;
+        onOpenChange(next);
+      }}
+    >
       <DialogContent
         className="w-[min(100%,32rem)] max-h-[min(90vh,40rem)] overflow-y-auto"
         data-component="create-menu-dialog"
@@ -31,7 +41,7 @@ export function CreateMenuDialog({
             Одна готовка · список ингредиентов для покупки.
           </p>
         </DialogHeader>
-        <CreateMenuForm />
+        <CreateMenuForm onPendingChange={setPending} />
       </DialogContent>
     </Dialog>
   );
