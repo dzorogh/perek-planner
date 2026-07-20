@@ -1,0 +1,5222 @@
+diff --git a/app/(authenticated)/history/page.tsx b/app/(authenticated)/history/page.tsx
+new file mode 100644
+index 0000000..9bda243
+--- /dev/null
++++ b/app/(authenticated)/history/page.tsx
+@@ -0,0 +1,138 @@
++import Link from "next/link";
++
++import { DeleteMenuButton } from "@/components/history/delete-menu-button";
++import { HistoryRatingRow } from "@/components/history/history-rating-row";
++import { loadHistory } from "@/domain/history/load-history";
++import { createClient } from "@/lib/supabase/server";
++
++export default async function HistoryPage() {
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++
++  if (!user) {
++    return (
++      <div className="max-w-xl">
++        <h1 className="page-title">История</h1>
++        <p className="mt-2 text-sm text-muted-foreground">
++          Войдите, чтобы видеть прошлые меню.
++        </p>
++      </div>
++    );
++  }
++
++  const { menus, error } = await loadHistory(supabase, user.id);
++
++  if (error) {
++    return (
++      <div className="max-w-xl">
++        <h1 className="page-title">История</h1>
++        <p className="mt-2 text-sm text-warning-fg" role="alert">
++          {error}
++        </p>
++      </div>
++    );
++  }
++
++  if (menus.length === 0) {
++    return (
++      <div className="max-w-xl">
++        <h1 className="page-title">История</h1>
++        <p className="mt-2 text-sm text-muted-foreground">
++          Пока нет прошлых меню. Создайте первое — оценки появятся здесь после
++          готовки.
++        </p>
++        <Link
++          href="/history?create=1"
++          className="mt-4 inline-block text-sm font-medium text-primary underline-offset-4 hover:underline"
++        >
++          Создать меню
++        </Link>
++      </div>
++    );
++  }
++
++  return (
++    <div className="w-full max-w-2xl">
++      <div className="mb-8 max-w-xl">
++        <h1 className="page-title">История</h1>
++        <p className="mt-2 text-sm text-muted-foreground">
++          Прошлые меню и рецепты. Оценки можно менять — без принудительного
++          экрана после готовки.
++        </p>
++      </div>
++
++      <div className="space-y-8">
++        {menus.map((menu) => {
++          const date = new Date(menu.createdAt);
++          const label = Number.isNaN(date.getTime())
++            ? menu.createdAt
++            : date.toLocaleDateString("ru-RU", {
++              day: "numeric",
++              month: "long",
++              year: "numeric",
++            });
++
++          return (
++            <section
++              key={menu.menuId}
++              className="rounded-lg border border-border bg-background"
++            >
++              <header className="border-b border-border px-4 py-3">
++                <div className="flex items-start justify-between gap-3">
++                  <div className="min-w-0">
++                    <h2 className="text-sm font-semibold text-accent">
++                      Меню · {menu.dayCount}{" "}
++                      {menu.dayCount === 1 ? "день" : "дня"}
++                    </h2>
++                    <p className="text-xs text-muted-foreground">{label}</p>
++                    <Link
++                      href={`/plan/menu?menuId=${encodeURIComponent(menu.menuId)}`}
++                      className="mt-1 inline-block text-xs font-medium text-primary underline-offset-4 hover:underline"
++                    >
++                      Открыть меню
++                    </Link>
++                  </div>
++                  <DeleteMenuButton menuId={menu.menuId} />
++                </div>
++              </header>
++              <div className="space-y-2 p-3">
++                {menu.recipes.length === 0 && menu.snacks.length === 0 ? (
++                  <p className="text-sm text-muted-foreground">
++                    Пустые слоты — блюд и Snacks нет.
++                  </p>
++                ) : null}
++                {menu.recipes.map((r) => (
++                  <HistoryRatingRow
++                    key={`${menu.menuId}-${r.recipeId}`}
++                    kind="recipe"
++                    recipeId={r.recipeId}
++                    name={r.recipeName}
++                    bodyText={r.bodyText}
++                    ingredients={r.ingredients}
++                    totalServings={r.totalServings}
++                    peoplePerMeal={r.peoplePerMeal}
++                    dayCount={r.dayCount}
++                    rating={r.rating}
++                    reason={r.reason}
++                  />
++                ))}
++                {menu.snacks.map((s) => (
++                  <HistoryRatingRow
++                    key={`${menu.menuId}-${s.label}`}
++                    kind="snack"
++                    label={s.label}
++                    name={s.label}
++                    rating={s.rating}
++                    reason={s.reason}
++                  />
++                ))}
++              </div>
++            </section>
++          );
++        })}
++      </div>
++    </div>
++  );
++}
+diff --git a/app/(authenticated)/layout.tsx b/app/(authenticated)/layout.tsx
+new file mode 100644
+index 0000000..6762e4a
+--- /dev/null
++++ b/app/(authenticated)/layout.tsx
+@@ -0,0 +1,29 @@
++import { redirect } from "next/navigation";
++
++import { AppShell } from "@/components/layout/app-shell";
++import { createClient } from "@/lib/supabase/server";
++
++export default async function AuthenticatedLayout({
++  children,
++}: {
++  children: React.ReactNode;
++}) {
++  // Local shell inspection only — never enable in Dokploy / production.
++  const bypassAuth =
++    process.env.KEPLO_DEV_BYPASS_AUTH === "true" &&
++    process.env.NODE_ENV !== "production";
++
++  if (!bypassAuth) {
++    const supabase = await createClient();
++    const {
++      data: { user },
++      error,
++    } = await supabase.auth.getUser();
++    // Transient auth failures: do not bounce a possibly-valid session to login.
++    if (!error && !user) {
++      redirect("/auth/login");
++    }
++  }
++
++  return <AppShell>{children}</AppShell>;
++}
+diff --git a/app/(authenticated)/page.tsx b/app/(authenticated)/page.tsx
+new file mode 100644
+index 0000000..2fab071
+--- /dev/null
++++ b/app/(authenticated)/page.tsx
+@@ -0,0 +1,11 @@
++import { redirect } from "next/navigation";
++
++type HomePageProps = {
++  searchParams: Promise<{ create?: string }>;
++};
++
++/** Create-menu lives in a modal; home lands on history. */
++export default async function HomePage({ searchParams }: HomePageProps) {
++  const { create } = await searchParams;
++  redirect(create === "1" ? "/history?create=1" : "/history");
++}
+diff --git a/app/(authenticated)/plan/menu/page.tsx b/app/(authenticated)/plan/menu/page.tsx
+new file mode 100644
+index 0000000..b4489c3
+--- /dev/null
++++ b/app/(authenticated)/plan/menu/page.tsx
+@@ -0,0 +1,87 @@
++import Link from "next/link";
++
++import { ContinueToShoppingButton } from "@/components/menu/continue-to-shopping-button";
++import { DayCardGrid } from "@/components/menu/day-card-grid";
++import { MenuDishList } from "@/components/menu/menu-dish-list";
++import { MenuTotalsBar } from "@/components/recipes/recipe-value-line";
++import { summarizeMenuDishes } from "@/domain/menu/dish-summary";
++import { loadMenuSkeleton } from "@/domain/menu/load-menu";
++import { sumMenuTotals } from "@/domain/recipes/scale-totals";
++import { createClient } from "@/lib/supabase/server";
++
++type PlanMenuPageProps = {
++  searchParams: Promise<{ menuId?: string; error?: string }>;
++};
++
++export default async function PlanMenuPage({ searchParams }: PlanMenuPageProps) {
++  const { menuId, error: errorParam } = await searchParams;
++
++  if (!menuId) {
++    return (
++      <div className="max-w-xl">
++        <h1 className="page-title">Меню</h1>
++        <p className="mt-2 text-sm text-muted-foreground">
++          Создайте меню — появится состав по дням.
++        </p>
++        <Link
++          href="/history?create=1"
++          className="mt-4 inline-block text-sm font-medium text-primary underline-offset-4 hover:underline"
++        >
++          Создать меню
++        </Link>
++      </div>
++    );
++  }
++
++  const supabase = await createClient();
++  const { menu, error } = await loadMenuSkeleton(supabase, menuId);
++
++  if (error || !menu) {
++    return (
++      <div className="max-w-xl">
++        <h1 className="page-title">Меню</h1>
++        <p className="mt-2 text-sm text-warning-fg" role="alert">
++          {error ?? "Меню не найдено."}
++        </p>
++        <Link
++          href="/history?create=1"
++          className="mt-4 inline-block text-sm font-medium text-primary underline-offset-4 hover:underline"
++        >
++          Создать меню
++        </Link>
++      </div>
++    );
++  }
++
++  return (
++    <div className="w-full">
++      <div className="mb-8 max-w-xl">
++        <h1 className="page-title">Меню</h1>
++        <p className="mt-2 text-sm text-muted-foreground">
++          Меню на {menu.dayCount}{" "}
++          {menu.dayCount === 1 ? "день" : "дня"},{" "}
++          {menu.slots[0]?.servings ?? 2} чел. на приём — проверьте слоты, при
++          необходимости замените.
++        </p>
++        {errorParam === "continue" ? (
++          <p className="mt-2 text-sm text-warning-fg" role="alert">
++            Не удалось продолжить. Попробуйте снова.
++          </p>
++        ) : null}
++      </div>
++
++      <DayCardGrid
++        menuId={menu.id}
++        dayCount={menu.dayCount}
++        slots={menu.slots}
++        snacks={menu.snacks}
++      />
++
++      <MenuTotalsBar totals={sumMenuTotals(menu.slots)} />
++
++      <MenuDishList dishes={summarizeMenuDishes(menu.slots)} />
++
++      <ContinueToShoppingButton menuId={menu.id} />
++    </div>
++  );
++}
+diff --git a/app/(authenticated)/plan/portions/page.tsx b/app/(authenticated)/plan/portions/page.tsx
+new file mode 100644
+index 0000000..f4a34ce
+--- /dev/null
++++ b/app/(authenticated)/plan/portions/page.tsx
+@@ -0,0 +1,16 @@
++import { redirect } from "next/navigation";
++
++type PlanPortionsPageProps = {
++  searchParams: Promise<{ menuId?: string }>;
++};
++
++/** Legacy route: portion grid removed — people count is set at menu create. */
++export default async function PlanPortionsPage({
++  searchParams,
++}: PlanPortionsPageProps) {
++  const { menuId } = await searchParams;
++  if (menuId) {
++    redirect(`/plan/shopping-list?menuId=${encodeURIComponent(menuId)}`);
++  }
++  redirect("/history");
++}
+diff --git a/app/(authenticated)/plan/shopping-list/page.tsx b/app/(authenticated)/plan/shopping-list/page.tsx
+new file mode 100644
+index 0000000..9370f53
+--- /dev/null
++++ b/app/(authenticated)/plan/shopping-list/page.tsx
+@@ -0,0 +1,152 @@
++import Link from "next/link";
++import { redirect } from "next/navigation";
++
++import { RecipeTextPanel } from "@/components/recipes/recipe-text-panel";
++import { MenuTotalsBar } from "@/components/recipes/recipe-value-line";
++import { ShoppingListClient } from "@/components/shopping/shopping-list-view";
++import { loadMenuSkeleton } from "@/domain/menu/load-menu";
++import { hasSlotEditPassed, UJ1_GATE_RU } from "@/domain/menu/uj1-gate";
++import { recipeBatchScale } from "@/domain/recipes/batch-scale";
++import type { RecipeIngredientView } from "@/domain/recipes/load-recipe";
++import {
++  EMPTY_PER_SERVING,
++  sumMenuTotals,
++  type RecipePerServingValue,
++} from "@/domain/recipes/scale-totals";
++import { buildShoppingList } from "@/domain/shopping/build-list";
++import { createClient } from "@/lib/supabase/server";
++
++type PlanShoppingListPageProps = {
++  searchParams: Promise<{ menuId?: string }>;
++};
++
++export default async function PlanShoppingListPage({
++  searchParams,
++}: PlanShoppingListPageProps) {
++  const { menuId } = await searchParams;
++
++  if (!menuId) {
++    return (
++      <div className="max-w-xl">
++        <h1 className="page-title">Shopping list</h1>
++        <p className="mt-2 text-sm text-muted-foreground" role="status">
++          {UJ1_GATE_RU}
++        </p>
++        <Link
++          href="/history?create=1"
++          className="mt-4 inline-block text-sm font-medium text-primary underline-offset-4 hover:underline"
++        >
++          Создать меню
++        </Link>
++      </div>
++    );
++  }
++
++  const supabase = await createClient();
++  const passed = await hasSlotEditPassed(supabase, menuId);
++  if (!passed) {
++    redirect(`/plan/menu?menuId=${encodeURIComponent(menuId)}`);
++  }
++
++  const [built, menuLoaded] = await Promise.all([
++    buildShoppingList(supabase, menuId),
++    loadMenuSkeleton(supabase, menuId),
++  ]);
++  if (!built.ok) {
++    return (
++      <div className="max-w-xl">
++        <h1 className="page-title">Shopping list</h1>
++        <p className="mt-2 text-sm text-warning-fg" role="alert">
++          {built.error}
++        </p>
++        <Link
++          href={`/plan/menu?menuId=${encodeURIComponent(menuId)}`}
++          className="mt-4 inline-block text-sm font-medium text-primary underline-offset-4 hover:underline"
++        >
++          К меню
++        </Link>
++      </div>
++    );
++  }
++
++  const slots = menuLoaded.menu?.slots ?? [];
++  const recipeMap = new Map<
++    string,
++    {
++      id: string;
++      name: string;
++      bodyText: string;
++      ingredients: RecipeIngredientView[];
++      value: RecipePerServingValue;
++    }
++  >();
++  for (const slot of slots) {
++    if (slot.recipeId && slot.recipeName && !recipeMap.has(slot.recipeId)) {
++      recipeMap.set(slot.recipeId, {
++        id: slot.recipeId,
++        name: slot.recipeName,
++        bodyText: slot.recipeBodyText ?? "",
++        ingredients: slot.recipeIngredients,
++        value: slot.recipeValue ?? { ...EMPTY_PER_SERVING },
++      });
++    }
++    if (
++      slot.companionRecipeId &&
++      slot.companionRecipeName &&
++      !recipeMap.has(slot.companionRecipeId)
++    ) {
++      recipeMap.set(slot.companionRecipeId, {
++        id: slot.companionRecipeId,
++        name: slot.companionRecipeName,
++        bodyText: slot.companionRecipeBodyText ?? "",
++        ingredients: slot.companionRecipeIngredients,
++        value: slot.companionRecipeValue ?? { ...EMPTY_PER_SERVING },
++      });
++    }
++  }
++  const recipes = [...recipeMap.values()].map((r) => ({
++    ...r,
++    batch: recipeBatchScale(slots, r.id),
++  }));
++
++  return (
++    <div className="w-full">
++      <div className="mb-6 max-w-xl">
++        <h1 className="page-title">Shopping list</h1>
++        <p className="mt-2 text-sm text-muted-foreground">
++          Один список на меню с количеством и весом (по числу человек из
++          создания меню). Копия всегда доступна.
++        </p>
++      </div>
++      <MenuTotalsBar totals={sumMenuTotals(slots)} className="mb-6 max-w-xl" />
++      <ShoppingListClient list={built.list} />
++      {recipes.length > 0 ? (
++        <section className="mt-8 max-w-xl">
++          <h2 className="text-sm font-semibold text-accent">Рецепты меню</h2>
++          <ul className="mt-2 space-y-1.5">
++            {recipes.map((r) => (
++              <li key={r.id}>
++                <RecipeTextPanel
++                  recipeId={r.id}
++                  recipeName={r.name}
++                  bodyText={r.bodyText}
++                  ingredients={r.ingredients}
++                  value={r.value}
++                  totalServings={r.batch.totalServings}
++                  peoplePerMeal={r.batch.peoplePerMeal}
++                  dayCount={r.batch.dayCount}
++                />
++              </li>
++            ))}
++          </ul>
++        </section>
++      ) : null}
++      <Link
++        href={`/plan/menu?menuId=${encodeURIComponent(menuId)}`}
++        className="mt-8 inline-block text-sm font-medium text-primary underline-offset-4 hover:underline"
++      >
++        ← К меню
++      </Link>
++    </div>
++  );
++}
+diff --git a/app/(authenticated)/settings/page.tsx b/app/(authenticated)/settings/page.tsx
+new file mode 100644
+index 0000000..bb9914e
+--- /dev/null
++++ b/app/(authenticated)/settings/page.tsx
+@@ -0,0 +1,33 @@
++import { LogoutButton } from "@/components/logout-button";
++import { TastePreferencesPanel } from "@/components/settings/taste-preferences-panel";
++import { loadTastePreferences } from "@/domain/settings/taste-preferences";
++import { createClient } from "@/lib/supabase/server";
++
++export default async function SettingsPage() {
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++
++  const preferences =
++    user != null
++      ? ((await loadTastePreferences(supabase, user.id)) ?? [])
++      : [];
++
++  return (
++    <div className="max-w-xl space-y-6">
++      <div>
++        <h1 className="page-title">Настройки</h1>
++        <p className="mt-2 text-sm text-muted-foreground">
++          Пожелания к меню и выход из сессии.
++        </p>
++      </div>
++
++      <TastePreferencesPanel items={preferences} />
++
++      <div className="rounded-lg border border-border bg-surface px-5 py-5">
++        <LogoutButton />
++      </div>
++    </div>
++  );
++}
+diff --git a/app/auth/confirm/route.ts b/app/auth/confirm/route.ts
+deleted file mode 100644
+index b1b1086..0000000
+--- a/app/auth/confirm/route.ts
++++ /dev/null
+@@ -1,30 +0,0 @@
+-import { createClient } from "@/lib/supabase/server";
+-import { type EmailOtpType } from "@supabase/supabase-js";
+-import { redirect } from "next/navigation";
+-import { type NextRequest } from "next/server";
+-
+-export async function GET(request: NextRequest) {
+-  const { searchParams } = new URL(request.url);
+-  const token_hash = searchParams.get("token_hash");
+-  const type = searchParams.get("type") as EmailOtpType | null;
+-  const next = searchParams.get("next") ?? "/";
+-
+-  if (token_hash && type) {
+-    const supabase = await createClient();
+-
+-    const { error } = await supabase.auth.verifyOtp({
+-      type,
+-      token_hash,
+-    });
+-    if (!error) {
+-      // redirect user to specified redirect URL or root of app
+-      redirect(next);
+-    } else {
+-      // redirect the user to an error page with some instructions
+-      redirect(`/auth/error?error=${error?.message}`);
+-    }
+-  }
+-
+-  // redirect the user to an error page with some instructions
+-  redirect(`/auth/error?error=No token hash or type`);
+-}
+diff --git a/app/auth/error/page.tsx b/app/auth/error/page.tsx
+deleted file mode 100644
+index 18b8306..0000000
+--- a/app/auth/error/page.tsx
++++ /dev/null
+@@ -1,51 +0,0 @@
+-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+-import { Suspense } from "react";
+-
+-async function ErrorContent({
+-  searchParams,
+-}: {
+-  searchParams: Promise<{ error: string }>;
+-}) {
+-  const params = await searchParams;
+-
+-  return (
+-    <>
+-      {params?.error ? (
+-        <p className="text-sm text-muted-foreground">
+-          Code error: {params.error}
+-        </p>
+-      ) : (
+-        <p className="text-sm text-muted-foreground">
+-          An unspecified error occurred.
+-        </p>
+-      )}
+-    </>
+-  );
+-}
+-
+-export default function Page({
+-  searchParams,
+-}: {
+-  searchParams: Promise<{ error: string }>;
+-}) {
+-  return (
+-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
+-      <div className="w-full max-w-sm">
+-        <div className="flex flex-col gap-6">
+-          <Card>
+-            <CardHeader>
+-              <CardTitle className="text-2xl">
+-                Sorry, something went wrong.
+-              </CardTitle>
+-            </CardHeader>
+-            <CardContent>
+-              <Suspense>
+-                <ErrorContent searchParams={searchParams} />
+-              </Suspense>
+-            </CardContent>
+-          </Card>
+-        </div>
+-      </div>
+-    </div>
+-  );
+-}
+diff --git a/app/auth/forgot-password/page.tsx b/app/auth/forgot-password/page.tsx
+deleted file mode 100644
+index 8dcfbb2..0000000
+--- a/app/auth/forgot-password/page.tsx
++++ /dev/null
+@@ -1,11 +0,0 @@
+-import { ForgotPasswordForm } from "@/components/forgot-password-form";
+-
+-export default function Page() {
+-  return (
+-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
+-      <div className="w-full max-w-sm">
+-        <ForgotPasswordForm />
+-      </div>
+-    </div>
+-  );
+-}
+diff --git a/app/auth/login/page.tsx b/app/auth/login/page.tsx
+index 5efe679..9f7b91f 100644
+--- a/app/auth/login/page.tsx
++++ b/app/auth/login/page.tsx
+@@ -1,9 +1,10 @@
+ import { LoginForm } from "@/components/login-form";
+ 
+-export default function Page() {
++export default function LoginPage() {
+   return (
+-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
++    <div className="flex min-h-svh w-full items-center justify-center bg-background p-6 md:p-10">
+       <div className="w-full max-w-sm">
++        <p className="mb-6 text-center section-title text-accent">Keplo</p>
+         <LoginForm />
+       </div>
+     </div>
+diff --git a/app/auth/sign-up-success/page.tsx b/app/auth/sign-up-success/page.tsx
+deleted file mode 100644
+index 88f16d3..0000000
+--- a/app/auth/sign-up-success/page.tsx
++++ /dev/null
+@@ -1,32 +0,0 @@
+-import {
+-  Card,
+-  CardContent,
+-  CardDescription,
+-  CardHeader,
+-  CardTitle,
+-} from "@/components/ui/card";
+-
+-export default function Page() {
+-  return (
+-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
+-      <div className="w-full max-w-sm">
+-        <div className="flex flex-col gap-6">
+-          <Card>
+-            <CardHeader>
+-              <CardTitle className="text-2xl">
+-                Thank you for signing up!
+-              </CardTitle>
+-              <CardDescription>Check your email to confirm</CardDescription>
+-            </CardHeader>
+-            <CardContent>
+-              <p className="text-sm text-muted-foreground">
+-                You&apos;ve successfully signed up. Please check your email to
+-                confirm your account before signing in.
+-              </p>
+-            </CardContent>
+-          </Card>
+-        </div>
+-      </div>
+-    </div>
+-  );
+-}
+diff --git a/app/auth/sign-up/page.tsx b/app/auth/sign-up/page.tsx
+deleted file mode 100644
+index d5dca78..0000000
+--- a/app/auth/sign-up/page.tsx
++++ /dev/null
+@@ -1,11 +0,0 @@
+-import { SignUpForm } from "@/components/sign-up-form";
+-
+-export default function Page() {
+-  return (
+-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
+-      <div className="w-full max-w-sm">
+-        <SignUpForm />
+-      </div>
+-    </div>
+-  );
+-}
+diff --git a/app/auth/update-password/page.tsx b/app/auth/update-password/page.tsx
+deleted file mode 100644
+index ff4d176..0000000
+--- a/app/auth/update-password/page.tsx
++++ /dev/null
+@@ -1,11 +0,0 @@
+-import { UpdatePasswordForm } from "@/components/update-password-form";
+-
+-export default function Page() {
+-  return (
+-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
+-      <div className="w-full max-w-sm">
+-        <UpdatePasswordForm />
+-      </div>
+-    </div>
+-  );
+-}
+diff --git a/app/globals.css b/app/globals.css
+index 9e332aa..fc0e2d9 100644
+--- a/app/globals.css
++++ b/app/globals.css
+@@ -1,68 +1,92 @@
+-@tailwind base;
+-@tailwind components;
+-@tailwind utilities;
++@import "tailwindcss";
++@import "tw-animate-css";
+ 
+-@layer base {
+-  :root {
+-    --background: 0 0% 100%;
+-    --foreground: 0 0% 3.9%;
+-    --card: 0 0% 100%;
+-    --card-foreground: 0 0% 3.9%;
+-    --popover: 0 0% 100%;
+-    --popover-foreground: 0 0% 3.9%;
+-    --primary: 0 0% 9%;
+-    --primary-foreground: 0 0% 98%;
+-    --secondary: 0 0% 96.1%;
+-    --secondary-foreground: 0 0% 9%;
+-    --muted: 0 0% 96.1%;
+-    --muted-foreground: 0 0% 45.1%;
+-    --accent: 0 0% 96.1%;
+-    --accent-foreground: 0 0% 9%;
+-    --destructive: 0 84.2% 60.2%;
+-    --destructive-foreground: 0 0% 98%;
+-    --border: 0 0% 89.8%;
+-    --input: 0 0% 89.8%;
+-    --ring: 0 0% 3.9%;
+-    --chart-1: 12 76% 61%;
+-    --chart-2: 173 58% 39%;
+-    --chart-3: 197 37% 24%;
+-    --chart-4: 43 74% 66%;
+-    --chart-5: 27 87% 67%;
+-    --radius: 0.5rem;
+-  }
+-  .dark {
+-    --background: 0 0% 3.9%;
+-    --foreground: 0 0% 98%;
+-    --card: 0 0% 3.9%;
+-    --card-foreground: 0 0% 98%;
+-    --popover: 0 0% 3.9%;
+-    --popover-foreground: 0 0% 98%;
+-    --primary: 0 0% 98%;
+-    --primary-foreground: 0 0% 9%;
+-    --secondary: 0 0% 14.9%;
+-    --secondary-foreground: 0 0% 98%;
+-    --muted: 0 0% 14.9%;
+-    --muted-foreground: 0 0% 63.9%;
+-    --accent: 0 0% 14.9%;
+-    --accent-foreground: 0 0% 98%;
+-    --destructive: 0 62.8% 30.6%;
+-    --destructive-foreground: 0 0% 98%;
+-    --border: 0 0% 14.9%;
+-    --input: 0 0% 14.9%;
+-    --ring: 0 0% 83.1%;
+-    --chart-1: 220 70% 50%;
+-    --chart-2: 160 60% 45%;
+-    --chart-3: 30 80% 55%;
+-    --chart-4: 280 65% 60%;
+-    --chart-5: 340 75% 55%;
+-  }
++@theme inline {
++  --color-background: var(--background);
++  --color-surface: var(--surface);
++  --color-foreground: var(--foreground);
++  --color-card: var(--surface);
++  --color-card-foreground: var(--foreground);
++  --color-popover: var(--surface);
++  --color-popover-foreground: var(--foreground);
++  --color-primary: var(--primary);
++  --color-primary-foreground: var(--primary-foreground);
++  --color-secondary: var(--secondary);
++  --color-secondary-foreground: var(--secondary-foreground);
++  --color-muted: var(--muted);
++  --color-muted-foreground: var(--muted-foreground);
++  --color-accent: var(--accent);
++  --color-accent-foreground: var(--accent-foreground);
++  --color-destructive: var(--destructive);
++  --color-border: var(--border);
++  --color-input: var(--border);
++  --color-ring: var(--primary);
++  --color-warning-bg: var(--warning-bg);
++  --color-warning-fg: var(--warning-fg);
++  --color-warning-border: var(--warning-border);
++  --color-empty-slot: var(--empty-slot);
++  --color-slot-label: var(--slot-label);
++  --color-snacks-border: var(--snacks-border);
++  --radius-sm: 10px;
++  --radius-md: 12px;
++  --radius-lg: 14px;
++  --radius-xl: 16px;
++  --radius-full: 9999px;
++  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
++}
++
++:root {
++  --background: #eef2ff;
++  --surface: #ffffff;
++  --foreground: #1e293b;
++  --primary: #4338ca;
++  --primary-foreground: #ffffff;
++  --secondary: #eef2ff;
++  --secondary-foreground: #4338ca;
++  --muted: #64748b;
++  --muted-foreground: #64748b;
++  --accent: #312e81;
++  --accent-foreground: #ffffff;
++  --border: #e0e7ff;
++  --destructive: #dc2626;
++  --warning-bg: #fef9c3;
++  --warning-fg: #854d0e;
++  --warning-border: #fde047;
++  --empty-slot: #f8fafc;
++  --slot-label: #94a3b8;
++  --snacks-border: #c7d2fe;
++  --radius: 12px;
+ }
+ 
+ @layer base {
+   * {
+     @apply border-border;
+   }
++
+   body {
+-    @apply bg-background text-foreground;
++    @apply bg-background text-foreground font-sans antialiased;
++  }
++
++  a:focus-visible,
++  button:focus-visible,
++  [role="link"]:focus-visible,
++  [role="button"]:focus-visible,
++  input:focus-visible {
++    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+   }
+ }
++
++@layer utilities {
++  .page-title {
++    font-size: 24px;
++    font-weight: 700;
++    line-height: 1.2;
++    letter-spacing: -0.02em;
++  }
++
++  .section-title {
++    font-size: 17px;
++    font-weight: 700;
++    line-height: 1.3;
++  }
++}
+\ No newline at end of file
+diff --git a/app/layout.tsx b/app/layout.tsx
+index 4d3424a..cf5d0ec 100644
+--- a/app/layout.tsx
++++ b/app/layout.tsx
+@@ -1,22 +1,17 @@
+ import type { Metadata } from "next";
+ import { Geist } from "next/font/google";
+-import { ThemeProvider } from "next-themes";
+-import "./globals.css";
+ 
+-const defaultUrl = process.env.VERCEL_URL
+-  ? `https://${process.env.VERCEL_URL}`
+-  : "http://localhost:3000";
++import "./globals.css";
+ 
+ export const metadata: Metadata = {
+-  metadataBase: new URL(defaultUrl),
+-  title: "Next.js and Supabase Starter Kit",
+-  description: "The fastest way to build apps with Next.js and Supabase",
++  title: "Keplo",
++  description: "Планировщик меню для готовки партиями и списка покупок",
+ };
+ 
+ const geistSans = Geist({
+   variable: "--font-geist-sans",
+   display: "swap",
+-  subsets: ["latin"],
++  subsets: ["latin", "cyrillic"],
+ });
+ 
+ export default function RootLayout({
+@@ -25,16 +20,9 @@ export default function RootLayout({
+   children: React.ReactNode;
+ }>) {
+   return (
+-    <html lang="en" suppressHydrationWarning>
+-      <body className={`${geistSans.className} antialiased`}>
+-        <ThemeProvider
+-          attribute="class"
+-          defaultTheme="system"
+-          enableSystem
+-          disableTransitionOnChange
+-        >
+-          {children}
+-        </ThemeProvider>
++    <html lang="ru">
++      <body className={`${geistSans.variable} font-sans antialiased`}>
++        {children}
+       </body>
+     </html>
+   );
+diff --git a/app/opengraph-image.png b/app/opengraph-image.png
+deleted file mode 100644
+index 57595e6..0000000
+Binary files a/app/opengraph-image.png and /dev/null differ
+diff --git a/app/page.tsx b/app/page.tsx
+deleted file mode 100644
+index ac33981..0000000
+--- a/app/page.tsx
++++ /dev/null
+@@ -1,58 +0,0 @@
+-import { DeployButton } from "@/components/deploy-button";
+-import { EnvVarWarning } from "@/components/env-var-warning";
+-import { AuthButton } from "@/components/auth-button";
+-import { Hero } from "@/components/hero";
+-import { ThemeSwitcher } from "@/components/theme-switcher";
+-import { ConnectSupabaseSteps } from "@/components/tutorial/connect-supabase-steps";
+-import { SignUpUserSteps } from "@/components/tutorial/sign-up-user-steps";
+-import { hasEnvVars } from "@/lib/utils";
+-import Link from "next/link";
+-import { Suspense } from "react";
+-
+-export default function Home() {
+-  return (
+-    <main className="min-h-screen flex flex-col items-center">
+-      <div className="flex-1 w-full flex flex-col gap-20 items-center">
+-        <nav className="w-full flex justify-center border-b border-b-foreground/10 h-16">
+-          <div className="w-full max-w-5xl flex justify-between items-center p-3 px-5 text-sm">
+-            <div className="flex gap-5 items-center font-semibold">
+-              <Link href={"/"}>Next.js Supabase Starter</Link>
+-              <div className="flex items-center gap-2">
+-                <DeployButton />
+-              </div>
+-            </div>
+-            {!hasEnvVars ? (
+-              <EnvVarWarning />
+-            ) : (
+-              <Suspense>
+-                <AuthButton />
+-              </Suspense>
+-            )}
+-          </div>
+-        </nav>
+-        <div className="flex-1 flex flex-col gap-20 max-w-5xl p-5">
+-          <Hero />
+-          <main className="flex-1 flex flex-col gap-6 px-4">
+-            <h2 className="font-medium text-xl mb-4">Next steps</h2>
+-            {hasEnvVars ? <SignUpUserSteps /> : <ConnectSupabaseSteps />}
+-          </main>
+-        </div>
+-
+-        <footer className="w-full flex items-center justify-center border-t mx-auto text-center text-xs gap-8 py-16">
+-          <p>
+-            Powered by{" "}
+-            <a
+-              href="https://supabase.com/?utm_source=create-next-app&utm_medium=template&utm_term=nextjs"
+-              target="_blank"
+-              className="font-bold hover:underline"
+-              rel="noreferrer"
+-            >
+-              Supabase
+-            </a>
+-          </p>
+-          <ThemeSwitcher />
+-        </footer>
+-      </div>
+-    </main>
+-  );
+-}
+diff --git a/app/protected/layout.tsx b/app/protected/layout.tsx
+deleted file mode 100644
+index 99b0966..0000000
+--- a/app/protected/layout.tsx
++++ /dev/null
+@@ -1,55 +0,0 @@
+-import { DeployButton } from "@/components/deploy-button";
+-import { EnvVarWarning } from "@/components/env-var-warning";
+-import { AuthButton } from "@/components/auth-button";
+-import { ThemeSwitcher } from "@/components/theme-switcher";
+-import { hasEnvVars } from "@/lib/utils";
+-import Link from "next/link";
+-import { Suspense } from "react";
+-
+-export default function ProtectedLayout({
+-  children,
+-}: {
+-  children: React.ReactNode;
+-}) {
+-  return (
+-    <main className="min-h-screen flex flex-col items-center">
+-      <div className="flex-1 w-full flex flex-col gap-20 items-center">
+-        <nav className="w-full flex justify-center border-b border-b-foreground/10 h-16">
+-          <div className="w-full max-w-5xl flex justify-between items-center p-3 px-5 text-sm">
+-            <div className="flex gap-5 items-center font-semibold">
+-              <Link href={"/"}>Next.js Supabase Starter</Link>
+-              <div className="flex items-center gap-2">
+-                <DeployButton />
+-              </div>
+-            </div>
+-            {!hasEnvVars ? (
+-              <EnvVarWarning />
+-            ) : (
+-              <Suspense>
+-                <AuthButton />
+-              </Suspense>
+-            )}
+-          </div>
+-        </nav>
+-        <div className="flex-1 flex flex-col gap-20 max-w-5xl p-5">
+-          {children}
+-        </div>
+-
+-        <footer className="w-full flex items-center justify-center border-t mx-auto text-center text-xs gap-8 py-16">
+-          <p>
+-            Powered by{" "}
+-            <a
+-              href="https://supabase.com/?utm_source=create-next-app&utm_medium=template&utm_term=nextjs"
+-              target="_blank"
+-              className="font-bold hover:underline"
+-              rel="noreferrer"
+-            >
+-              Supabase
+-            </a>
+-          </p>
+-          <ThemeSwitcher />
+-        </footer>
+-      </div>
+-    </main>
+-  );
+-}
+diff --git a/app/protected/page.tsx b/app/protected/page.tsx
+deleted file mode 100644
+index 4f6caa7..0000000
+--- a/app/protected/page.tsx
++++ /dev/null
+@@ -1,43 +0,0 @@
+-import { redirect } from "next/navigation";
+-
+-import { createClient } from "@/lib/supabase/server";
+-import { InfoIcon } from "lucide-react";
+-import { FetchDataSteps } from "@/components/tutorial/fetch-data-steps";
+-import { Suspense } from "react";
+-
+-async function UserDetails() {
+-  const supabase = await createClient();
+-  const { data, error } = await supabase.auth.getClaims();
+-
+-  if (error || !data?.claims) {
+-    redirect("/auth/login");
+-  }
+-
+-  return JSON.stringify(data.claims, null, 2);
+-}
+-
+-export default function ProtectedPage() {
+-  return (
+-    <div className="flex-1 w-full flex flex-col gap-12">
+-      <div className="w-full">
+-        <div className="bg-accent text-sm p-3 px-5 rounded-md text-foreground flex gap-3 items-center">
+-          <InfoIcon size="16" strokeWidth={2} />
+-          This is a protected page that you can only see as an authenticated
+-          user
+-        </div>
+-      </div>
+-      <div className="flex flex-col gap-2 items-start">
+-        <h2 className="font-bold text-2xl mb-4">Your user details</h2>
+-        <pre className="text-xs font-mono p-3 rounded border max-h-32 overflow-auto">
+-          <Suspense>
+-            <UserDetails />
+-          </Suspense>
+-        </pre>
+-      </div>
+-      <div>
+-        <h2 className="font-bold text-2xl mb-4">Next steps</h2>
+-        <FetchDataSteps />
+-      </div>
+-    </div>
+-  );
+-}
+diff --git a/app/twitter-image.png b/app/twitter-image.png
+deleted file mode 100644
+index 57595e6..0000000
+Binary files a/app/twitter-image.png and /dev/null differ
+diff --git a/proxy.ts b/proxy.ts
+index 503ab12..0d00552 100644
+--- a/proxy.ts
++++ b/proxy.ts
+@@ -1,20 +1,13 @@
+-import { updateSession } from "@/lib/supabase/proxy";
+ import { type NextRequest } from "next/server";
+ 
++import { updateSession } from "@/lib/supabase/middleware";
++
+ export async function proxy(request: NextRequest) {
+   return await updateSession(request);
+ }
+ 
+ export const config = {
+   matcher: [
+-    /*
+-     * Match all request paths except:
+-     * - _next/static (static files)
+-     * - _next/image (image optimization files)
+-     * - favicon.ico (favicon file)
+-     * - images - .svg, .png, .jpg, .jpeg, .gif, .webp
+-     * Feel free to modify this pattern to include more paths.
+-     */
+     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+   ],
+ };
+diff --git a/src/components/auth-button.tsx b/src/components/auth-button.tsx
+deleted file mode 100644
+index 29f696c..0000000
+--- a/src/components/auth-button.tsx
++++ /dev/null
+@@ -1,29 +0,0 @@
+-import Link from "next/link";
+-import { Button } from "./ui/button";
+-import { createClient } from "@/lib/supabase/server";
+-import { LogoutButton } from "./logout-button";
+-
+-export async function AuthButton() {
+-  const supabase = await createClient();
+-
+-  // You can also use getUser() which will be slower.
+-  const { data } = await supabase.auth.getClaims();
+-
+-  const user = data?.claims;
+-
+-  return user ? (
+-    <div className="flex items-center gap-4">
+-      Hey, {user.email}!
+-      <LogoutButton />
+-    </div>
+-  ) : (
+-    <div className="flex gap-2">
+-      <Button asChild size="sm" variant={"outline"}>
+-        <Link href="/auth/login">Sign in</Link>
+-      </Button>
+-      <Button asChild size="sm" variant={"default"}>
+-        <Link href="/auth/sign-up">Sign up</Link>
+-      </Button>
+-    </div>
+-  );
+-}
+diff --git a/src/components/deploy-button.tsx b/src/components/deploy-button.tsx
+deleted file mode 100644
+index a6b2c26..0000000
+--- a/src/components/deploy-button.tsx
++++ /dev/null
+@@ -1,25 +0,0 @@
+-import Link from "next/link";
+-import { Button } from "./ui/button";
+-
+-export function DeployButton() {
+-  return (
+-    <>
+-      <Link
+-        href="https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Fnext.js%2Ftree%2Fcanary%2Fexamples%2Fwith-supabase&project-name=nextjs-with-supabase&repository-name=nextjs-with-supabase&demo-title=nextjs-with-supabase&demo-description=This+starter+configures+Supabase+Auth+to+use+cookies%2C+making+the+user%27s+session+available+throughout+the+entire+Next.js+app+-+Client+Components%2C+Server+Components%2C+Route+Handlers%2C+Server+Actions+and+Middleware.&demo-url=https%3A%2F%2Fdemo-nextjs-with-supabase.vercel.app%2F&external-id=https%3A%2F%2Fgithub.com%2Fvercel%2Fnext.js%2Ftree%2Fcanary%2Fexamples%2Fwith-supabase&demo-image=https%3A%2F%2Fdemo-nextjs-with-supabase.vercel.app%2Fopengraph-image.png"
+-        target="_blank"
+-      >
+-        <Button className="flex items-center gap-2" size="sm">
+-          <svg
+-            className="h-3 w-3"
+-            viewBox="0 0 76 65"
+-            fill="hsl(var(--background)/1)"
+-            xmlns="http://www.w3.org/2000/svg"
+-          >
+-            <path d="M37.5274 0L75.0548 65H0L37.5274 0Z" fill="inherit" />
+-          </svg>
+-          <span>Deploy to Vercel</span>
+-        </Button>
+-      </Link>
+-    </>
+-  );
+-}
+diff --git a/src/components/env-var-warning.tsx b/src/components/env-var-warning.tsx
+deleted file mode 100644
+index 2caa528..0000000
+--- a/src/components/env-var-warning.tsx
++++ /dev/null
+@@ -1,20 +0,0 @@
+-import { Badge } from "./ui/badge";
+-import { Button } from "./ui/button";
+-
+-export function EnvVarWarning() {
+-  return (
+-    <div className="flex gap-4 items-center">
+-      <Badge variant={"outline"} className="font-normal">
+-        Supabase environment variables required
+-      </Badge>
+-      <div className="flex gap-2">
+-        <Button size="sm" variant={"outline"} disabled>
+-          Sign in
+-        </Button>
+-        <Button size="sm" variant={"default"} disabled>
+-          Sign up
+-        </Button>
+-      </div>
+-    </div>
+-  );
+-}
+diff --git a/src/components/feedback/comment-dialog.tsx b/src/components/feedback/comment-dialog.tsx
+new file mode 100644
+index 0000000..43b914b
+--- /dev/null
++++ b/src/components/feedback/comment-dialog.tsx
+@@ -0,0 +1,117 @@
++"use client";
++
++import { useEffect, useState } from "react";
++
++import { Button } from "@/components/ui/button";
++import {
++  Dialog,
++  DialogContent,
++  DialogHeader,
++  DialogTitle,
++} from "@/components/ui/dialog";
++import {
++  MAX_FEEDBACK_COMMENT_LENGTH,
++  MIN_FEEDBACK_COMMENT_LENGTH,
++} from "@/domain/history/constants";
++
++type CommentDialogProps = {
++  open: boolean;
++  onOpenChange: (open: boolean) => void;
++  title: string;
++  description?: string;
++  placeholder?: string;
++  submitLabel?: string;
++  pending?: boolean;
++  error?: string | null;
++  /** Called with trimmed comment when user submits. */
++  onSubmit: (comment: string) => void | Promise<void>;
++};
++
++export function CommentDialog({
++  open,
++  onOpenChange,
++  title,
++  description,
++  placeholder = "Например: не люблю тушёную капусту",
++  submitLabel = "Сохранить",
++  pending = false,
++  error = null,
++  onSubmit,
++}: CommentDialogProps) {
++  const [comment, setComment] = useState("");
++
++  useEffect(() => {
++    if (!open) setComment("");
++  }, [open]);
++
++  const trimmed = comment.trim();
++  const tooShort =
++    trimmed.length > 0 && trimmed.length < MIN_FEEDBACK_COMMENT_LENGTH;
++  const canSubmit =
++    trimmed.length >= MIN_FEEDBACK_COMMENT_LENGTH &&
++    trimmed.length <= MAX_FEEDBACK_COMMENT_LENGTH &&
++    !pending;
++
++  return (
++    <Dialog open={open} onOpenChange={onOpenChange}>
++      <DialogContent data-component="comment-dialog">
++        <DialogHeader>
++          <DialogTitle>{title}</DialogTitle>
++          {description ? (
++            <p className="text-sm text-muted-foreground">{description}</p>
++          ) : null}
++        </DialogHeader>
++
++        <div className="space-y-3">
++          <label className="block text-[11px] font-semibold uppercase tracking-[0.04em] text-slot-label">
++            Причина
++          </label>
++          <textarea
++            value={comment}
++            onChange={(e) => setComment(e.target.value)}
++            placeholder={placeholder}
++            maxLength={MAX_FEEDBACK_COMMENT_LENGTH}
++            rows={4}
++            disabled={pending}
++            className="flex min-h-[96px] w-full rounded-sm border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
++            autoFocus
++          />
++          <p className="text-xs text-muted-foreground">
++            Минимум {MIN_FEEDBACK_COMMENT_LENGTH} символа. Учитывается при
++            следующих генерациях меню.
++          </p>
++          {tooShort ? (
++            <p className="text-xs text-warning-fg" role="alert">
++              Напишите чуть подробнее.
++            </p>
++          ) : null}
++          {error ? (
++            <p className="text-xs text-warning-fg" role="alert">
++              {error}
++            </p>
++          ) : null}
++          <div className="flex justify-end gap-2">
++            <Button
++              type="button"
++              variant="ghost"
++              className="rounded-sm"
++              disabled={pending}
++              onClick={() => onOpenChange(false)}
++            >
++              Отмена
++            </Button>
++            <Button
++              type="button"
++              className="rounded-sm"
++              disabled={!canSubmit}
++              aria-busy={pending}
++              onClick={() => void onSubmit(trimmed)}
++            >
++              {pending ? "Сохраняем…" : submitLabel}
++            </Button>
++          </div>
++        </div>
++      </DialogContent>
++    </Dialog>
++  );
++}
+diff --git a/src/components/forgot-password-form.tsx b/src/components/forgot-password-form.tsx
+deleted file mode 100644
+index fd96eae..0000000
+--- a/src/components/forgot-password-form.tsx
++++ /dev/null
+@@ -1,105 +0,0 @@
+-"use client";
+-
+-import { cn } from "@/lib/utils";
+-import { createClient } from "@/lib/supabase/client";
+-import { Button } from "@/components/ui/button";
+-import {
+-  Card,
+-  CardContent,
+-  CardDescription,
+-  CardHeader,
+-  CardTitle,
+-} from "@/components/ui/card";
+-import { Input } from "@/components/ui/input";
+-import { Label } from "@/components/ui/label";
+-import Link from "next/link";
+-import { useState } from "react";
+-
+-export function ForgotPasswordForm({
+-  className,
+-  ...props
+-}: React.ComponentPropsWithoutRef<"div">) {
+-  const [email, setEmail] = useState("");
+-  const [error, setError] = useState<string | null>(null);
+-  const [success, setSuccess] = useState(false);
+-  const [isLoading, setIsLoading] = useState(false);
+-
+-  const handleForgotPassword = async (e: React.FormEvent) => {
+-    e.preventDefault();
+-    const supabase = createClient();
+-    setIsLoading(true);
+-    setError(null);
+-
+-    try {
+-      // The url which will be included in the email. This URL needs to be configured in your redirect URLs in the Supabase dashboard at https://supabase.com/dashboard/project/_/auth/url-configuration
+-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+-        redirectTo: `${window.location.origin}/auth/update-password`,
+-      });
+-      if (error) throw error;
+-      setSuccess(true);
+-    } catch (error: unknown) {
+-      setError(error instanceof Error ? error.message : "An error occurred");
+-    } finally {
+-      setIsLoading(false);
+-    }
+-  };
+-
+-  return (
+-    <div className={cn("flex flex-col gap-6", className)} {...props}>
+-      {success ? (
+-        <Card>
+-          <CardHeader>
+-            <CardTitle className="text-2xl">Check Your Email</CardTitle>
+-            <CardDescription>Password reset instructions sent</CardDescription>
+-          </CardHeader>
+-          <CardContent>
+-            <p className="text-sm text-muted-foreground">
+-              If you registered using your email and password, you will receive
+-              a password reset email.
+-            </p>
+-          </CardContent>
+-        </Card>
+-      ) : (
+-        <Card>
+-          <CardHeader>
+-            <CardTitle className="text-2xl">Reset Your Password</CardTitle>
+-            <CardDescription>
+-              Type in your email and we&apos;ll send you a link to reset your
+-              password
+-            </CardDescription>
+-          </CardHeader>
+-          <CardContent>
+-            <form onSubmit={handleForgotPassword}>
+-              <div className="flex flex-col gap-6">
+-                <div className="grid gap-2">
+-                  <Label htmlFor="email">Email</Label>
+-                  <Input
+-                    id="email"
+-                    type="email"
+-                    placeholder="m@example.com"
+-                    required
+-                    value={email}
+-                    onChange={(e) => setEmail(e.target.value)}
+-                  />
+-                </div>
+-                {error && <p className="text-sm text-red-500">{error}</p>}
+-                <Button type="submit" className="w-full" disabled={isLoading}>
+-                  {isLoading ? "Sending..." : "Send reset email"}
+-                </Button>
+-              </div>
+-              <div className="mt-4 text-center text-sm">
+-                Already have an account?{" "}
+-                <Link
+-                  href="/auth/login"
+-                  className="underline underline-offset-4"
+-                >
+-                  Login
+-                </Link>
+-              </div>
+-            </form>
+-          </CardContent>
+-        </Card>
+-      )}
+-    </div>
+-  );
+-}
+diff --git a/src/components/hero.tsx b/src/components/hero.tsx
+deleted file mode 100644
+index 4a31bd8..0000000
+--- a/src/components/hero.tsx
++++ /dev/null
+@@ -1,44 +0,0 @@
+-import { NextLogo } from "./next-logo";
+-import { SupabaseLogo } from "./supabase-logo";
+-
+-export function Hero() {
+-  return (
+-    <div className="flex flex-col gap-16 items-center">
+-      <div className="flex gap-8 justify-center items-center">
+-        <a
+-          href="https://supabase.com/?utm_source=create-next-app&utm_medium=template&utm_term=nextjs"
+-          target="_blank"
+-          rel="noreferrer"
+-        >
+-          <SupabaseLogo />
+-        </a>
+-        <span className="border-l rotate-45 h-6" />
+-        <a href="https://nextjs.org/" target="_blank" rel="noreferrer">
+-          <NextLogo />
+-        </a>
+-      </div>
+-      <h1 className="sr-only">Supabase and Next.js Starter Template</h1>
+-      <p className="text-3xl lg:text-4xl !leading-tight mx-auto max-w-xl text-center">
+-        The fastest way to build apps with{" "}
+-        <a
+-          href="https://supabase.com/?utm_source=create-next-app&utm_medium=template&utm_term=nextjs"
+-          target="_blank"
+-          className="font-bold hover:underline"
+-          rel="noreferrer"
+-        >
+-          Supabase
+-        </a>{" "}
+-        and{" "}
+-        <a
+-          href="https://nextjs.org/"
+-          target="_blank"
+-          className="font-bold hover:underline"
+-          rel="noreferrer"
+-        >
+-          Next.js
+-        </a>
+-      </p>
+-      <div className="w-full p-[1px] bg-gradient-to-r from-transparent via-foreground/10 to-transparent my-8" />
+-    </div>
+-  );
+-}
+diff --git a/src/components/history/delete-menu-button.tsx b/src/components/history/delete-menu-button.tsx
+new file mode 100644
+index 0000000..112c3d3
+--- /dev/null
++++ b/src/components/history/delete-menu-button.tsx
+@@ -0,0 +1,57 @@
++"use client";
++
++import { useRouter } from "next/navigation";
++import { useState, useTransition } from "react";
++
++import { Button } from "@/components/ui/button";
++import { deleteMenuAction } from "@/domain/history/delete-actions";
++
++type DeleteMenuButtonProps = {
++  menuId: string;
++};
++
++export function DeleteMenuButton({ menuId }: DeleteMenuButtonProps) {
++  const router = useRouter();
++  const [pending, startTransition] = useTransition();
++  const [error, setError] = useState<string | null>(null);
++
++  function handleClick() {
++    if (
++      !window.confirm(
++        "Удалить это меню? Слоты и список покупок тоже исчезнут.",
++      )
++    ) {
++      return;
++    }
++    setError(null);
++    startTransition(async () => {
++      const result = await deleteMenuAction(menuId);
++      if (!result.ok) {
++        setError(result.error);
++        return;
++      }
++      router.refresh();
++    });
++  }
++
++  return (
++    <div className="inline-flex flex-col items-start gap-1">
++      <Button
++        type="button"
++        variant="ghost"
++        size="sm"
++        className="h-auto px-0 text-xs font-medium text-muted-foreground hover:bg-transparent hover:text-warning-fg"
++        disabled={pending}
++        aria-busy={pending}
++        onClick={handleClick}
++      >
++        {pending ? "Удаляем…" : "Удалить"}
++      </Button>
++      {error ? (
++        <p className="text-xs text-warning-fg" role="alert">
++          {error}
++        </p>
++      ) : null}
++    </div>
++  );
++}
+diff --git a/src/components/history/history-rating-row.tsx b/src/components/history/history-rating-row.tsx
+new file mode 100644
+index 0000000..28eba0a
+--- /dev/null
++++ b/src/components/history/history-rating-row.tsx
+@@ -0,0 +1,168 @@
++"use client";
++
++import { startTransition, useActionState, useEffect, useState } from "react";
++
++import { CommentDialog } from "@/components/feedback/comment-dialog";
++import { RecipeTextPanel } from "@/components/recipes/recipe-text-panel";
++import { Button } from "@/components/ui/button";
++import {
++  RATING_VALUE_LABELS_RU,
++  type HistoryRatingValue,
++  type RatingValue,
++} from "@/domain/history/constants";
++import {
++  upsertRecipeRatingAction,
++  upsertSnackRatingAction,
++  type RatingActionState,
++} from "@/domain/history/rating-actions";
++import type { RecipeIngredientView } from "@/domain/recipes/load-recipe";
++
++type RecipeProps = {
++  kind: "recipe";
++  recipeId: string;
++  name: string;
++  bodyText: string;
++  ingredients: RecipeIngredientView[];
++  totalServings: number;
++  peoplePerMeal: number;
++  dayCount: number;
++  rating: RatingValue | null;
++  reason: string | null;
++};
++
++type SnackProps = {
++  kind: "snack";
++  label: string;
++  name: string;
++  rating: RatingValue | null;
++  reason: string | null;
++};
++
++function asHistoryRating(v: RatingValue | null): HistoryRatingValue | null {
++  if (v === "like" || v === "dislike") return v;
++  return null;
++}
++
++export function HistoryRatingRow(props: RecipeProps | SnackProps) {
++  const action =
++    props.kind === "recipe"
++      ? upsertRecipeRatingAction
++      : upsertSnackRatingAction;
++  const [state, formAction, pending] = useActionState<
++    RatingActionState,
++    FormData
++  >(action, null);
++  const [dislikeOpen, setDislikeOpen] = useState(false);
++  const current = asHistoryRating(props.rating);
++
++  useEffect(() => {
++    if (state?.ok) setDislikeOpen(false);
++  }, [state]);
++
++  function submitLike() {
++    const fd = new FormData();
++    if (props.kind === "recipe") {
++      fd.set("recipeId", props.recipeId);
++    } else {
++      fd.set("label", props.label);
++    }
++    fd.set("rating", "like");
++    startTransition(() => {
++      formAction(fd);
++    });
++  }
++
++  function submitDislike(comment: string) {
++    const fd = new FormData();
++    if (props.kind === "recipe") {
++      fd.set("recipeId", props.recipeId);
++    } else {
++      fd.set("label", props.label);
++    }
++    fd.set("rating", "dislike");
++    fd.set("comment", comment);
++    startTransition(() => {
++      formAction(fd);
++    });
++  }
++
++  return (
++    <div
++      data-component="history-rating-row"
++      className="rounded-lg border border-border bg-surface px-3 py-3"
++    >
++      <div className="flex flex-wrap items-baseline justify-between gap-2">
++        {props.kind === "recipe" ? (
++          <RecipeTextPanel
++            recipeId={props.recipeId}
++            recipeName={props.name}
++            bodyText={props.bodyText}
++            ingredients={props.ingredients}
++            totalServings={props.totalServings}
++            peoplePerMeal={props.peoplePerMeal}
++            dayCount={props.dayCount}
++          />
++        ) : (
++          <p className="text-sm font-medium text-foreground">{props.name}</p>
++        )}
++        <span className="text-xs text-muted-foreground">
++          {props.kind === "recipe" ? "Рецепт" : "Snack"}
++        </span>
++      </div>
++
++      <div className="mt-3 flex flex-wrap gap-2">
++        <Button
++          type="button"
++          size="sm"
++          variant={current === "like" ? "default" : "outline"}
++          className="rounded-sm"
++          disabled={pending}
++          aria-pressed={current === "like"}
++          onClick={() => submitLike()}
++        >
++          {RATING_VALUE_LABELS_RU.like}
++        </Button>
++        <Button
++          type="button"
++          size="sm"
++          variant={current === "dislike" ? "default" : "outline"}
++          className="rounded-sm"
++          disabled={pending}
++          aria-pressed={current === "dislike"}
++          onClick={() => setDislikeOpen(true)}
++        >
++          {RATING_VALUE_LABELS_RU.dislike}
++        </Button>
++      </div>
++
++      {current === "dislike" && props.reason ? (
++        <p className="mt-2 text-xs text-muted-foreground">
++          Причина: {props.reason}
++        </p>
++      ) : null}
++
++      {state && !state.ok ? (
++        <p className="mt-2 text-xs text-warning-fg" role="alert">
++          {state.error}
++        </p>
++      ) : null}
++      {state?.ok ? (
++        <p className="mt-2 text-xs text-primary" role="status">
++          Оценка сохранена.
++        </p>
++      ) : null}
++
++      <CommentDialog
++        open={dislikeOpen}
++        onOpenChange={setDislikeOpen}
++        title="Не нравится"
++        description="Без причины дизлайк не сохраняем. Комментарий учтём при следующих генерациях."
++        placeholder="Например: не люблю тушёную капусту"
++        submitLabel="Сохранить дизлайк"
++        pending={pending}
++        error={state && !state.ok ? state.error : null}
++        onSubmit={submitDislike}
++      />
++    </div>
++  );
++}
+diff --git a/src/components/layout/app-header.tsx b/src/components/layout/app-header.tsx
+new file mode 100644
+index 0000000..02a4e2d
+--- /dev/null
++++ b/src/components/layout/app-header.tsx
+@@ -0,0 +1,78 @@
++"use client";
++
++import Link from "next/link";
++import { usePathname } from "next/navigation";
++import { Suspense } from "react";
++
++import { BrandMark } from "@/components/layout/brand-mark";
++import { PillNav } from "@/components/layout/pill-nav";
++import {
++  isPlanRoute,
++  resolvePrimaryActiveHref,
++  resolveWizardActiveHref,
++} from "@/components/layout/plan-chrome";
++import { PrimaryNav } from "@/components/layout/primary-nav";
++import { LogoutButton } from "@/components/logout-button";
++import { CreateMenuCta } from "@/components/menu/create-menu-cta";
++import { Button } from "@/components/ui/button";
++import { cn } from "@/lib/utils";
++
++const chromeInner =
++  "mx-auto flex w-full max-w-[1180px] items-center px-7 xl:px-10";
++
++export function AppHeader() {
++  const pathname = usePathname();
++  const showWizard = isPlanRoute(pathname);
++  const wizardActiveHref = resolveWizardActiveHref(pathname);
++  const primaryActiveHref = resolvePrimaryActiveHref(pathname);
++
++  return (
++    <>
++      <header className="border-b border-border bg-surface">
++        <div className={cn(chromeInner, "justify-between gap-6 py-[14px]")}>
++          <Link
++            href="/history"
++            className="flex min-w-0 items-center gap-2.5"
++            aria-label="Keplo — на главную"
++          >
++            <BrandMark className="size-8 shrink-0" />
++            <span className="section-title tracking-[-0.03em] text-accent">
++              Keplo
++            </span>
++          </Link>
++
++          <div className="flex flex-wrap items-center justify-end gap-4">
++            <Suspense
++              fallback={
++                <Button size="sm" disabled>
++                  Создать меню
++                </Button>
++              }
++            >
++              <CreateMenuCta />
++            </Suspense>
++            <PrimaryNav activeHref={primaryActiveHref} />
++            <LogoutButton />
++          </div>
++        </div>
++      </header>
++
++      {showWizard ? (
++        <div className="border-b border-border bg-[#F8FAFC]">
++          <div className={cn(chromeInner, "flex-wrap gap-2 py-2.5")}>
++            <Suspense
++              fallback={
++                <nav
++                  aria-label="Шаги планирования"
++                  className="flex gap-1.5 rounded-full bg-background p-1"
++                />
++              }
++            >
++              <PillNav activeHref={wizardActiveHref} />
++            </Suspense>
++          </div>
++        </div>
++      ) : null}
++    </>
++  );
++}
+diff --git a/src/components/layout/app-shell.tsx b/src/components/layout/app-shell.tsx
+new file mode 100644
+index 0000000..7a9e8d7
+--- /dev/null
++++ b/src/components/layout/app-shell.tsx
+@@ -0,0 +1,16 @@
++import { AppHeader } from "@/components/layout/app-header";
++
++type AppShellProps = {
++  children: React.ReactNode;
++};
++
++export function AppShell({ children }: AppShellProps) {
++  return (
++    <div className="min-h-svh bg-background">
++      <AppHeader />
++      <div className="mx-auto w-full max-w-[1180px]">
++        <main className="px-7 py-10 xl:px-10">{children}</main>
++      </div>
++    </div>
++  );
++}
+diff --git a/src/components/layout/brand-mark.tsx b/src/components/layout/brand-mark.tsx
+new file mode 100644
+index 0000000..baf1695
+--- /dev/null
++++ b/src/components/layout/brand-mark.tsx
+@@ -0,0 +1,25 @@
++export function BrandMark({ className }: { className?: string }) {
++  return (
++    <svg
++      className={className}
++      width="32"
++      height="32"
++      viewBox="0 0 32 32"
++      fill="none"
++      xmlns="http://www.w3.org/2000/svg"
++      aria-hidden="true"
++    >
++      <rect width="32" height="32" rx="9" className="fill-primary" />
++      <rect x="7" y="9" width="5" height="14" rx="1.5" className="fill-background" />
++      <rect
++        x="13.5"
++        y="9"
++        width="5"
++        height="14"
++        rx="1.5"
++        className="fill-snacks-border"
++      />
++      <rect x="20" y="9" width="5" height="14" rx="1.5" className="fill-background" />
++    </svg>
++  );
++}
+diff --git a/src/components/layout/pill-nav.tsx b/src/components/layout/pill-nav.tsx
+new file mode 100644
+index 0000000..a32e244
+--- /dev/null
++++ b/src/components/layout/pill-nav.tsx
+@@ -0,0 +1,91 @@
++"use client";
++
++import Link from "next/link";
++import { useSearchParams } from "next/navigation";
++import { useEffect, useState } from "react";
++
++import { getSlotEditPassedAction } from "@/domain/menu/uj1-actions";
++import { cn } from "@/lib/utils";
++
++const STEPS = [
++  { href: "/plan/menu", label: "Состав", id: "menu" },
++  { href: "/plan/shopping-list", label: "Список", id: "list" },
++] as const;
++
++const UJ1_TITLE = "Сначала проверьте меню и перейдите к списку покупок";
++
++type PillNavProps = {
++  activeHref?: string;
++};
++
++export function PillNav({ activeHref = "/plan/menu" }: PillNavProps) {
++  const searchParams = useSearchParams();
++  const menuId = searchParams.get("menuId");
++  const [fetched, setFetched] = useState<{
++    menuId: string;
++    passed: boolean;
++  } | null>(null);
++
++  useEffect(() => {
++    if (!menuId) return;
++    let cancelled = false;
++    void getSlotEditPassedAction(menuId).then((passed) => {
++      if (!cancelled) setFetched({ menuId, passed });
++    });
++    return () => {
++      cancelled = true;
++    };
++  }, [menuId]);
++
++  const slotEditPassed =
++    menuId && fetched?.menuId === menuId ? fetched.passed : null;
++
++  return (
++    <nav
++      aria-label="Шаги планирования"
++      className="flex gap-1.5 rounded-full bg-background p-1"
++    >
++      {STEPS.map((step) => {
++        const isActive = step.href === activeHref;
++        const href = menuId
++          ? `${step.href}?menuId=${encodeURIComponent(menuId)}`
++          : step.href;
++
++        const needsPass = step.id === "list";
++        const blocked = needsPass && (!menuId || slotEditPassed !== true);
++
++        if (blocked) {
++          return (
++            <span
++              key={step.href}
++              className={cn(
++                "cursor-not-allowed rounded-full px-3.5 py-1.5 text-[13px] text-muted-foreground/50",
++                isActive && "bg-surface font-semibold text-primary shadow-sm",
++              )}
++              title={UJ1_TITLE}
++              aria-disabled="true"
++            >
++              {step.label}
++            </span>
++          );
++        }
++
++        return (
++          <Link
++            key={step.href}
++            href={href}
++            className={cn(
++              "rounded-full px-3.5 py-1.5 text-[13px] transition-colors",
++              isActive
++                ? "bg-surface font-semibold text-primary shadow-sm"
++                : "text-muted-foreground hover:text-foreground",
++            )}
++            aria-current={isActive ? "page" : undefined}
++          >
++            {step.label}
++          </Link>
++        );
++      })}
++    </nav>
++  );
++}
+diff --git a/src/components/layout/plan-chrome.ts b/src/components/layout/plan-chrome.ts
+new file mode 100644
+index 0000000..8b81952
+--- /dev/null
++++ b/src/components/layout/plan-chrome.ts
+@@ -0,0 +1,23 @@
++/** Plan surfaces that show the W1 wizard bar under the global header. */
++export function isPlanRoute(pathname: string): boolean {
++  return (
++    pathname.startsWith("/plan/menu") ||
++    pathname.startsWith("/plan/shopping-list") ||
++    pathname.startsWith("/plan/portions")
++  );
++}
++
++export function resolveWizardActiveHref(pathname: string): string {
++  if (pathname.startsWith("/plan/shopping-list")) return "/plan/shopping-list";
++  if (pathname.startsWith("/plan/portions")) return "/plan/shopping-list";
++  return "/plan/menu";
++}
++
++/** Global text-nav current page — never a plan step. */
++export function resolvePrimaryActiveHref(
++  pathname: string,
++): "/history" | "/settings" | undefined {
++  if (pathname.startsWith("/history")) return "/history";
++  if (pathname.startsWith("/settings")) return "/settings";
++  return undefined;
++}
+diff --git a/src/components/layout/primary-nav.tsx b/src/components/layout/primary-nav.tsx
+new file mode 100644
+index 0000000..244db85
+--- /dev/null
++++ b/src/components/layout/primary-nav.tsx
+@@ -0,0 +1,38 @@
++import Link from "next/link";
++
++import { cn } from "@/lib/utils";
++
++const LINKS = [
++  { href: "/history", label: "История" },
++  { href: "/settings", label: "Настройки" },
++] as const;
++
++type PrimaryNavProps = {
++  activeHref?: "/history" | "/settings";
++};
++
++export function PrimaryNav({ activeHref }: PrimaryNavProps) {
++  return (
++    <nav aria-label="Основная навигация" className="flex items-center gap-5">
++      {LINKS.map((link) => {
++        const isActive = link.href === activeHref;
++
++        return (
++          <Link
++            key={link.href}
++            href={link.href}
++            className={cn(
++              "text-[13px] transition-colors",
++              isActive
++                ? "font-semibold text-primary"
++                : "text-muted-foreground hover:text-foreground",
++            )}
++            aria-current={isActive ? "page" : undefined}
++          >
++            {link.label}
++          </Link>
++        );
++      })}
++    </nav>
++  );
++}
+diff --git a/src/components/login-form.tsx b/src/components/login-form.tsx
+index 23040a0..db2135c 100644
+--- a/src/components/login-form.tsx
++++ b/src/components/login-form.tsx
+@@ -1,7 +1,8 @@
+ "use client";
+ 
+-import { cn } from "@/lib/utils";
+-import { createClient } from "@/lib/supabase/client";
++import { useRouter } from "next/navigation";
++import { useState } from "react";
++
+ import { Button } from "@/components/ui/button";
+ import {
+   Card,
+@@ -12,9 +13,31 @@ import {
+ } from "@/components/ui/card";
+ import { Input } from "@/components/ui/input";
+ import { Label } from "@/components/ui/label";
+-import Link from "next/link";
+-import { useRouter } from "next/navigation";
+-import { useState } from "react";
++import { createClient } from "@/lib/supabase/client";
++import { cn } from "@/lib/utils";
++
++function mapSignInError(error: unknown): string {
++  const message =
++    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
++
++  if (
++    message.includes("invalid login credentials") ||
++    message.includes("invalid_credentials")
++  ) {
++    return "Неверный логин или пароль.";
++  }
++  if (message.includes("email not confirmed")) {
++    return "Подтвердите адрес электронной почты, затем войдите снова.";
++  }
++  if (message.includes("too many requests") || message.includes("rate limit")) {
++    return "Слишком много попыток. Подождите немного и попробуйте снова.";
++  }
++  if (message.includes("network") || message.includes("fetch")) {
++    return "Нет связи с сервером входа. Проверьте сеть и попробуйте снова.";
++  }
++
++  return "Не удалось войти. Проверьте данные и попробуйте снова.";
++}
+ 
+ export function LoginForm({
+   className,
+@@ -26,22 +49,22 @@ export function LoginForm({
+   const [isLoading, setIsLoading] = useState(false);
+   const router = useRouter();
+ 
+-  const handleLogin = async (e: React.FormEvent) => {
+-    e.preventDefault();
++  const handleLogin = async (event: React.FormEvent) => {
++    event.preventDefault();
+     const supabase = createClient();
+     setIsLoading(true);
+     setError(null);
+ 
+     try {
+-      const { error } = await supabase.auth.signInWithPassword({
++      const { error: signInError } = await supabase.auth.signInWithPassword({
+         email,
+         password,
+       });
+-      if (error) throw error;
+-      // Update this route to redirect to an authenticated route. The user already has an active session.
+-      router.push("/protected");
+-    } catch (error: unknown) {
+-      setError(error instanceof Error ? error.message : "An error occurred");
++      if (signInError) throw signInError;
++      router.push("/");
++      router.refresh();
++    } catch (err: unknown) {
++      setError(mapSignInError(err));
+     } finally {
+       setIsLoading(false);
+     }
+@@ -49,59 +72,46 @@ export function LoginForm({
+ 
+   return (
+     <div className={cn("flex flex-col gap-6", className)} {...props}>
+-      <Card>
++      <Card className="border-border bg-surface shadow-none">
+         <CardHeader>
+-          <CardTitle className="text-2xl">Login</CardTitle>
+-          <CardDescription>
+-            Enter your email below to login to your account
++          <CardTitle className="page-title">Вход</CardTitle>
++          <CardDescription className="text-muted-foreground">
++            Войдите, чтобы открыть рабочее пространство планирования меню.
+           </CardDescription>
+         </CardHeader>
+         <CardContent>
+-          <form onSubmit={handleLogin}>
+-            <div className="flex flex-col gap-6">
+-              <div className="grid gap-2">
+-                <Label htmlFor="email">Email</Label>
+-                <Input
+-                  id="email"
+-                  type="email"
+-                  placeholder="m@example.com"
+-                  required
+-                  value={email}
+-                  onChange={(e) => setEmail(e.target.value)}
+-                />
+-              </div>
+-              <div className="grid gap-2">
+-                <div className="flex items-center">
+-                  <Label htmlFor="password">Password</Label>
+-                  <Link
+-                    href="/auth/forgot-password"
+-                    className="ml-auto inline-block text-sm underline-offset-4 hover:underline"
+-                  >
+-                    Forgot your password?
+-                  </Link>
+-                </div>
+-                <Input
+-                  id="password"
+-                  type="password"
+-                  required
+-                  value={password}
+-                  onChange={(e) => setPassword(e.target.value)}
+-                />
+-              </div>
+-              {error && <p className="text-sm text-red-500">{error}</p>}
+-              <Button type="submit" className="w-full" disabled={isLoading}>
+-                {isLoading ? "Logging in..." : "Login"}
+-              </Button>
++          <form onSubmit={handleLogin} className="grid gap-6">
++            <div className="grid gap-2">
++              <Label htmlFor="email">Эл. почта</Label>
++              <Input
++                id="email"
++                type="email"
++                autoComplete="email"
++                placeholder="логин@почта.ru"
++                required
++                value={email}
++                onChange={(event) => setEmail(event.target.value)}
++              />
+             </div>
+-            <div className="mt-4 text-center text-sm">
+-              Don&apos;t have an account?{" "}
+-              <Link
+-                href="/auth/sign-up"
+-                className="underline underline-offset-4"
+-              >
+-                Sign up
+-              </Link>
++            <div className="grid gap-2">
++              <Label htmlFor="password">Пароль</Label>
++              <Input
++                id="password"
++                type="password"
++                autoComplete="current-password"
++                required
++                value={password}
++                onChange={(event) => setPassword(event.target.value)}
++              />
+             </div>
++            {error ? (
++              <p className="text-sm text-destructive" role="alert">
++                {error}
++              </p>
++            ) : null}
++            <Button type="submit" className="w-full rounded-sm" disabled={isLoading}>
++              {isLoading ? "Входим…" : "Войти"}
++            </Button>
+           </form>
+         </CardContent>
+       </Card>
+diff --git a/src/components/logout-button.tsx b/src/components/logout-button.tsx
+index 4b8b90b..1b75279 100644
+--- a/src/components/logout-button.tsx
++++ b/src/components/logout-button.tsx
+@@ -1,17 +1,52 @@
+ "use client";
+ 
+-import { createClient } from "@/lib/supabase/client";
+-import { Button } from "@/components/ui/button";
+ import { useRouter } from "next/navigation";
++import { useState } from "react";
++
++import { Button } from "@/components/ui/button";
++import { createClient } from "@/lib/supabase/client";
+ 
+ export function LogoutButton() {
+   const router = useRouter();
++  const [isLoading, setIsLoading] = useState(false);
++  const [error, setError] = useState<string | null>(null);
+ 
+-  const logout = async () => {
+-    const supabase = createClient();
+-    await supabase.auth.signOut();
+-    router.push("/auth/login");
++  const handleLogout = async () => {
++    setIsLoading(true);
++    setError(null);
++    try {
++      const supabase = createClient();
++      const { error: signOutError } = await supabase.auth.signOut();
++      if (signOutError) {
++        setError("Не удалось выйти. Попробуйте ещё раз.");
++        return;
++      }
++      router.push("/auth/login");
++      router.refresh();
++    } catch {
++      setError("Не удалось выйти. Попробуйте ещё раз.");
++    } finally {
++      setIsLoading(false);
++    }
+   };
+ 
+-  return <Button onClick={logout}>Logout</Button>;
++  return (
++    <div className="flex flex-col items-end gap-1">
++      <Button
++        type="button"
++        variant="ghost"
++        size="sm"
++        className="text-[13px] font-normal text-muted-foreground hover:text-foreground"
++        onClick={handleLogout}
++        disabled={isLoading}
++      >
++        {isLoading ? "Выходим…" : "Выйти"}
++      </Button>
++      {error ? (
++        <p className="text-xs text-destructive" role="alert">
++          {error}
++        </p>
++      ) : null}
++    </div>
++  );
+ }
+diff --git a/src/components/menu/continue-to-shopping-button.tsx b/src/components/menu/continue-to-shopping-button.tsx
+new file mode 100644
+index 0000000..a150aec
+--- /dev/null
++++ b/src/components/menu/continue-to-shopping-button.tsx
+@@ -0,0 +1,37 @@
++"use client";
++
++import { useFormStatus } from "react-dom";
++
++import { Button } from "@/components/ui/button";
++import { continueToPortionsAction } from "@/domain/menu/slot-actions";
++
++type ContinueToShoppingButtonProps = {
++  menuId: string;
++};
++
++function SubmitButton() {
++  const { pending } = useFormStatus();
++
++  return (
++    <Button
++      type="submit"
++      className="w-full rounded-sm sm:w-auto"
++      disabled={pending}
++      aria-disabled={pending}
++      aria-busy={pending}
++    >
++      {pending ? "Переходим…" : "К списку покупок →"}
++    </Button>
++  );
++}
++
++export function ContinueToShoppingButton({
++  menuId,
++}: ContinueToShoppingButtonProps) {
++  return (
++    <form action={continueToPortionsAction} className="mt-8 max-w-xl">
++      <input type="hidden" name="menuId" value={menuId} />
++      <SubmitButton />
++    </form>
++  );
++}
+diff --git a/src/components/menu/create-menu-cta.tsx b/src/components/menu/create-menu-cta.tsx
+new file mode 100644
+index 0000000..0d5e66b
+--- /dev/null
++++ b/src/components/menu/create-menu-cta.tsx
+@@ -0,0 +1,39 @@
++"use client";
++
++import { usePathname, useRouter, useSearchParams } from "next/navigation";
++import { useEffect, useState } from "react";
++
++import { CreateMenuDialog } from "@/components/menu/create-menu-dialog";
++import { Button } from "@/components/ui/button";
++import { cn } from "@/lib/utils";
++
++/** Header CTA — opens create-menu as a one-shot modal (not a wizard step). */
++export function CreateMenuCta() {
++  const router = useRouter();
++  const pathname = usePathname();
++  const searchParams = useSearchParams();
++  const [open, setOpen] = useState(false);
++
++  useEffect(() => {
++    if (searchParams.get("create") !== "1") return;
++    setOpen(true);
++    const next = new URLSearchParams(searchParams.toString());
++    next.delete("create");
++    const qs = next.toString();
++    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
++  }, [pathname, router, searchParams]);
++
++  return (
++    <>
++      <Button
++        type="button"
++        size="sm"
++        className={cn(open && "ring-2 ring-primary/25")}
++        onClick={() => setOpen(true)}
++      >
++        Создать меню
++      </Button>
++      <CreateMenuDialog open={open} onOpenChange={setOpen} />
++    </>
++  );
++}
+diff --git a/src/components/menu/create-menu-dialog.tsx b/src/components/menu/create-menu-dialog.tsx
+new file mode 100644
+index 0000000..35466ef
+--- /dev/null
++++ b/src/components/menu/create-menu-dialog.tsx
+@@ -0,0 +1,38 @@
++"use client";
++
++import { CreateMenuForm } from "@/components/menu/create-menu-form";
++import {
++  Dialog,
++  DialogContent,
++  DialogHeader,
++  DialogTitle,
++} from "@/components/ui/dialog";
++
++type CreateMenuDialogProps = {
++  open: boolean;
++  onOpenChange: (open: boolean) => void;
++};
++
++export function CreateMenuDialog({
++  open,
++  onOpenChange,
++}: CreateMenuDialogProps) {
++  return (
++    <Dialog open={open} onOpenChange={onOpenChange}>
++      <DialogContent
++        className="w-[min(100%,32rem)] max-h-[min(90vh,40rem)] overflow-y-auto"
++        data-component="create-menu-dialog"
++      >
++        <DialogHeader className="text-center sm:text-center">
++          <DialogTitle className="page-title text-center">
++            Новое меню
++          </DialogTitle>
++          <p className="mt-1.5 text-center text-sm text-muted-foreground">
++            Одна готовка · список ингредиентов для покупки.
++          </p>
++        </DialogHeader>
++        <CreateMenuForm />
++      </DialogContent>
++    </Dialog>
++  );
++}
+diff --git a/src/components/menu/create-menu-form.tsx b/src/components/menu/create-menu-form.tsx
+new file mode 100644
+index 0000000..28251cc
+--- /dev/null
++++ b/src/components/menu/create-menu-form.tsx
+@@ -0,0 +1,108 @@
++"use client";
++
++import { useActionState, useState } from "react";
++
++import { DayLengthPicker } from "@/components/menu/day-length-picker";
++import {
++  DEFAULT_MEAL_TYPES_SELECTION,
++  MealTypesPicker,
++  selectedMealSlots,
++  type MealTypesSelection,
++} from "@/components/menu/meal-types-picker";
++import { PeopleCountPicker } from "@/components/menu/people-count-picker";
++import { Button } from "@/components/ui/button";
++import {
++  createMenuSkeletonAction,
++  type CreateMenuSkeletonActionState,
++} from "@/domain/menu/actions";
++import {
++  DEFAULT_DAY_COUNT,
++  DEFAULT_SERVINGS_PER_MEAL,
++} from "@/domain/menu/constants";
++
++export function CreateMenuForm() {
++  const [dayCount, setDayCount] = useState(DEFAULT_DAY_COUNT);
++  const [peopleCount, setPeopleCount] = useState(DEFAULT_SERVINGS_PER_MEAL);
++  const [mealTypes, setMealTypes] = useState<MealTypesSelection>(
++    DEFAULT_MEAL_TYPES_SELECTION,
++  );
++  const [state, formAction, isPending] = useActionState<
++    CreateMenuSkeletonActionState,
++    FormData
++  >(createMenuSkeletonAction, null);
++
++  const mealsCsv = selectedMealSlots(mealTypes).join(",");
++
++  return (
++    <form action={formAction} className="w-full">
++      <input type="hidden" name="dayCount" value={dayCount} />
++      <input type="hidden" name="peopleCount" value={peopleCount} />
++      <input type="hidden" name="meals" value={mealsCsv} />
++      <input
++        type="hidden"
++        name="includeSnacks"
++        value={mealTypes.includeSnacks ? "1" : "0"}
++      />
++
++      <div className="mt-1 grid grid-cols-1 gap-4 text-left min-[520px]:grid-cols-2 min-[520px]:gap-4">
++        <div>
++          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.04em] text-slot-label">
++            Сколько дней
++          </p>
++          <DayLengthPicker
++            value={dayCount}
++            onChange={setDayCount}
++            disabled={isPending}
++          />
++          <p className="mt-1.5 text-xs text-slot-label">
++            Макс. 4 — по сроку хранения
++          </p>
++        </div>
++
++        <div>
++          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.04em] text-slot-label">
++            Сколько человек
++          </p>
++          <PeopleCountPicker
++            value={peopleCount}
++            onChange={setPeopleCount}
++            disabled={isPending}
++          />
++          <p className="mt-1.5 text-xs text-slot-label">
++            Порций на каждый приём
++          </p>
++        </div>
++      </div>
++
++      <div className="mt-5 text-left">
++        <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.04em] text-slot-label">
++          Какие приёмы пищи
++        </p>
++        <MealTypesPicker
++          value={mealTypes}
++          onChange={setMealTypes}
++          disabled={isPending}
++        />
++        <p className="mb-5 mt-1.5 text-xs text-slot-label">
++          Снимите лишнее — сгенерируем только выбранное
++        </p>
++      </div>
++
++      <Button
++        type="submit"
++        className="w-full rounded-sm"
++        disabled={isPending}
++        aria-disabled={isPending}
++        aria-busy={isPending}
++      >
++        {isPending ? "Генерируем…" : "Сгенерировать"}
++      </Button>
++
++      {state && !state.ok ? (
++        <p className="mt-3 text-center text-sm text-warning-fg" role="alert">
++          {state.error}
++        </p>
++      ) : null}
++    </form>
++  );
++}
+diff --git a/src/components/menu/day-card-grid.tsx b/src/components/menu/day-card-grid.tsx
+new file mode 100644
+index 0000000..ca5eb71
+--- /dev/null
++++ b/src/components/menu/day-card-grid.tsx
+@@ -0,0 +1,268 @@
++import { SlotCardActions } from "@/components/menu/slot-card-actions";
++import { SnackSlotCard } from "@/components/menu/snack-slot-card";
++import { RecipeTextPanel } from "@/components/recipes/recipe-text-panel";
++import { RecipeValueLine } from "@/components/recipes/recipe-value-line";
++import { MEAL_LABELS_RU, MEAL_SLOTS, type MealSlot } from "@/domain/menu/constants";
++import type { MenuSlotView, MenuSnackView } from "@/domain/menu/load-menu";
++import {
++  recipeBatchScale,
++  type RecipeBatchScale,
++} from "@/domain/recipes/batch-scale";
++import type { RecipeIngredientView } from "@/domain/recipes/load-recipe";
++import type { RecipePerServingValue } from "@/domain/recipes/scale-totals";
++
++type DayCardGridProps = {
++  menuId: string;
++  dayCount: number;
++  slots: MenuSlotView[];
++  snacks: MenuSnackView[];
++};
++
++function DishLine({
++  menuId,
++  slotId,
++  recipeId,
++  recipeName,
++  recipeBodyText,
++  recipeIngredients,
++  recipeValue,
++  slotServings,
++  batch,
++  recipeOccurrenceCount,
++  target,
++  canClear,
++}: {
++  menuId: string;
++  slotId: string;
++  recipeId: string;
++  recipeName: string;
++  recipeBodyText: string | null;
++  recipeIngredients: RecipeIngredientView[];
++  recipeValue: RecipePerServingValue;
++  slotServings: number;
++  batch: RecipeBatchScale;
++  recipeOccurrenceCount: number;
++  target: "main" | "companion";
++  canClear?: boolean;
++}) {
++  return (
++    <div
++      data-component="slot-dish"
++      data-target={target}
++      className="relative min-h-10 rounded-md bg-empty-slot px-3.5 py-3"
++    >
++      <div className="pr-8">
++        <RecipeTextPanel
++          recipeId={recipeId}
++          recipeName={recipeName}
++          bodyText={recipeBodyText ?? ""}
++          ingredients={recipeIngredients}
++          value={recipeValue}
++          totalServings={batch.totalServings}
++          peoplePerMeal={batch.peoplePerMeal}
++          dayCount={batch.dayCount}
++          triggerClassName="text-left text-sm font-semibold text-foreground underline decoration-border underline-offset-2 hover:text-primary"
++        />
++        <RecipeValueLine value={recipeValue} servings={slotServings} />
++      </div>
++      <SlotCardActions
++        menuId={menuId}
++        slotId={slotId}
++        hasRecipe
++        target={target}
++        recipeOccurrenceCount={recipeOccurrenceCount}
++        canClear={canClear}
++      />
++    </div>
++  );
++}
++
++function SlotCell({
++  menuId,
++  slot,
++  allSlots,
++  recipeOccurrences,
++}: {
++  menuId: string;
++  slot: MenuSlotView;
++  allSlots: MenuSlotView[];
++  recipeOccurrences: Map<string, number>;
++}) {
++  if (!slot.recipeId) {
++    return (
++      <div
++        data-component="slot-cell"
++        data-empty="true"
++        className="relative min-h-14 rounded-md bg-empty-slot px-3.5 py-3"
++      >
++        <div className="pr-8">
++          <p className="text-sm text-slot-label">Пустой слот</p>
++        </div>
++        <SlotCardActions
++          menuId={menuId}
++          slotId={slot.id}
++          hasRecipe={false}
++          target="main"
++          recipeOccurrenceCount={1}
++        />
++      </div>
++    );
++  }
++
++  return (
++    <div data-component="slot-cell" data-empty="false" className="space-y-2">
++      {slot.recipeId && slot.recipeName ? (
++        <DishLine
++          menuId={menuId}
++          slotId={slot.id}
++          recipeId={slot.recipeId}
++          recipeName={slot.recipeName}
++          recipeBodyText={slot.recipeBodyText}
++          recipeIngredients={slot.recipeIngredients}
++          recipeValue={slot.recipeValue}
++          slotServings={slot.servings}
++          batch={recipeBatchScale(allSlots, slot.recipeId)}
++          recipeOccurrenceCount={recipeOccurrences.get(slot.recipeId) ?? 1}
++          target="main"
++        />
++      ) : null}
++      {slot.companionRecipeId && slot.companionRecipeName ? (
++        <DishLine
++          menuId={menuId}
++          slotId={slot.id}
++          recipeId={slot.companionRecipeId}
++          recipeName={slot.companionRecipeName}
++          recipeBodyText={slot.companionRecipeBodyText}
++          recipeIngredients={slot.companionRecipeIngredients}
++          recipeValue={slot.companionRecipeValue}
++          slotServings={slot.servings}
++          batch={recipeBatchScale(allSlots, slot.companionRecipeId)}
++          recipeOccurrenceCount={
++            recipeOccurrences.get(slot.companionRecipeId) ?? 1
++          }
++          target="companion"
++          canClear
++        />
++      ) : null}
++    </div>
++  );
++}
++
++function countRecipeOccurrences(slots: MenuSlotView[]): Map<string, number> {
++  const counts = new Map<string, number>();
++  for (const slot of slots) {
++    for (const id of [slot.recipeId, slot.companionRecipeId]) {
++      if (!id) continue;
++      counts.set(id, (counts.get(id) ?? 0) + 1);
++    }
++  }
++  return counts;
++}
++
++function mealsPresent(slots: MenuSlotView[]): MealSlot[] {
++  const present = new Set(slots.map((s) => s.meal));
++  return MEAL_SLOTS.filter((meal) => present.has(meal));
++}
++
++function slotFor(
++  slots: MenuSlotView[],
++  dayIndex: number,
++  meal: MealSlot,
++): MenuSlotView | undefined {
++  return slots.find((s) => s.dayIndex === dayIndex && s.meal === meal);
++}
++
++export function DayCardGrid({
++  menuId,
++  dayCount,
++  slots,
++  snacks,
++}: DayCardGridProps) {
++  const days = Array.from({ length: dayCount }, (_, i) => i + 1);
++  const menuHasSnacks = snacks.length > 0;
++  const recipeOccurrences = countRecipeOccurrences(slots);
++  const meals = mealsPresent(slots);
++  const snackServings =
++    slots.find((s) => s.servings > 0)?.servings ?? 1;
++  const gridStyle = {
++    gridTemplateColumns: `108px repeat(${dayCount}, minmax(0, 1fr))`,
++  } as const;
++
++  return (
++    <div
++      data-component="meal-lane-grid"
++      className="rounded-lg border border-border bg-surface px-5 py-5 md:px-6 md:py-6"
++    >
++      <div
++        className="mb-1 grid gap-4 border-b border-border pb-2.5"
++        style={gridStyle}
++        aria-hidden="true"
++      >
++        <div />
++        {days.map((dayIndex) => (
++          <div
++            key={dayIndex}
++            className="text-center text-[13px] font-semibold text-accent"
++          >
++            День {dayIndex}
++          </div>
++        ))}
++      </div>
++
++      {meals.map((meal) => (
++        <div
++          key={meal}
++          data-component="meal-lane"
++          data-meal={meal}
++          className="grid gap-4 border-b border-[#F1F5F9] py-4 last:border-b-0"
++          style={gridStyle}
++        >
++          <div className="pt-3 text-[11px] font-semibold uppercase tracking-[0.04em] text-slot-label">
++            {MEAL_LABELS_RU[meal]}
++          </div>
++          {days.map((dayIndex) => {
++            const slot = slotFor(slots, dayIndex, meal);
++            if (!slot) {
++              return <div key={`${meal}-${dayIndex}`} className="min-h-14" />;
++            }
++            return (
++              <SlotCell
++                key={slot.id}
++                menuId={menuId}
++                slot={slot}
++                allSlots={slots}
++                recipeOccurrences={recipeOccurrences}
++              />
++            );
++          })}
++        </div>
++      ))}
++
++      {menuHasSnacks ? (
++        <div
++          data-component="meal-lane"
++          data-meal="snack"
++          className="grid gap-4 border-b border-[#F1F5F9] py-4 last:border-b-0"
++          style={gridStyle}
++        >
++          <div className="pt-3 text-[11px] font-semibold uppercase tracking-[0.04em] text-slot-label">
++            Перекус
++          </div>
++          {days.map((dayIndex) => {
++            const daySnack =
++              snacks.find((s) => s.dayIndex === dayIndex) ?? null;
++            return (
++              <SnackSlotCard
++                key={`snack-${dayIndex}`}
++                menuId={menuId}
++                dayIndex={dayIndex}
++                snack={daySnack}
++                servings={snackServings}
++              />
++            );
++          })}
++        </div>
++      ) : null}
++    </div>
++  );
++}
+diff --git a/src/components/menu/day-length-picker.tsx b/src/components/menu/day-length-picker.tsx
+new file mode 100644
+index 0000000..22c95ec
+--- /dev/null
++++ b/src/components/menu/day-length-picker.tsx
+@@ -0,0 +1,51 @@
++"use client";
++
++import { DAY_OPTION_LABELS } from "@/domain/menu/constants";
++import { cn } from "@/lib/utils";
++
++type DayLengthPickerProps = {
++  value: number;
++  onChange: (dayCount: number) => void;
++  disabled?: boolean;
++};
++
++export function DayLengthPicker({
++  value,
++  onChange,
++  disabled = false,
++}: DayLengthPickerProps) {
++  return (
++    <div
++      data-component="day-length-picker"
++      className="mb-0 flex gap-1 rounded-md bg-background p-1"
++      role="radiogroup"
++      aria-label="Длина меню"
++      aria-disabled={disabled || undefined}
++    >
++      {DAY_OPTION_LABELS.map((option) => {
++        const selected = option.value === value;
++
++        return (
++          <button
++            key={option.value}
++            type="button"
++            role="radio"
++            aria-checked={selected}
++            disabled={disabled}
++            onClick={() => onChange(option.value)}
++            className={cn(
++              "flex-1 rounded-sm px-1.5 py-2 text-center text-sm transition-colors",
++              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
++              selected
++                ? "bg-surface font-semibold text-primary shadow-sm"
++                : "text-muted-foreground hover:text-foreground",
++              disabled && "cursor-not-allowed opacity-60",
++            )}
++          >
++            {option.value}&nbsp;{option.label}
++          </button>
++        );
++      })}
++    </div>
++  );
++}
+diff --git a/src/components/menu/meal-types-picker.tsx b/src/components/menu/meal-types-picker.tsx
+new file mode 100644
+index 0000000..9eb24a5
+--- /dev/null
++++ b/src/components/menu/meal-types-picker.tsx
+@@ -0,0 +1,133 @@
++"use client";
++
++import {
++  DEFAULT_INCLUDE_SNACKS,
++  DEFAULT_MEAL_SELECTION,
++  MEAL_LABELS_RU,
++  MEAL_SLOTS,
++  type MealSlot,
++} from "@/domain/menu/constants";
++import { cn } from "@/lib/utils";
++
++export type MealTypesSelection = {
++  meals: Record<MealSlot, boolean>;
++  includeSnacks: boolean;
++};
++
++export const DEFAULT_MEAL_TYPES_SELECTION: MealTypesSelection = {
++  meals: { ...DEFAULT_MEAL_SELECTION },
++  includeSnacks: DEFAULT_INCLUDE_SNACKS,
++};
++
++type MealTypesPickerProps = {
++  value: MealTypesSelection;
++  onChange: (next: MealTypesSelection) => void;
++  disabled?: boolean;
++};
++
++type MealChip = {
++  key: string;
++  label: string;
++  checked: boolean;
++  onToggle: (checked: boolean) => void;
++};
++
++export function MealTypesPicker({
++  value,
++  onChange,
++  disabled = false,
++}: MealTypesPickerProps) {
++  const selectedCount =
++    MEAL_SLOTS.filter((m) => value.meals[m]).length +
++    (value.includeSnacks ? 1 : 0);
++
++  function toggleMeal(meal: MealSlot, checked: boolean) {
++    const nextMeals = { ...value.meals, [meal]: checked };
++    const nextCount =
++      MEAL_SLOTS.filter((m) => nextMeals[m]).length +
++      (value.includeSnacks ? 1 : 0);
++    if (nextCount === 0) return;
++    onChange({ ...value, meals: nextMeals });
++  }
++
++  function toggleSnacks(checked: boolean) {
++    const nextCount =
++      MEAL_SLOTS.filter((m) => value.meals[m]).length + (checked ? 1 : 0);
++    if (nextCount === 0) return;
++    onChange({ ...value, includeSnacks: checked });
++  }
++
++  const chips: MealChip[] = [
++    ...MEAL_SLOTS.map((meal) => ({
++      key: meal,
++      label: MEAL_LABELS_RU[meal],
++      checked: value.meals[meal],
++      onToggle: (checked: boolean) => toggleMeal(meal, checked),
++    })),
++    {
++      key: "snacks",
++      label: "Снеки",
++      checked: value.includeSnacks,
++      onToggle: toggleSnacks,
++    },
++  ];
++
++  return (
++    <div
++      data-component="meal-types-picker"
++      className="mb-2 flex flex-wrap gap-2"
++      role="group"
++      aria-label="Приёмы пищи"
++      aria-disabled={disabled || undefined}
++    >
++      {chips.map((chip) => {
++        const lockedOn = chip.checked && selectedCount === 1;
++        return (
++          <button
++            key={chip.key}
++            type="button"
++            role="checkbox"
++            aria-checked={chip.checked}
++            disabled={disabled || lockedOn}
++            onClick={() => chip.onToggle(!chip.checked)}
++            className={cn(
++              "inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors",
++              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
++              chip.checked
++                ? "border-primary/25 bg-secondary font-medium text-primary shadow-sm"
++                : "border-transparent bg-background text-muted-foreground hover:text-foreground",
++              (disabled || lockedOn) && "cursor-not-allowed opacity-60",
++            )}
++          >
++            <span
++              aria-hidden
++              className={cn(
++                "flex size-3.5 shrink-0 items-center justify-center rounded-[4px] border text-[10px] leading-none",
++                chip.checked
++                  ? "border-primary bg-primary text-primary-foreground"
++                  : "border-border bg-surface",
++              )}
++            >
++              {chip.checked ? "✓" : ""}
++            </span>
++            {chip.label}
++          </button>
++        );
++      })}
++    </div>
++  );
++}
++
++export function selectedMealSlots(selection: MealTypesSelection): MealSlot[] {
++  return MEAL_SLOTS.filter((m) => selection.meals[m]);
++}
++
++export function mealSelectionSummary(selection: MealTypesSelection): string {
++  const parts = [
++    ...selectedMealSlots(selection).map((m) =>
++      MEAL_LABELS_RU[m].toLowerCase(),
++    ),
++    ...(selection.includeSnacks ? ["снеки"] : []),
++  ];
++  return parts.join(" / ");
++}
+diff --git a/src/components/menu/menu-dish-list.tsx b/src/components/menu/menu-dish-list.tsx
+new file mode 100644
+index 0000000..9cffdc7
+--- /dev/null
++++ b/src/components/menu/menu-dish-list.tsx
+@@ -0,0 +1,51 @@
++import {
++  formatDishDayCount,
++  type MenuDishSummary,
++} from "@/domain/menu/dish-summary";
++import { formatCompactValueLine } from "@/domain/recipes/scale-totals";
++
++type MenuDishListProps = {
++  dishes: MenuDishSummary[];
++};
++
++export function MenuDishList({ dishes }: MenuDishListProps) {
++  if (dishes.length === 0) return null;
++
++  return (
++    <section
++      data-component="menu-dish-list"
++      className="mt-8 mb-2 max-w-xl"
++      aria-labelledby="menu-dish-list-title"
++    >
++      <h2
++        id="menu-dish-list-title"
++        className="text-sm font-semibold text-foreground"
++      >
++        Блюда в меню
++      </h2>
++      <ul className="mt-3 divide-y divide-border border-y border-border">
++        {dishes.map((dish) => {
++          const valueLine = formatCompactValueLine(dish.batchTotals);
++          return (
++            <li
++              key={dish.recipeId}
++              className="flex items-baseline justify-between gap-4 py-2.5"
++            >
++              <div className="min-w-0">
++                <span className="text-sm text-foreground">{dish.name}</span>
++                {valueLine ? (
++                  <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">
++                    {valueLine}
++                  </p>
++                ) : null}
++              </div>
++              <span className="shrink-0 text-sm tabular-nums text-muted-foreground">
++                {formatDishDayCount(dish.dayCount)}
++              </span>
++            </li>
++          );
++        })}
++      </ul>
++    </section>
++  );
++}
+diff --git a/src/components/menu/people-count-picker.tsx b/src/components/menu/people-count-picker.tsx
+new file mode 100644
+index 0000000..bf26ce9
+--- /dev/null
++++ b/src/components/menu/people-count-picker.tsx
+@@ -0,0 +1,52 @@
++"use client";
++
++import { PEOPLE_OPTION_LABELS } from "@/domain/menu/constants";
++import { cn } from "@/lib/utils";
++
++type PeopleCountPickerProps = {
++  value: number;
++  onChange: (peopleCount: number) => void;
++  disabled?: boolean;
++};
++
++export function PeopleCountPicker({
++  value,
++  onChange,
++  disabled = false,
++}: PeopleCountPickerProps) {
++  return (
++    <div
++      data-component="people-count-picker"
++      className="mb-0 flex gap-1 rounded-md bg-background p-1"
++      role="radiogroup"
++      aria-label="Сколько человек"
++      aria-disabled={disabled || undefined}
++    >
++      {PEOPLE_OPTION_LABELS.map((option) => {
++        const selected = option.value === value;
++
++        return (
++          <button
++            key={option.value}
++            type="button"
++            role="radio"
++            aria-checked={selected}
++            aria-label={`${option.value} ${option.label}`}
++            disabled={disabled}
++            onClick={() => onChange(option.value)}
++            className={cn(
++              "flex-1 rounded-sm px-1 py-2 text-center text-sm transition-colors",
++              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
++              selected
++                ? "bg-surface font-semibold text-primary shadow-sm"
++                : "text-muted-foreground hover:text-foreground",
++              disabled && "cursor-not-allowed opacity-60",
++            )}
++          >
++            {option.value}
++          </button>
++        );
++      })}
++    </div>
++  );
++}
+diff --git a/src/components/menu/portion-plan-grid.tsx b/src/components/menu/portion-plan-grid.tsx
+new file mode 100644
+index 0000000..67bedec
+--- /dev/null
++++ b/src/components/menu/portion-plan-grid.tsx
+@@ -0,0 +1,112 @@
++"use client";
++
++import { useActionState } from "react";
++
++import { Input } from "@/components/ui/input";
++import { MEAL_LABELS_RU } from "@/domain/menu/constants";
++import type { MenuSlotView } from "@/domain/menu/load-menu";
++import {
++  updateSlotServingsAction,
++  type PortionActionState,
++} from "@/domain/menu/portion-actions";
++
++type PortionPlanGridProps = {
++  menuId: string;
++  dayCount: number;
++  slots: MenuSlotView[];
++};
++
++function ServingsCell({
++  menuId,
++  slot,
++}: {
++  menuId: string;
++  slot: MenuSlotView;
++}) {
++  const [state, formAction, pending] = useActionState<
++    PortionActionState,
++    FormData
++  >(updateSlotServingsAction, null);
++
++  return (
++    <div
++      data-component="portion-slot"
++      className="rounded-lg bg-surface px-3 py-2 ring-1 ring-border"
++    >
++      <p className="text-[11px] font-semibold uppercase tracking-[0.04em] text-slot-label">
++        {MEAL_LABELS_RU[slot.meal]}
++      </p>
++      <p className="mt-0.5 text-sm text-foreground">
++        {slot.recipeName ? (
++          <>
++            {slot.recipeName}
++            {slot.companionRecipeName ? (
++              <span className="text-muted-foreground">
++                {" · "}
++                {slot.companionRecipeName}
++              </span>
++            ) : null}
++          </>
++        ) : (
++          <span className="text-slot-label">Пустой слот</span>
++        )}
++      </p>
++      <form action={formAction} className="mt-2 flex items-center gap-2">
++        <input type="hidden" name="menuId" value={menuId} />
++        <input type="hidden" name="slotId" value={slot.id} />
++        <label className="text-xs text-muted-foreground">Порций</label>
++        <Input
++          type="number"
++          name="servings"
++          min={1}
++          max={20}
++          defaultValue={slot.servings}
++          disabled={pending}
++          className="h-8 w-16 rounded-sm"
++          onBlur={(e) => e.currentTarget.form?.requestSubmit()}
++        />
++      </form>
++      {state && !state.ok ? (
++        <p className="mt-1 text-xs text-warning-fg" role="alert">
++          {state.error}
++        </p>
++      ) : null}
++    </div>
++  );
++}
++
++export function PortionPlanGrid({
++  menuId,
++  dayCount,
++  slots,
++}: PortionPlanGridProps) {
++  const days = Array.from({ length: dayCount }, (_, i) => i + 1);
++
++  return (
++    <div
++      data-component="portion-plan-grid"
++      className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"
++    >
++      {days.map((dayIndex) => {
++        const daySlots = slots.filter((s) => s.dayIndex === dayIndex);
++        return (
++          <section
++            key={dayIndex}
++            className="rounded-lg border border-border bg-surface"
++          >
++            <header className="rounded-t-lg border-b border-border bg-background px-4 py-3">
++              <h2 className="text-sm font-semibold text-accent">
++                День {dayIndex}
++              </h2>
++            </header>
++            <div className="flex flex-col gap-2 p-3">
++              {daySlots.map((slot) => (
++                <ServingsCell key={slot.id} menuId={menuId} slot={slot} />
++              ))}
++            </div>
++          </section>
++        );
++      })}
++    </div>
++  );
++}
+diff --git a/src/components/menu/slot-card-actions.tsx b/src/components/menu/slot-card-actions.tsx
+new file mode 100644
+index 0000000..ce9810d
+--- /dev/null
++++ b/src/components/menu/slot-card-actions.tsx
+@@ -0,0 +1,177 @@
++"use client";
++
++import { MoreHorizontal } from "lucide-react";
++import { startTransition, useActionState, useEffect, useState } from "react";
++
++import { CommentDialog } from "@/components/feedback/comment-dialog";
++import { Button } from "@/components/ui/button";
++import {
++  DropdownMenu,
++  DropdownMenuContent,
++  DropdownMenuItem,
++  DropdownMenuTrigger,
++} from "@/components/ui/dropdown-menu";
++import {
++  clearCompanionAction,
++  refuseSlotAction,
++  resuggestRecipeAcrossMenuAction,
++  resuggestSlotAction,
++  type SlotActionState,
++} from "@/domain/menu/slot-actions";
++
++export type SlotDishTarget = "main" | "companion";
++
++type SlotCardActionsProps = {
++  menuId: string;
++  slotId: string;
++  hasRecipe: boolean;
++  target?: SlotDishTarget;
++  /** How many slots on this menu share the same recipe (for «Заменить все»). */
++  recipeOccurrenceCount?: number;
++  /** Show «Убрать» for companion dishes. */
++  canClear?: boolean;
++};
++
++function ActionError({ state }: { state: SlotActionState }) {
++  if (!state || state.ok) return null;
++  return (
++    <p className="mt-1 text-xs text-warning-fg" role="alert">
++      {state.error}
++    </p>
++  );
++}
++
++export function SlotCardActions({
++  menuId,
++  slotId,
++  hasRecipe,
++  target = "main",
++  recipeOccurrenceCount = 1,
++  canClear = false,
++}: SlotCardActionsProps) {
++  const [refuseOpen, setRefuseOpen] = useState(false);
++  const [resuggestState, resuggestFormAction, resuggestPending] =
++    useActionState<SlotActionState, FormData>(resuggestSlotAction, null);
++  const [resuggestAllState, resuggestAllFormAction, resuggestAllPending] =
++    useActionState<SlotActionState, FormData>(
++      resuggestRecipeAcrossMenuAction,
++      null,
++    );
++  const [refuseState, refuseFormAction, refusePending] = useActionState<
++    SlotActionState,
++    FormData
++  >(refuseSlotAction, null);
++  const [clearState, clearFormAction, clearPending] = useActionState<
++    SlotActionState,
++    FormData
++  >(clearCompanionAction, null);
++
++  useEffect(() => {
++    if (refuseState?.ok) setRefuseOpen(false);
++  }, [refuseState]);
++
++  const busy =
++    resuggestPending || resuggestAllPending || refusePending || clearPending;
++  const showReplaceAll = hasRecipe && recipeOccurrenceCount > 1;
++
++  function runAction(
++    action: (payload: FormData) => void,
++    extra?: Record<string, string>,
++  ) {
++    const fd = new FormData();
++    fd.set("menuId", menuId);
++    fd.set("slotId", slotId);
++    fd.set("target", target);
++    if (extra) {
++      for (const [key, value] of Object.entries(extra)) {
++        fd.set(key, value);
++      }
++    }
++    startTransition(() => {
++      action(fd);
++    });
++  }
++
++  return (
++    <div data-component="slot-actions" data-target={target}>
++      <div className="absolute right-2 top-2">
++        <DropdownMenu>
++          <DropdownMenuTrigger asChild>
++            <Button
++              type="button"
++              variant="ghost"
++              size="icon"
++              className="h-7 w-7 shrink-0 text-muted-foreground hover:text-primary"
++              disabled={busy}
++              aria-label={
++                target === "companion"
++                  ? "Действия с компаньоном"
++                  : "Действия со слотом"
++              }
++              aria-busy={busy}
++            >
++              <MoreHorizontal className="h-4 w-4" />
++            </Button>
++          </DropdownMenuTrigger>
++          <DropdownMenuContent
++            align="end"
++            className="min-w-[13rem] rounded-md border-border"
++          >
++            <DropdownMenuItem
++              disabled={busy}
++              className="focus:bg-background focus:text-primary"
++              onSelect={() => runAction(resuggestFormAction)}
++            >
++              {resuggestPending ? "Заменяем…" : "Заменить"}
++            </DropdownMenuItem>
++            {showReplaceAll ? (
++              <DropdownMenuItem
++                disabled={busy}
++                className="focus:bg-background focus:text-primary"
++                onSelect={() => runAction(resuggestAllFormAction)}
++              >
++                {resuggestAllPending ? "Заменяем…" : "Заменить все"}
++              </DropdownMenuItem>
++            ) : null}
++            {canClear ? (
++              <DropdownMenuItem
++                disabled={busy}
++                className="focus:bg-background focus:text-primary"
++                onSelect={() => runAction(clearFormAction)}
++              >
++                {clearPending ? "Убираем…" : "Убрать"}
++              </DropdownMenuItem>
++            ) : null}
++            {hasRecipe ? (
++              <DropdownMenuItem
++                disabled={busy}
++                className="text-warning-fg focus:bg-background focus:text-warning-fg"
++                onSelect={() => setRefuseOpen(true)}
++              >
++                Никогда не предлагать
++              </DropdownMenuItem>
++            ) : null}
++          </DropdownMenuContent>
++        </DropdownMenu>
++      </div>
++
++      <ActionError state={resuggestState} />
++      <ActionError state={resuggestAllState} />
++      <ActionError state={refuseState} />
++      <ActionError state={clearState} />
++
++      <CommentDialog
++        open={refuseOpen}
++        onOpenChange={setRefuseOpen}
++        title="Никогда не предлагать"
++        description="Блюдо уберём из этого меню и больше не будем предлагать. Напишите почему — генератор учтёт это дальше."
++        submitLabel="Убрать и заменить"
++        pending={refusePending}
++        error={refuseState && !refuseState.ok ? refuseState.error : null}
++        onSubmit={(comment) => {
++          runAction(refuseFormAction, { comment });
++        }}
++      />
++    </div>
++  );
++}
+diff --git a/src/components/menu/snack-slot-card.tsx b/src/components/menu/snack-slot-card.tsx
+new file mode 100644
+index 0000000..25d5b45
+--- /dev/null
++++ b/src/components/menu/snack-slot-card.tsx
+@@ -0,0 +1,185 @@
++"use client";
++
++import { MoreHorizontal } from "lucide-react";
++import { startTransition, useActionState, useEffect, useState } from "react";
++
++import { CommentDialog } from "@/components/feedback/comment-dialog";
++import { Button } from "@/components/ui/button";
++import {
++  DropdownMenu,
++  DropdownMenuContent,
++  DropdownMenuItem,
++  DropdownMenuTrigger,
++} from "@/components/ui/dropdown-menu";
++import { RecipeValueLine } from "@/components/recipes/recipe-value-line";
++import type { MenuSnackView } from "@/domain/menu/load-menu";
++import {
++  refuseSnackAction,
++  resuggestSnackAction,
++  suggestSnackForDayAction,
++  type SnackActionState,
++} from "@/domain/menu/snack-actions";
++import { formatSnackLabel } from "@/domain/suggestions/snack-pool";
++
++type SnackSlotCardProps = {
++  menuId: string;
++  dayIndex: number;
++  snack: MenuSnackView | null;
++  /** Scale price/KBJU like meal slots (people per meal). */
++  servings?: number;
++};
++
++function ActionError({ state }: { state: SnackActionState }) {
++  if (!state || state.ok) return null;
++  return (
++    <p className="mt-1 text-xs text-warning-fg" role="alert">
++      {state.error}
++    </p>
++  );
++}
++
++export function SnackSlotCard({
++  menuId,
++  dayIndex,
++  snack,
++  servings = 1,
++}: SnackSlotCardProps) {
++  const [refuseOpen, setRefuseOpen] = useState(false);
++  const [resuggestState, resuggestAction, resuggestPending] = useActionState<
++    SnackActionState,
++    FormData
++  >(resuggestSnackAction, null);
++  const [suggestState, suggestAction, suggestPending] = useActionState<
++    SnackActionState,
++    FormData
++  >(suggestSnackForDayAction, null);
++  const [refuseState, refuseAction, refusePending] = useActionState<
++    SnackActionState,
++    FormData
++  >(refuseSnackAction, null);
++
++  useEffect(() => {
++    if (refuseState?.ok) setRefuseOpen(false);
++  }, [refuseState]);
++
++  const busy = resuggestPending || suggestPending || refusePending;
++  const empty = !snack;
++
++  function runAction(
++    action: (payload: FormData) => void,
++    fields: Record<string, string>,
++  ) {
++    const fd = new FormData();
++    for (const [key, value] of Object.entries(fields)) {
++      fd.set(key, value);
++    }
++    startTransition(() => {
++      action(fd);
++    });
++  }
++
++  return (
++    <div
++      data-component="snack-slot"
++      data-empty={empty ? "true" : "false"}
++      className="relative min-h-14 rounded-md bg-empty-slot px-3.5 py-3"
++    >
++      <span className="sr-only">Перекус</span>
++
++      <div className="pr-8">
++        {empty ? (
++          <p className="text-sm text-slot-label">Пустой перекус</p>
++        ) : (
++          <>
++            <p className="text-sm font-semibold text-foreground">
++              {formatSnackLabel(snack.label)}
++            </p>
++            <RecipeValueLine value={snack.value} servings={servings} />
++          </>
++        )}
++      </div>
++
++      <div className="absolute right-2 top-2">
++        <DropdownMenu>
++          <DropdownMenuTrigger asChild>
++            <Button
++              type="button"
++              variant="ghost"
++              size="icon"
++              className="h-7 w-7 shrink-0 text-muted-foreground hover:text-primary"
++              disabled={busy}
++              aria-label="Действия со слотом"
++              aria-busy={busy}
++            >
++              <MoreHorizontal className="h-4 w-4" />
++            </Button>
++          </DropdownMenuTrigger>
++          <DropdownMenuContent
++            align="end"
++            className="min-w-[13rem] rounded-md border-border"
++          >
++            {empty ? (
++              <DropdownMenuItem
++                disabled={busy}
++                className="focus:bg-background focus:text-primary"
++                onSelect={() =>
++                  runAction(suggestAction, {
++                    menuId,
++                    dayIndex: String(dayIndex),
++                  })
++                }
++              >
++                {suggestPending ? "Подбираем…" : "Предложить"}
++              </DropdownMenuItem>
++            ) : (
++              <>
++                <DropdownMenuItem
++                  disabled={busy}
++                  className="focus:bg-background focus:text-primary"
++                  onSelect={() =>
++                    runAction(resuggestAction, {
++                      menuId,
++                      snackId: snack.id,
++                    })
++                  }
++                >
++                  {resuggestPending ? "Заменяем…" : "Заменить"}
++                </DropdownMenuItem>
++                <DropdownMenuItem
++                  disabled={busy}
++                  className="text-warning-fg focus:bg-background focus:text-warning-fg"
++                  onSelect={() => setRefuseOpen(true)}
++                >
++                  Никогда не предлагать
++                </DropdownMenuItem>
++              </>
++            )}
++          </DropdownMenuContent>
++        </DropdownMenu>
++      </div>
++
++      <ActionError state={resuggestState} />
++      <ActionError state={suggestState} />
++      <ActionError state={refuseState} />
++
++      {snack ? (
++        <CommentDialog
++          open={refuseOpen}
++          onOpenChange={setRefuseOpen}
++          title="Никогда не предлагать"
++          description="Перекус уберём из этого меню и больше не будем предлагать. Напишите почему — генератор учтёт это дальше."
++          submitLabel="Убрать и заменить"
++          pending={refusePending}
++          error={refuseState && !refuseState.ok ? refuseState.error : null}
++          onSubmit={(comment) => {
++            runAction(refuseAction, {
++              menuId,
++              snackId: snack.id,
++              comment,
++            });
++          }}
++        />
++      ) : null}
++    </div>
++  );
++}
+diff --git a/src/components/next-logo.tsx b/src/components/next-logo.tsx
+deleted file mode 100644
+index 7b04400..0000000
+--- a/src/components/next-logo.tsx
++++ /dev/null
+@@ -1,46 +0,0 @@
+-export function NextLogo() {
+-  return (
+-    <svg
+-      aria-label="Next.js logotype"
+-      height="68"
+-      role="img"
+-      viewBox="0 0 394 79"
+-      width="100"
+-    >
+-      <path
+-        d="M261.919 0.0330722H330.547V12.7H303.323V79.339H289.71V12.7H261.919V0.0330722Z"
+-        fill="currentColor"
+-      />
+-      <path
+-        d="M149.052 0.0330722V12.7H94.0421V33.0772H138.281V45.7441H94.0421V66.6721H149.052V79.339H80.43V12.7H80.4243V0.0330722H149.052Z"
+-        fill="currentColor"
+-      />
+-      <path
+-        d="M183.32 0.0661486H165.506L229.312 79.3721H247.178L215.271 39.7464L247.127 0.126654L229.312 0.154184L206.352 28.6697L183.32 0.0661486Z"
+-        fill="currentColor"
+-      />
+-      <path
+-        d="M201.6 56.7148L192.679 45.6229L165.455 79.4326H183.32L201.6 56.7148Z"
+-        fill="currentColor"
+-      />
+-      <path
+-        clipRule="evenodd"
+-        d="M80.907 79.339L17.0151 0H0V79.3059H13.6121V16.9516L63.8067 79.339H80.907Z"
+-        fill="currentColor"
+-        fillRule="evenodd"
+-      />
+-      <path
+-        d="M333.607 78.8546C332.61 78.8546 331.762 78.5093 331.052 77.8186C330.342 77.1279 329.991 76.2917 330 75.3011C329.991 74.3377 330.342 73.5106 331.052 72.8199C331.762 72.1292 332.61 71.7838 333.607 71.7838C334.566 71.7838 335.405 72.1292 336.115 72.8199C336.835 73.5106 337.194 74.3377 337.204 75.3011C337.194 75.9554 337.028 76.5552 336.696 77.0914C336.355 77.6368 335.922 78.064 335.377 78.373C334.842 78.6911 334.252 78.8546 333.607 78.8546Z"
+-        fill="currentColor"
+-      />
+-      <path
+-        d="M356.84 45.4453H362.872V68.6846C362.863 70.8204 362.401 72.6472 361.498 74.1832C360.585 75.7191 359.321 76.8914 357.698 77.7185C356.084 78.5364 354.193 78.9546 352.044 78.9546C350.079 78.9546 348.318 78.6001 346.75 77.9094C345.182 77.2187 343.937 76.1826 343.024 74.8193C342.101 73.456 341.649 71.7565 341.649 69.7207H347.691C347.7 70.6114 347.903 71.3838 348.29 72.0291C348.677 72.6744 349.212 73.1651 349.895 73.5105C350.586 73.8559 351.38 74.0286 352.274 74.0286C353.243 74.0286 354.073 73.8286 354.746 73.4196C355.419 73.0197 355.936 72.4199 356.296 71.6201C356.646 70.8295 356.831 69.8479 356.84 68.6846V45.4453Z"
+-        fill="currentColor"
+-      />
+-      <path
+-        d="M387.691 54.5338C387.544 53.1251 386.898 52.0254 385.773 51.2438C384.638 50.4531 383.172 50.0623 381.373 50.0623C380.11 50.0623 379.022 50.2532 378.118 50.6258C377.214 51.0075 376.513 51.5164 376.033 52.1617C375.554 52.807 375.314 53.5432 375.295 54.3703C375.295 55.061 375.461 55.6608 375.784 56.1607C376.107 56.6696 376.54 57.0968 377.103 57.4422C377.656 57.7966 378.274 58.0874 378.948 58.3237C379.63 58.56 380.313 58.76 380.995 58.9236L384.14 59.6961C385.404 59.9869 386.631 60.3778 387.802 60.8776C388.973 61.3684 390.034 61.9955 390.965 62.7498C391.897 63.5042 392.635 64.413 393.179 65.4764C393.723 66.5397 394 67.7848 394 69.2208C394 71.1566 393.502 72.8562 392.496 74.3285C391.491 75.7917 390.043 76.9369 388.143 77.764C386.252 78.582 383.965 79 381.272 79C378.671 79 376.402 78.6002 374.493 77.8004C372.575 77.0097 371.08 75.8463 370.001 74.3194C368.922 72.7926 368.341 70.9294 368.258 68.7391H374.235C374.318 69.8842 374.687 70.8386 375.314 71.6111C375.95 72.3745 376.78 72.938 377.795 73.3197C378.819 73.6923 379.962 73.8832 381.226 73.8832C382.545 73.8832 383.707 73.6832 384.712 73.2924C385.708 72.9016 386.492 72.3564 387.055 71.6475C387.627 70.9476 387.913 70.1206 387.922 69.1754C387.913 68.312 387.654 67.5939 387.156 67.0304C386.649 66.467 385.948 65.9944 385.053 65.6127C384.15 65.231 383.098 64.8856 381.899 64.5857L378.081 63.6223C375.323 62.9225 373.137 61.8592 371.541 60.4323C369.937 59.0054 369.143 57.115 369.143 54.7429C369.143 52.798 369.678 51.0894 370.758 49.6261C371.827 48.1629 373.294 47.0268 375.148 46.2179C377.011 45.4 379.114 45 381.456 45C383.836 45 385.92 45.4 387.719 46.2179C389.517 47.0268 390.929 48.1538 391.952 49.5897C392.976 51.0257 393.511 52.6707 393.539 54.5338H387.691Z"
+-        fill="currentColor"
+-      />
+-    </svg>
+-  );
+-}
+diff --git a/src/components/recipes/recipe-text-panel.tsx b/src/components/recipes/recipe-text-panel.tsx
+new file mode 100644
+index 0000000..7cd7e79
+--- /dev/null
++++ b/src/components/recipes/recipe-text-panel.tsx
+@@ -0,0 +1,144 @@
++"use client";
++
++import {
++  Dialog,
++  DialogContent,
++  DialogHeader,
++  DialogTitle,
++  DialogTrigger,
++} from "@/components/ui/dialog";
++import { RecipeValueDetail } from "@/components/recipes/recipe-value-line";
++import {
++  formatRecipeYieldLabel,
++  splitRecipeSteps,
++} from "@/domain/recipes/format-body";
++import type { RecipeIngredientView } from "@/domain/recipes/load-recipe";
++import {
++  EMPTY_PER_SERVING,
++  type RecipePerServingValue,
++} from "@/domain/recipes/scale-totals";
++import { formatLineLabel } from "@/domain/shopping/quantity";
++
++type RecipeTextPanelProps = {
++  recipeId: string;
++  recipeName: string;
++  bodyText: string;
++  ingredients?: RecipeIngredientView[];
++  value?: RecipePerServingValue;
++  /**
++   * Total cook yield = sum of slot servings for this recipe on the menu
++   * (people × meal occurrences / days). Defaults to 1.
++   */
++  totalServings?: number;
++  /** People per meal; used in the yield subtitle. */
++  peoplePerMeal?: number;
++  /** Distinct days this recipe appears; used in the yield subtitle. */
++  dayCount?: number;
++  triggerClassName?: string;
++};
++
++export function RecipeTextPanel({
++  recipeName,
++  bodyText,
++  ingredients = [],
++  value = EMPTY_PER_SERVING,
++  totalServings = 1,
++  peoplePerMeal = 1,
++  dayCount = 1,
++  triggerClassName,
++}: RecipeTextPanelProps) {
++  const hasBody = bodyText.trim().length > 0;
++  const steps = hasBody ? splitRecipeSteps(bodyText) : [];
++  const portionCount =
++    Number.isFinite(totalServings) && totalServings >= 1
++      ? Math.trunc(totalServings)
++      : 1;
++  const people =
++    Number.isFinite(peoplePerMeal) && peoplePerMeal >= 1
++      ? Math.trunc(peoplePerMeal)
++      : 1;
++  const days =
++    Number.isFinite(dayCount) && dayCount >= 1 ? Math.trunc(dayCount) : 1;
++
++  return (
++    <Dialog>
++      <DialogTrigger asChild>
++        <button
++          type="button"
++          data-component="recipe-text-trigger"
++          className={
++            triggerClassName ??
++            "text-left text-sm font-medium text-primary underline-offset-4 hover:underline"
++          }
++        >
++          {recipeName}
++        </button>
++      </DialogTrigger>
++      <DialogContent
++        data-component="recipe-text-panel"
++        className="w-[min(100%,32rem)]"
++      >
++        <DialogHeader>
++          <DialogTitle>{recipeName}</DialogTitle>
++          <p className="text-sm text-muted-foreground">
++            {formatRecipeYieldLabel({
++              totalServings: portionCount,
++              peoplePerMeal: people,
++              dayCount: days,
++            })}
++          </p>
++          <RecipeValueDetail value={value} totalServings={portionCount} />
++        </DialogHeader>
++
++        <div className="max-h-[60vh] space-y-5 overflow-y-auto text-sm leading-relaxed text-foreground">
++          {ingredients.length > 0 ? (
++            <section>
++              <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.04em] text-accent">
++                Ингредиенты
++              </h3>
++              <ul className="space-y-1.5">
++                {ingredients.map((ing) => {
++                  const amount =
++                    ing.amountPerServing != null
++                      ? ing.amountPerServing * portionCount
++                      : null;
++                  return (
++                    <li key={`${ing.kind}-${ing.name}`} className="flex gap-2">
++                      <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-muted-foreground" />
++                      <span>
++                        {formatLineLabel(ing.name, amount, ing.unit)}
++                      </span>
++                    </li>
++                  );
++                })}
++              </ul>
++            </section>
++          ) : null}
++
++          <section>
++            {ingredients.length > 0 ? (
++              <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.04em] text-accent">
++                Приготовление
++              </h3>
++            ) : null}
++            {steps.length > 0 ? (
++              <ol className="list-decimal space-y-2.5 pl-5 marker:text-muted-foreground">
++                {steps.map((step, index) => (
++                  <li key={index} className="pl-1">
++                    {step}
++                  </li>
++                ))}
++              </ol>
++            ) : (
++              <p className="text-muted-foreground">
++                Текст рецепта пока не заполнен.
++              </p>
++            )}
++          </section>
++        </div>
++
++        <p className="text-xs text-muted-foreground">Esc — закрыть.</p>
++      </DialogContent>
++    </Dialog>
++  );
++}
+diff --git a/src/components/recipes/recipe-value-line.tsx b/src/components/recipes/recipe-value-line.tsx
+new file mode 100644
+index 0000000..e1623d5
+--- /dev/null
++++ b/src/components/recipes/recipe-value-line.tsx
+@@ -0,0 +1,107 @@
++import {
++  formatCompactValueLine,
++  formatKbjuLine,
++  formatPriceRub,
++  scalePerServing,
++  type RecipePerServingValue,
++  type ScaledRecipeTotals,
++} from "@/domain/recipes/scale-totals";
++
++type RecipeValueLineProps = {
++  value: RecipePerServingValue;
++  /** Scale factor (slot servings or batch totalServings). Default 1 = per serving. */
++  servings?: number;
++  className?: string;
++};
++
++/** Compact «360 ₽ · 900 ккал» for slot / list rows. */
++export function RecipeValueLine({
++  value,
++  servings = 1,
++  className = "text-xs tabular-nums text-muted-foreground",
++}: RecipeValueLineProps) {
++  const totals = scalePerServing(value, servings);
++  const line = formatCompactValueLine(totals);
++  if (!line) return null;
++  return <p className={className}>{line}</p>;
++}
++
++type RecipeValueDetailProps = {
++  value: RecipePerServingValue;
++  totalServings: number;
++};
++
++/** Yield-adjacent detail: per-serving + batch price/KBJU. */
++export function RecipeValueDetail({
++  value,
++  totalServings,
++}: RecipeValueDetailProps) {
++  const perServing = scalePerServing(value, 1);
++  const batch = scalePerServing(value, totalServings);
++  const pricePer = formatPriceRub(perServing.priceCents);
++  const priceBatch = formatPriceRub(batch.priceCents);
++  const kbjuPer = formatKbjuLine(perServing);
++  const kbjuBatch = formatKbjuLine(batch);
++
++  const priceLine =
++    pricePer && priceBatch && totalServings > 1
++      ? `${pricePer} на порцию · ${priceBatch} на ${totalServings}`
++      : pricePer
++        ? `${pricePer} на порцию`
++        : null;
++
++  if (!priceLine && !kbjuPer) return null;
++
++  return (
++    <div className="space-y-1 text-sm text-muted-foreground">
++      {priceLine ? <p className="tabular-nums">{priceLine}</p> : null}
++      {kbjuPer ? (
++        <div>
++          <p className="mb-1 text-xs font-semibold uppercase tracking-[0.04em] text-accent">
++            КБЖУ
++          </p>
++          <p className="tabular-nums">
++            {kbjuPer}
++            {kbjuBatch && totalServings > 1
++              ? ` · на ${totalServings}: ${kbjuBatch}`
++              : ""}
++          </p>
++        </div>
++      ) : null}
++    </div>
++  );
++}
++
++type MenuTotalsBarProps = {
++  totals: ScaledRecipeTotals;
++  className?: string;
++};
++
++/** Menu-level total block; hidden when nothing known. */
++export function MenuTotalsBar({
++  totals,
++  className = "mt-6 max-w-xl",
++}: MenuTotalsBarProps) {
++  const price = formatPriceRub(totals.priceCents);
++  const kbju = formatKbjuLine(totals);
++  if (!price && !kbju) return null;
++
++  return (
++    <section
++      data-component="menu-totals"
++      className={className}
++      aria-labelledby="menu-totals-title"
++    >
++      <h2
++        id="menu-totals-title"
++        className="text-sm font-semibold text-foreground"
++      >
++        Итого по меню
++      </h2>
++      <div className="mt-2 space-y-1 text-sm tabular-nums text-muted-foreground">
++        {price ? <p>{price}</p> : null}
++        {kbju ? <p>{kbju}</p> : null}
++      </div>
++    </section>
++  );
++}
+diff --git a/src/components/settings/taste-preferences-panel.tsx b/src/components/settings/taste-preferences-panel.tsx
+new file mode 100644
+index 0000000..ece8102
+--- /dev/null
++++ b/src/components/settings/taste-preferences-panel.tsx
+@@ -0,0 +1,187 @@
++"use client";
++
++import { useActionState, useEffect, useRef, useState } from "react";
++
++import { Button } from "@/components/ui/button";
++import {
++  MAX_FEEDBACK_COMMENT_LENGTH,
++  MIN_FEEDBACK_COMMENT_LENGTH,
++} from "@/domain/history/constants";
++import {
++  addTastePreferenceAction,
++  deleteTastePreferenceAction,
++  type TastePreferenceActionState,
++} from "@/domain/settings/taste-preference-actions";
++import {
++  TASTE_PREFERENCE_KIND_LABELS_RU,
++  type TastePreference,
++  type TastePreferenceKind,
++} from "@/domain/settings/taste-preferences";
++
++type TastePreferencesPanelProps = {
++  items: TastePreference[];
++};
++
++export function TastePreferencesPanel({ items }: TastePreferencesPanelProps) {
++  const [kind, setKind] = useState<TastePreferenceKind>("ban");
++  const formRef = useRef<HTMLFormElement>(null);
++
++  const [addState, addAction, addPending] = useActionState<
++    TastePreferenceActionState,
++    FormData
++  >(addTastePreferenceAction, null);
++
++  useEffect(() => {
++    if (addState?.ok) {
++      formRef.current?.reset();
++      setKind("ban");
++    }
++  }, [addState]);
++
++  return (
++    <section
++      className="rounded-lg border border-border bg-surface px-5 py-5"
++      data-component="taste-preferences"
++    >
++      <h2 className="text-base font-semibold text-foreground">
++        Пожелания и запреты
++      </h2>
++      <p className="mt-1 text-sm text-muted-foreground">
++        Учитываются при генерации меню. Запрет — жёстко не предлагать;
++        пожелание — предпочитать, когда можно.
++      </p>
++
++      <form
++        ref={formRef}
++        action={addAction}
++        className="mt-4 space-y-3"
++      >
++        <div className="flex gap-2">
++          <KindToggle kind={kind} onChange={setKind} />
++          <input type="hidden" name="kind" value={kind} />
++        </div>
++        <label className="block text-[11px] font-semibold uppercase tracking-[0.04em] text-slot-label">
++          Текст
++        </label>
++        <textarea
++          name="body"
++          rows={2}
++          maxLength={MAX_FEEDBACK_COMMENT_LENGTH}
++          placeholder={
++            kind === "ban"
++              ? "Например: без гречки и капусты"
++              : "Например: чаще рыбу на ужин"
++          }
++          disabled={addPending}
++          className="flex min-h-[64px] w-full rounded-sm border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
++        />
++        <p className="text-xs text-muted-foreground">
++          Минимум {MIN_FEEDBACK_COMMENT_LENGTH} символа.
++        </p>
++        {addState && !addState.ok ? (
++          <p className="text-xs text-warning-fg" role="alert">
++            {addState.error}
++          </p>
++        ) : null}
++        <div className="flex justify-end">
++          <Button
++            type="submit"
++            className="rounded-sm"
++            disabled={addPending}
++            aria-busy={addPending}
++          >
++            {addPending ? "Сохраняем…" : "Добавить"}
++          </Button>
++        </div>
++      </form>
++
++      {items.length === 0 ? (
++        <p className="mt-5 text-sm text-muted-foreground">
++          Пока пусто — добавьте запрет или пожелание выше.
++        </p>
++      ) : (
++        <ul className="mt-5 divide-y divide-border border-t border-border">
++          {items.map((item) => (
++            <PreferenceRow key={item.id} item={item} />
++          ))}
++        </ul>
++      )}
++    </section>
++  );
++}
++
++function KindToggle({
++  kind,
++  onChange,
++}: {
++  kind: TastePreferenceKind;
++  onChange: (kind: TastePreferenceKind) => void;
++}) {
++  return (
++    <div
++      className="inline-flex rounded-sm border border-border bg-background p-0.5"
++      role="group"
++      aria-label="Тип записи"
++    >
++      {(["ban", "wish"] as const).map((value) => {
++        const active = kind === value;
++        return (
++          <button
++            key={value}
++            type="button"
++            onClick={() => onChange(value)}
++            className={
++              active
++                ? "rounded-sm bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground"
++                : "rounded-sm px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
++            }
++          >
++            {TASTE_PREFERENCE_KIND_LABELS_RU[value]}
++          </button>
++        );
++      })}
++    </div>
++  );
++}
++
++function PreferenceRow({ item }: { item: TastePreference }) {
++  const [state, action, pending] = useActionState<
++    TastePreferenceActionState,
++    FormData
++  >(deleteTastePreferenceAction, null);
++
++  return (
++    <li className="flex items-start justify-between gap-3 py-3">
++      <div className="min-w-0">
++        <span
++          className={
++            item.kind === "ban"
++              ? "inline-block text-[11px] font-semibold uppercase tracking-[0.04em] text-warning-fg"
++              : "inline-block text-[11px] font-semibold uppercase tracking-[0.04em] text-secondary-foreground"
++          }
++        >
++          {TASTE_PREFERENCE_KIND_LABELS_RU[item.kind]}
++        </span>
++        <p className="mt-0.5 text-sm text-foreground">{item.body}</p>
++        {state && !state.ok ? (
++          <p className="mt-1 text-xs text-warning-fg" role="alert">
++            {state.error}
++          </p>
++        ) : null}
++      </div>
++      <form action={action}>
++        <input type="hidden" name="id" value={item.id} />
++        <Button
++          type="submit"
++          variant="ghost"
++          size="sm"
++          className="shrink-0 rounded-sm text-muted-foreground"
++          disabled={pending}
++          aria-busy={pending}
++        >
++          {pending ? "…" : "Удалить"}
++        </Button>
++      </form>
++    </li>
++  );
++}
+diff --git a/src/components/shopping/shopping-list-view.tsx b/src/components/shopping/shopping-list-view.tsx
+new file mode 100644
+index 0000000..fd45bd9
+--- /dev/null
++++ b/src/components/shopping/shopping-list-view.tsx
+@@ -0,0 +1,100 @@
++"use client";
++
++import { useState } from "react";
++
++import { Button } from "@/components/ui/button";
++import type { ShoppingListView } from "@/domain/shopping/build-list";
++import { formatShoppingListCopy } from "@/domain/shopping/build-list";
++
++type ShoppingListViewProps = {
++  list: ShoppingListView;
++};
++
++const KIND_LABEL: Record<ShoppingListView["lines"][number]["lineKind"], string> =
++{
++  ingredient: "Блюда",
++  pantry: "Базовые продукты",
++  snack: "Snacks",
++};
++
++export function ShoppingListClient({ list }: ShoppingListViewProps) {
++  const [copied, setCopied] = useState(false);
++
++  async function onCopy() {
++    const text = formatShoppingListCopy(list);
++    try {
++      await navigator.clipboard.writeText(text);
++      setCopied(true);
++      window.setTimeout(() => setCopied(false), 2500);
++    } catch {
++      setCopied(false);
++    }
++  }
++
++  const byKind = {
++    ingredient: list.lines.filter((l) => l.lineKind === "ingredient"),
++    pantry: list.lines.filter((l) => l.lineKind === "pantry"),
++    snack: list.lines.filter((l) => l.lineKind === "snack"),
++  };
++
++  return (
++    <div className="max-w-xl">
++      <div className="flex flex-wrap items-center gap-3">
++        <Button
++          type="button"
++          data-component="shopping-list-cta"
++          className="rounded-sm"
++          onClick={() => void onCopy()}
++        >
++          Копировать список
++        </Button>
++      </div>
++
++      {copied ? (
++        <p className="mt-3 text-sm text-primary" role="status">
++          Список скопирован.
++        </p>
++      ) : null}
++
++      {list.lines.length === 0 ? (
++        <p className="mt-6 text-sm text-muted-foreground">
++          Список пуст — добавьте блюда или Snacks в меню.
++        </p>
++      ) : (
++        <div className="mt-6 space-y-5">
++          {(["ingredient", "pantry", "snack"] as const).map((kind) => {
++            const lines = byKind[kind];
++            if (lines.length === 0) return null;
++            return (
++              <section key={kind}>
++                <h2 className="text-sm font-semibold text-accent">
++                  {KIND_LABEL[kind]}
++                </h2>
++                {kind === "pantry" ? (
++                  <p className="mt-1 text-xs text-muted-foreground">
++                    Базовые продукты — отфильтруйте при покупке при необходимости.
++                  </p>
++                ) : null}
++                <ul className="mt-2 space-y-1.5">
++                  {lines.map((line) => (
++                    <li
++                      key={line.id}
++                      className="flex items-baseline justify-between gap-4 text-sm text-foreground"
++                    >
++                      <span>{line.ingredientName}</span>
++                      {line.quantityLabel ? (
++                        <span className="shrink-0 tabular-nums text-muted-foreground">
++                          {line.quantityLabel}
++                        </span>
++                      ) : null}
++                    </li>
++                  ))}
++                </ul>
++              </section>
++            );
++          })}
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/src/components/sign-up-form.tsx b/src/components/sign-up-form.tsx
+deleted file mode 100644
+index 6c4b369..0000000
+--- a/src/components/sign-up-form.tsx
++++ /dev/null
+@@ -1,120 +0,0 @@
+-"use client";
+-
+-import { cn } from "@/lib/utils";
+-import { createClient } from "@/lib/supabase/client";
+-import { Button } from "@/components/ui/button";
+-import {
+-  Card,
+-  CardContent,
+-  CardDescription,
+-  CardHeader,
+-  CardTitle,
+-} from "@/components/ui/card";
+-import { Input } from "@/components/ui/input";
+-import { Label } from "@/components/ui/label";
+-import Link from "next/link";
+-import { useRouter } from "next/navigation";
+-import { useState } from "react";
+-
+-export function SignUpForm({
+-  className,
+-  ...props
+-}: React.ComponentPropsWithoutRef<"div">) {
+-  const [email, setEmail] = useState("");
+-  const [password, setPassword] = useState("");
+-  const [repeatPassword, setRepeatPassword] = useState("");
+-  const [error, setError] = useState<string | null>(null);
+-  const [isLoading, setIsLoading] = useState(false);
+-  const router = useRouter();
+-
+-  const handleSignUp = async (e: React.FormEvent) => {
+-    e.preventDefault();
+-    const supabase = createClient();
+-    setIsLoading(true);
+-    setError(null);
+-
+-    if (password !== repeatPassword) {
+-      setError("Passwords do not match");
+-      setIsLoading(false);
+-      return;
+-    }
+-
+-    try {
+-      const { error } = await supabase.auth.signUp({
+-        email,
+-        password,
+-        options: {
+-          emailRedirectTo: `${window.location.origin}/protected`,
+-        },
+-      });
+-      if (error) throw error;
+-      router.push("/auth/sign-up-success");
+-    } catch (error: unknown) {
+-      setError(error instanceof Error ? error.message : "An error occurred");
+-    } finally {
+-      setIsLoading(false);
+-    }
+-  };
+-
+-  return (
+-    <div className={cn("flex flex-col gap-6", className)} {...props}>
+-      <Card>
+-        <CardHeader>
+-          <CardTitle className="text-2xl">Sign up</CardTitle>
+-          <CardDescription>Create a new account</CardDescription>
+-        </CardHeader>
+-        <CardContent>
+-          <form onSubmit={handleSignUp}>
+-            <div className="flex flex-col gap-6">
+-              <div className="grid gap-2">
+-                <Label htmlFor="email">Email</Label>
+-                <Input
+-                  id="email"
+-                  type="email"
+-                  placeholder="m@example.com"
+-                  required
+-                  value={email}
+-                  onChange={(e) => setEmail(e.target.value)}
+-                />
+-              </div>
+-              <div className="grid gap-2">
+-                <div className="flex items-center">
+-                  <Label htmlFor="password">Password</Label>
+-                </div>
+-                <Input
+-                  id="password"
+-                  type="password"
+-                  required
+-                  value={password}
+-                  onChange={(e) => setPassword(e.target.value)}
+-                />
+-              </div>
+-              <div className="grid gap-2">
+-                <div className="flex items-center">
+-                  <Label htmlFor="repeat-password">Repeat Password</Label>
+-                </div>
+-                <Input
+-                  id="repeat-password"
+-                  type="password"
+-                  required
+-                  value={repeatPassword}
+-                  onChange={(e) => setRepeatPassword(e.target.value)}
+-                />
+-              </div>
+-              {error && <p className="text-sm text-red-500">{error}</p>}
+-              <Button type="submit" className="w-full" disabled={isLoading}>
+-                {isLoading ? "Creating an account..." : "Sign up"}
+-              </Button>
+-            </div>
+-            <div className="mt-4 text-center text-sm">
+-              Already have an account?{" "}
+-              <Link href="/auth/login" className="underline underline-offset-4">
+-                Login
+-              </Link>
+-            </div>
+-          </form>
+-        </CardContent>
+-      </Card>
+-    </div>
+-  );
+-}
+diff --git a/src/components/supabase-logo.tsx b/src/components/supabase-logo.tsx
+deleted file mode 100644
+index d3461aa..0000000
+--- a/src/components/supabase-logo.tsx
++++ /dev/null
+@@ -1,102 +0,0 @@
+-export function SupabaseLogo() {
+-  return (
+-    <svg
+-      aria-label="Supabase logo"
+-      width="140"
+-      height="30"
+-      viewBox="0 0 115 23"
+-      fill="none"
+-      xmlns="http://www.w3.org/2000/svg"
+-    >
+-      <g clipPath="url(#clip0_4671_51136)">
+-        <g clipPath="url(#clip1_4671_51136)">
+-          <path
+-            d="M13.4028 21.8652C12.8424 22.5629 11.7063 22.1806 11.6928 21.2898L11.4954 8.25948H20.3564C21.9614 8.25948 22.8565 10.0924 21.8585 11.3353L13.4028 21.8652Z"
+-            fill="url(#paint0_linear_4671_51136)"
+-          />
+-          <path
+-            d="M13.4028 21.8652C12.8424 22.5629 11.7063 22.1806 11.6928 21.2898L11.4954 8.25948H20.3564C21.9614 8.25948 22.8565 10.0924 21.8585 11.3353L13.4028 21.8652Z"
+-            fill="url(#paint1_linear_4671_51136)"
+-            fillOpacity="0.2"
+-          />
+-          <path
+-            d="M9.79895 0.89838C10.3593 0.200591 11.4954 0.582929 11.5089 1.47383L11.5955 14.5041H2.84528C1.24026 14.5041 0.345103 12.6711 1.34316 11.4283L9.79895 0.89838Z"
+-            fill="#3ECF8E"
+-          />
+-        </g>
+-        <path
+-          d="M30.5894 13.3913C30.7068 14.4766 31.7052 16.3371 34.6026 16.3371C37.1279 16.3371 38.3418 14.7479 38.3418 13.1976C38.3418 11.8022 37.3824 10.6588 35.4836 10.2712L34.1131 9.98049C33.5846 9.88359 33.2323 9.5929 33.2323 9.12777C33.2323 8.58512 33.7804 8.17818 34.4656 8.17818C35.5618 8.17818 35.9729 8.89521 36.0513 9.45725L38.2243 8.97275C38.1069 7.94561 37.1867 6.22083 34.446 6.22083C32.3709 6.22083 30.844 7.63555 30.844 9.34094C30.844 10.6781 31.6856 11.7828 33.5454 12.1898L34.8179 12.4805C35.5618 12.6355 35.8555 12.9844 35.8555 13.4107C35.8555 13.9146 35.4444 14.3603 34.583 14.3603C33.4476 14.3603 32.8797 13.6626 32.8212 12.9068L30.5894 13.3913Z"
+-          fill="currentColor"
+-        />
+-        <path
+-          d="M46.6623 16.0464H49.1486C49.1094 15.717 49.0506 15.0581 49.0506 14.3216V6.51154H46.4468V12.0542C46.4468 13.1588 45.7813 13.934 44.6263 13.934C43.4126 13.934 42.8643 13.0813 42.8643 12.0154V6.51154H40.2606V12.5387C40.2606 14.6123 41.5918 16.2984 43.9215 16.2984C44.9393 16.2984 46.0556 15.9108 46.5841 15.0193C46.5841 15.4069 46.6231 15.8526 46.6623 16.0464Z"
+-          fill="currentColor"
+-        />
+-        <path
+-          d="M54.433 19.7286V15.1162C54.9027 15.7558 55.8817 16.279 57.213 16.279C59.9341 16.279 61.7545 14.1472 61.7545 11.2596C61.7545 8.43021 60.1298 6.29842 57.3108 6.29842C55.8623 6.29842 54.7855 6.93792 54.3548 7.67439V6.51159H51.8295V19.7286H54.433ZM59.19 11.279C59.19 12.9845 58.133 13.9728 56.8017 13.9728C55.4708 13.9728 54.394 12.9651 54.394 11.279C54.394 9.59299 55.4708 8.6046 56.8017 8.6046C58.133 8.6046 59.19 9.59299 59.19 11.279Z"
+-          fill="currentColor"
+-        />
+-        <path
+-          d="M63.229 13.4495C63.229 14.9417 64.4818 16.3177 66.5375 16.3177C67.9662 16.3177 68.8865 15.6588 69.3758 14.9029C69.3758 15.2712 69.4149 15.7944 69.4737 16.0464H71.862C71.8033 15.7169 71.7449 15.0386 71.7449 14.5348V9.84482C71.7449 7.92622 70.6093 6.22083 67.5555 6.22083C64.9713 6.22083 63.5811 7.86807 63.4248 9.36033L65.7347 9.84482C65.8131 9.0115 66.4395 8.29445 67.5747 8.29445C68.6713 8.29445 69.1998 8.85646 69.1998 9.53475C69.1998 9.86421 69.0238 10.1355 68.4755 10.2131L66.1068 10.5619C64.5015 10.7945 63.229 11.744 63.229 13.4495ZM67.0854 14.3991C66.2438 14.3991 65.8325 13.8565 65.8325 13.2945C65.8325 12.558 66.361 12.1898 67.0268 12.0929L69.1998 11.7634V12.1898C69.1998 13.8759 68.1818 14.3991 67.0854 14.3991Z"
+-          fill="currentColor"
+-        />
+-        <path
+-          d="M76.895 16.0465V14.8837C77.4038 15.6976 78.4217 16.279 79.7531 16.279C82.4941 16.279 84.2951 14.1278 84.2951 11.2403C84.2951 8.4108 82.6701 6.25965 79.851 6.25965C78.4217 6.25965 77.3648 6.8798 76.934 7.55806V2.01546H74.3696V16.0465H76.895ZM81.6911 11.2596C81.6911 13.0038 80.6341 13.9728 79.3028 13.9728C77.9912 13.9728 76.895 12.9845 76.895 11.2596C76.895 9.51543 77.9912 8.56584 79.3028 8.56584C80.6341 8.56584 81.6911 9.51543 81.6911 11.2596Z"
+-          fill="currentColor"
+-        />
+-        <path
+-          d="M85.7692 13.4495C85.7692 14.9417 87.022 16.3177 89.0776 16.3177C90.5065 16.3177 91.4269 15.6588 91.916 14.9029C91.916 15.2712 91.9554 15.7944 92.014 16.0464H94.4023C94.3439 15.7169 94.2851 15.0386 94.2851 14.5348V9.84482C94.2851 7.92622 93.1495 6.22083 90.0955 6.22083C87.5115 6.22083 86.1216 7.86807 85.965 9.36033L88.2747 9.84482C88.3533 9.0115 88.9798 8.29445 90.1149 8.29445C91.2115 8.29445 91.74 8.85646 91.74 9.53475C91.74 9.86421 91.5638 10.1355 91.0156 10.2131L88.647 10.5619C87.0418 10.7945 85.7692 11.744 85.7692 13.4495ZM89.6258 14.3991C88.784 14.3991 88.3727 13.8565 88.3727 13.2945C88.3727 12.558 88.9012 12.1898 89.5671 12.0929L91.74 11.7634V12.1898C91.74 13.8759 90.722 14.3991 89.6258 14.3991Z"
+-          fill="currentColor"
+-        />
+-        <path
+-          d="M96.087 13.3913C96.2042 14.4766 97.2028 16.3371 100.1 16.3371C102.626 16.3371 103.839 14.7479 103.839 13.1976C103.839 11.8022 102.88 10.6588 100.981 10.2712L99.6105 9.98049C99.082 9.88359 98.7299 9.5929 98.7299 9.12777C98.7299 8.58512 99.2778 8.17818 99.963 8.17818C101.06 8.17818 101.471 8.89521 101.549 9.45725L103.722 8.97275C103.604 7.94561 102.684 6.22083 99.9436 6.22083C97.8683 6.22083 96.3416 7.63555 96.3416 9.34094C96.3416 10.6781 97.183 11.7828 99.043 12.1898L100.316 12.4805C101.06 12.6355 101.353 12.9844 101.353 13.4107C101.353 13.9146 100.942 14.3603 100.081 14.3603C98.9451 14.3603 98.3776 13.6626 98.3188 12.9068L96.087 13.3913Z"
+-          fill="currentColor"
+-        />
+-        <path
+-          d="M107.794 10.1937C107.852 9.32158 108.596 8.31381 109.947 8.31381C111.435 8.31381 112.062 9.24406 112.101 10.1937H107.794ZM112.355 12.6743C112.042 13.527 111.376 14.1278 110.163 14.1278C108.87 14.1278 107.794 13.2169 107.735 11.9573H114.626C114.626 11.9184 114.665 11.5309 114.665 11.1626C114.665 8.10064 112.884 6.22083 109.908 6.22083C107.441 6.22083 105.17 8.19753 105.17 11.2402C105.17 14.4572 107.5 16.3371 110.143 16.3371C112.512 16.3371 114.039 14.9611 114.528 13.3138L112.355 12.6743Z"
+-          fill="currentColor"
+-        />
+-      </g>
+-      <defs>
+-        <linearGradient
+-          id="paint0_linear_4671_51136"
+-          x1="11.4954"
+-          y1="11.1486"
+-          x2="19.3439"
+-          y2="14.4777"
+-          gradientUnits="userSpaceOnUse"
+-        >
+-          <stop stopColor="#249361" />
+-          <stop offset="1" stopColor="#3ECF8E" />
+-        </linearGradient>
+-        <linearGradient
+-          id="paint1_linear_4671_51136"
+-          x1="8.00382"
+-          y1="6.42177"
+-          x2="11.5325"
+-          y2="13.1398"
+-          gradientUnits="userSpaceOnUse"
+-        >
+-          <stop />
+-          <stop offset="1" stopOpacity="0" />
+-        </linearGradient>
+-        <clipPath id="clip0_4671_51136">
+-          <rect
+-            width="113.85"
+-            height="21.8943"
+-            fill="currentColor"
+-            transform="translate(0.922119 0.456161)"
+-          />
+-        </clipPath>
+-        <clipPath id="clip1_4671_51136">
+-          <rect
+-            width="21.3592"
+-            height="21.8943"
+-            fill="currentColor"
+-            transform="translate(0.919006 0.497101)"
+-          />
+-        </clipPath>
+-      </defs>
+-    </svg>
+-  );
+-}
+diff --git a/src/components/theme-switcher.tsx b/src/components/theme-switcher.tsx
+deleted file mode 100644
+index d838e40..0000000
+--- a/src/components/theme-switcher.tsx
++++ /dev/null
+@@ -1,78 +0,0 @@
+-"use client";
+-
+-import { Button } from "@/components/ui/button";
+-import {
+-  DropdownMenu,
+-  DropdownMenuContent,
+-  DropdownMenuRadioGroup,
+-  DropdownMenuRadioItem,
+-  DropdownMenuTrigger,
+-} from "@/components/ui/dropdown-menu";
+-import { Laptop, Moon, Sun } from "lucide-react";
+-import { useTheme } from "next-themes";
+-import { useEffect, useState } from "react";
+-
+-const ThemeSwitcher = () => {
+-  const [mounted, setMounted] = useState(false);
+-  const { theme, setTheme } = useTheme();
+-
+-  // useEffect only runs on the client, so now we can safely show the UI
+-  useEffect(() => {
+-    setMounted(true);
+-  }, []);
+-
+-  if (!mounted) {
+-    return null;
+-  }
+-
+-  const ICON_SIZE = 16;
+-
+-  return (
+-    <DropdownMenu>
+-      <DropdownMenuTrigger asChild>
+-        <Button variant="ghost" size={"sm"}>
+-          {theme === "light" ? (
+-            <Sun
+-              key="light"
+-              size={ICON_SIZE}
+-              className={"text-muted-foreground"}
+-            />
+-          ) : theme === "dark" ? (
+-            <Moon
+-              key="dark"
+-              size={ICON_SIZE}
+-              className={"text-muted-foreground"}
+-            />
+-          ) : (
+-            <Laptop
+-              key="system"
+-              size={ICON_SIZE}
+-              className={"text-muted-foreground"}
+-            />
+-          )}
+-        </Button>
+-      </DropdownMenuTrigger>
+-      <DropdownMenuContent className="w-content" align="start">
+-        <DropdownMenuRadioGroup
+-          value={theme}
+-          onValueChange={(e) => setTheme(e)}
+-        >
+-          <DropdownMenuRadioItem className="flex gap-2" value="light">
+-            <Sun size={ICON_SIZE} className="text-muted-foreground" />{" "}
+-            <span>Light</span>
+-          </DropdownMenuRadioItem>
+-          <DropdownMenuRadioItem className="flex gap-2" value="dark">
+-            <Moon size={ICON_SIZE} className="text-muted-foreground" />{" "}
+-            <span>Dark</span>
+-          </DropdownMenuRadioItem>
+-          <DropdownMenuRadioItem className="flex gap-2" value="system">
+-            <Laptop size={ICON_SIZE} className="text-muted-foreground" />{" "}
+-            <span>System</span>
+-          </DropdownMenuRadioItem>
+-        </DropdownMenuRadioGroup>
+-      </DropdownMenuContent>
+-    </DropdownMenu>
+-  );
+-};
+-
+-export { ThemeSwitcher };
+diff --git a/src/components/tutorial/code-block.tsx b/src/components/tutorial/code-block.tsx
+deleted file mode 100644
+index 9f1b13d..0000000
+--- a/src/components/tutorial/code-block.tsx
++++ /dev/null
+@@ -1,61 +0,0 @@
+-"use client";
+-
+-import { useState } from "react";
+-import { Button } from "../ui/button";
+-
+-const CopyIcon = () => (
+-  <svg
+-    xmlns="http://www.w3.org/2000/svg"
+-    width="20"
+-    height="20"
+-    viewBox="0 0 24 24"
+-    fill="none"
+-    stroke="currentColor"
+-    strokeWidth="2"
+-    strokeLinecap="round"
+-    strokeLinejoin="round"
+-  >
+-    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+-    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+-  </svg>
+-);
+-
+-const CheckIcon = () => (
+-  <svg
+-    xmlns="http://www.w3.org/2000/svg"
+-    width="20"
+-    height="20"
+-    viewBox="0 0 24 24"
+-    fill="none"
+-    stroke="currentColor"
+-    strokeWidth="2"
+-    strokeLinecap="round"
+-    strokeLinejoin="round"
+-  >
+-    <polyline points="20 6 9 17 4 12"></polyline>
+-  </svg>
+-);
+-
+-export function CodeBlock({ code }: { code: string }) {
+-  const [icon, setIcon] = useState(CopyIcon);
+-
+-  const copy = async () => {
+-    await navigator?.clipboard?.writeText(code);
+-    setIcon(CheckIcon);
+-    setTimeout(() => setIcon(CopyIcon), 2000);
+-  };
+-
+-  return (
+-    <pre className="bg-muted rounded-md p-6 my-6 relative">
+-      <Button
+-        size="icon"
+-        onClick={copy}
+-        variant={"outline"}
+-        className="absolute right-2 top-2"
+-      >
+-        {icon}
+-      </Button>
+-      <code className="text-xs p-3">{code}</code>
+-    </pre>
+-  );
+-}
+diff --git a/src/components/tutorial/connect-supabase-steps.tsx b/src/components/tutorial/connect-supabase-steps.tsx
+deleted file mode 100644
+index 611c500..0000000
+--- a/src/components/tutorial/connect-supabase-steps.tsx
++++ /dev/null
+@@ -1,62 +0,0 @@
+-import { TutorialStep } from "./tutorial-step";
+-
+-export function ConnectSupabaseSteps() {
+-  return (
+-    <ol className="flex flex-col gap-6">
+-      <TutorialStep title="Create Supabase project">
+-        <p>
+-          Head over to{" "}
+-          <a
+-            href="https://app.supabase.com/project/_/settings/api"
+-            target="_blank"
+-            className="font-bold hover:underline text-foreground/80"
+-            rel="noreferrer"
+-          >
+-            database.new
+-          </a>{" "}
+-          and create a new Supabase project.
+-        </p>
+-      </TutorialStep>
+-
+-      <TutorialStep title="Declare environment variables">
+-        <p>
+-          Rename the{" "}
+-          <span className="relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-xs font-medium text-secondary-foreground border">
+-            .env.example
+-          </span>{" "}
+-          file in your Next.js app to{" "}
+-          <span className="relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-xs font-medium text-secondary-foreground border">
+-            .env.local
+-          </span>{" "}
+-          and populate with values from{" "}
+-          <a
+-            href="https://app.supabase.com/project/_/settings/api"
+-            target="_blank"
+-            className="font-bold hover:underline text-foreground/80"
+-            rel="noreferrer"
+-          >
+-            your Supabase project&apos;s API Settings
+-          </a>
+-          .
+-        </p>
+-      </TutorialStep>
+-
+-      <TutorialStep title="Restart your Next.js development server">
+-        <p>
+-          You may need to quit your Next.js development server and run{" "}
+-          <span className="relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-xs font-medium text-secondary-foreground border">
+-            npm run dev
+-          </span>{" "}
+-          again to load the new environment variables.
+-        </p>
+-      </TutorialStep>
+-
+-      <TutorialStep title="Refresh the page">
+-        <p>
+-          You may need to refresh the page for Next.js to load the new
+-          environment variables.
+-        </p>
+-      </TutorialStep>
+-    </ol>
+-  );
+-}
+diff --git a/src/components/tutorial/fetch-data-steps.tsx b/src/components/tutorial/fetch-data-steps.tsx
+deleted file mode 100644
+index c54aa83..0000000
+--- a/src/components/tutorial/fetch-data-steps.tsx
++++ /dev/null
+@@ -1,163 +0,0 @@
+-import { TutorialStep } from "./tutorial-step";
+-import { CodeBlock } from "./code-block";
+-
+-const create = `create table notes (
+-  id bigserial primary key,
+-  title text
+-);
+-
+-insert into notes(title)
+-values
+-  ('Today I created a Supabase project.'),
+-  ('I added some data and queried it from Next.js.'),
+-  ('It was awesome!');
+-`.trim();
+-
+-const rls = `alter table notes enable row level security;
+-create policy "Allow public read access" on notes
+-for select
+-using (true);`.trim();
+-
+-const server = `import { createClient } from '@/lib/supabase/server'
+-
+-export default async function Page() {
+-  const supabase = await createClient()
+-  const { data: notes } = await supabase.from('notes').select()
+-
+-  return <pre>{JSON.stringify(notes, null, 2)}</pre>
+-}
+-`.trim();
+-
+-const client = `'use client'
+-
+-import { createClient } from '@/lib/supabase/client'
+-import { useEffect, useState } from 'react'
+-
+-export default function Page() {
+-  const [notes, setNotes] = useState<any[] | null>(null)
+-  const supabase = createClient()
+-
+-  useEffect(() => {
+-    const getData = async () => {
+-      const { data } = await supabase.from('notes').select()
+-      setNotes(data)
+-    }
+-    getData()
+-  }, [])
+-
+-  return <pre>{JSON.stringify(notes, null, 2)}</pre>
+-}
+-`.trim();
+-
+-export function FetchDataSteps() {
+-  return (
+-    <ol className="flex flex-col gap-6">
+-      <TutorialStep title="Create some tables and insert some data">
+-        <p>
+-          Head over to the{" "}
+-          <a
+-            href="https://supabase.com/dashboard/project/_/editor"
+-            className="font-bold hover:underline text-foreground/80"
+-            target="_blank"
+-            rel="noreferrer"
+-          >
+-            Table Editor
+-          </a>{" "}
+-          for your Supabase project to create a table and insert some example
+-          data. If you&apos;re stuck for creativity, you can copy and paste the
+-          following into the{" "}
+-          <a
+-            href="https://supabase.com/dashboard/project/_/sql/new"
+-            className="font-bold hover:underline text-foreground/80"
+-            target="_blank"
+-            rel="noreferrer"
+-          >
+-            SQL Editor
+-          </a>{" "}
+-          and click RUN!
+-        </p>
+-        <CodeBlock code={create} />
+-      </TutorialStep>
+-
+-      <TutorialStep title="Enable Row Level Security (RLS)">
+-        <p>
+-          Supabase enables Row Level Security (RLS) by default. To query data
+-          from your <code>notes</code> table, you need to add a policy. You can
+-          do this in the{" "}
+-          <a
+-            href="https://supabase.com/dashboard/project/_/editor"
+-            className="font-bold hover:underline text-foreground/80"
+-            target="_blank"
+-            rel="noreferrer"
+-          >
+-            Table Editor
+-          </a>{" "}
+-          or via the{" "}
+-          <a
+-            href="https://supabase.com/dashboard/project/_/sql/new"
+-            className="font-bold hover:underline text-foreground/80"
+-            target="_blank"
+-            rel="noreferrer"
+-          >
+-            SQL Editor
+-          </a>
+-          .
+-        </p>
+-        <p>
+-          For example, you can run the following SQL to allow public read
+-          access:
+-        </p>
+-        <CodeBlock code={rls} />
+-        <p>
+-          You can learn more about RLS in the{" "}
+-          <a
+-            href="https://supabase.com/docs/guides/auth/row-level-security"
+-            className="font-bold hover:underline text-foreground/80"
+-            target="_blank"
+-            rel="noreferrer"
+-          >
+-            Supabase docs
+-          </a>
+-          .
+-        </p>
+-      </TutorialStep>
+-
+-      <TutorialStep title="Query Supabase data from Next.js">
+-        <p>
+-          To create a Supabase client and query data from an Async Server
+-          Component, create a new page.tsx file at{" "}
+-          <span className="relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-xs font-medium text-secondary-foreground border">
+-            /app/notes/page.tsx
+-          </span>{" "}
+-          and add the following.
+-        </p>
+-        <CodeBlock code={server} />
+-        <p>Alternatively, you can use a Client Component.</p>
+-        <CodeBlock code={client} />
+-      </TutorialStep>
+-
+-      <TutorialStep title="Explore the Supabase UI Library">
+-        <p>
+-          Head over to the{" "}
+-          <a
+-            href="https://supabase.com/ui"
+-            className="font-bold hover:underline text-foreground/80"
+-          >
+-            Supabase UI library
+-          </a>{" "}
+-          and try installing some blocks. For example, you can install a
+-          Realtime Chat block by running:
+-        </p>
+-        <CodeBlock
+-          code={
+-            "npx shadcn@latest add https://supabase.com/ui/r/realtime-chat-nextjs.json"
+-          }
+-        />
+-      </TutorialStep>
+-
+-      <TutorialStep title="Build in a weekend and scale to millions!">
+-        <p>You&apos;re ready to launch your product to the world! 🚀</p>
+-      </TutorialStep>
+-    </ol>
+-  );
+-}
+diff --git a/src/components/tutorial/sign-up-user-steps.tsx b/src/components/tutorial/sign-up-user-steps.tsx
+deleted file mode 100644
+index 47cce0d..0000000
+--- a/src/components/tutorial/sign-up-user-steps.tsx
++++ /dev/null
+@@ -1,91 +0,0 @@
+-import Link from "next/link";
+-import { TutorialStep } from "./tutorial-step";
+-import { ArrowUpRight } from "lucide-react";
+-
+-export function SignUpUserSteps() {
+-  return (
+-    <ol className="flex flex-col gap-6">
+-      {process.env.VERCEL_ENV === "preview" ||
+-      process.env.VERCEL_ENV === "production" ? (
+-        <TutorialStep title="Set up redirect urls">
+-          <p>It looks like this App is hosted on Vercel.</p>
+-          <p className="mt-4">
+-            This particular deployment is
+-            <span className="relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-xs font-medium text-secondary-foreground border">
+-              &quot;{process.env.VERCEL_ENV}&quot;
+-            </span>{" "}
+-            on
+-            <span className="relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-xs font-medium text-secondary-foreground border">
+-              https://{process.env.VERCEL_URL}
+-            </span>
+-            .
+-          </p>
+-          <p className="mt-4">
+-            You will need to{" "}
+-            <Link
+-              className="text-primary hover:text-foreground"
+-              href={
+-                "https://supabase.com/dashboard/project/_/auth/url-configuration"
+-              }
+-            >
+-              update your Supabase project
+-            </Link>{" "}
+-            with redirect URLs based on your Vercel deployment URLs.
+-          </p>
+-          <ul className="mt-4">
+-            <li>
+-              -{" "}
+-              <span className="relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-xs font-medium text-secondary-foreground border">
+-                http://localhost:3000/**
+-              </span>
+-            </li>
+-            <li>
+-              -{" "}
+-              <span className="relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-xs font-medium text-secondary-foreground border">
+-                {`https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}/**`}
+-              </span>
+-            </li>
+-            <li>
+-              -{" "}
+-              <span className="relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-xs font-medium text-secondary-foreground border">
+-                {`https://${process.env.VERCEL_PROJECT_PRODUCTION_URL?.replace(
+-                  ".vercel.app",
+-                  "",
+-                )}-*-[vercel-team-url].vercel.app/**`}
+-              </span>{" "}
+-              (Vercel Team URL can be found in{" "}
+-              <Link
+-                className="text-primary hover:text-foreground"
+-                href="https://vercel.com/docs/accounts/create-a-team#find-your-team-id"
+-                target="_blank"
+-              >
+-                Vercel Team settings
+-              </Link>
+-              )
+-            </li>
+-          </ul>
+-          <Link
+-            href="https://supabase.com/docs/guides/auth/redirect-urls#vercel-preview-urls"
+-            target="_blank"
+-            className="text-primary/50 hover:text-primary flex items-center text-sm gap-1 mt-4"
+-          >
+-            Redirect URLs Docs <ArrowUpRight size={14} />
+-          </Link>
+-        </TutorialStep>
+-      ) : null}
+-      <TutorialStep title="Sign up your first user">
+-        <p>
+-          Head over to the{" "}
+-          <Link
+-            href="auth/sign-up"
+-            className="font-bold hover:underline text-foreground/80"
+-          >
+-            Sign up
+-          </Link>{" "}
+-          page and sign up your first user. It&apos;s okay if this is just you
+-          for now. Your awesome idea will have plenty of users later!
+-        </p>
+-      </TutorialStep>
+-    </ol>
+-  );
+-}
+diff --git a/src/components/tutorial/tutorial-step.tsx b/src/components/tutorial/tutorial-step.tsx
+deleted file mode 100644
+index 0ab9cd4..0000000
+--- a/src/components/tutorial/tutorial-step.tsx
++++ /dev/null
+@@ -1,30 +0,0 @@
+-import { Checkbox } from "../ui/checkbox";
+-
+-export function TutorialStep({
+-  title,
+-  children,
+-}: {
+-  title: string;
+-  children: React.ReactNode;
+-}) {
+-  return (
+-    <li className="relative">
+-      <Checkbox
+-        id={title}
+-        name={title}
+-        className={`absolute top-[3px] mr-2 peer`}
+-      />
+-      <label
+-        htmlFor={title}
+-        className={`relative text-base text-foreground peer-checked:line-through font-medium`}
+-      >
+-        <span className="ml-8">{title}</span>
+-        <div
+-          className={`ml-8 text-sm peer-checked:line-through font-normal text-muted-foreground`}
+-        >
+-          {children}
+-        </div>
+-      </label>
+-    </li>
+-  );
+-}
+diff --git a/src/components/ui/button.tsx b/src/components/ui/button.tsx
+index d09a695..a8466db 100644
+--- a/src/components/ui/button.tsx
++++ b/src/components/ui/button.tsx
+@@ -5,25 +5,24 @@ import { cva, type VariantProps } from "class-variance-authority";
+ import { cn } from "@/lib/utils";
+ 
+ const buttonVariants = cva(
+-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
++  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-sm text-sm font-semibold transition-colors focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+   {
+     variants: {
+       variant: {
+-        default:
+-          "bg-primary text-primary-foreground shadow hover:bg-primary/90",
++        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+         destructive:
+-          "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90",
++          "bg-destructive text-primary-foreground shadow-sm hover:bg-destructive/90",
+         outline:
+-          "border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground",
++          "border border-input bg-surface shadow-sm hover:bg-background hover:text-primary",
+         secondary:
+           "bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80",
+-        ghost: "hover:bg-accent hover:text-accent-foreground",
++        ghost: "bg-background text-primary hover:bg-surface",
+         link: "text-primary underline-offset-4 hover:underline",
+       },
+       size: {
+         default: "h-9 px-4 py-2",
+-        sm: "h-8 rounded-md px-3 text-xs",
+-        lg: "h-10 rounded-md px-8",
++        sm: "h-8 rounded-sm px-3 text-xs",
++        lg: "h-10 rounded-sm px-8",
+         icon: "h-9 w-9",
+       },
+     },
+@@ -36,7 +35,7 @@ const buttonVariants = cva(
+ 
+ export interface ButtonProps
+   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+-    VariantProps<typeof buttonVariants> {
++  VariantProps<typeof buttonVariants> {
+   asChild?: boolean;
+ }
+ 
+diff --git a/src/components/ui/card.tsx b/src/components/ui/card.tsx
+index 1cc0c12..7c95dd1 100644
+--- a/src/components/ui/card.tsx
++++ b/src/components/ui/card.tsx
+@@ -9,7 +9,7 @@ const Card = React.forwardRef<
+   <div
+     ref={ref}
+     className={cn(
+-      "rounded-xl border bg-card text-card-foreground shadow",
++      "rounded-lg border border-border bg-card text-card-foreground shadow-none",
+       className,
+     )}
+     {...props}
+diff --git a/src/components/ui/dialog.tsx b/src/components/ui/dialog.tsx
+new file mode 100644
+index 0000000..f46ef04
+--- /dev/null
++++ b/src/components/ui/dialog.tsx
+@@ -0,0 +1,86 @@
++"use client";
++
++import * as React from "react";
++import * as DialogPrimitive from "@radix-ui/react-dialog";
++import { X } from "lucide-react";
++
++import { cn } from "@/lib/utils";
++
++const Dialog = DialogPrimitive.Root;
++const DialogTrigger = DialogPrimitive.Trigger;
++const DialogPortal = DialogPrimitive.Portal;
++const DialogClose = DialogPrimitive.Close;
++
++const DialogOverlay = React.forwardRef<
++  React.ElementRef<typeof DialogPrimitive.Overlay>,
++  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
++>(({ className, ...props }, ref) => (
++  <DialogPrimitive.Overlay
++    ref={ref}
++    className={cn(
++      "fixed inset-0 z-50 bg-foreground/40 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
++      className,
++    )}
++    {...props}
++  />
++));
++DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
++
++const DialogContent = React.forwardRef<
++  React.ElementRef<typeof DialogPrimitive.Content>,
++  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
++>(({ className, children, ...props }, ref) => (
++  <DialogPortal>
++    <DialogOverlay />
++    <DialogPrimitive.Content
++      ref={ref}
++      className={cn(
++        "fixed left-1/2 top-1/2 z-50 grid w-[min(100%,28rem)] -translate-x-1/2 -translate-y-1/2 gap-4 border border-border bg-surface p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 rounded-lg",
++        className,
++      )}
++      {...props}
++    >
++      {children}
++      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring">
++        <X className="h-4 w-4" />
++        <span className="sr-only">Закрыть</span>
++      </DialogPrimitive.Close>
++    </DialogPrimitive.Content>
++  </DialogPortal>
++));
++DialogContent.displayName = DialogPrimitive.Content.displayName;
++
++function DialogHeader({
++  className,
++  ...props
++}: React.HTMLAttributes<HTMLDivElement>) {
++  return (
++    <div
++      className={cn("flex flex-col space-y-1.5 text-left", className)}
++      {...props}
++    />
++  );
++}
++
++function DialogTitle({
++  className,
++  ...props
++}: React.ComponentPropsWithoutRef<typeof DialogPrimitive.Title>) {
++  return (
++    <DialogPrimitive.Title
++      className={cn("text-lg font-semibold leading-none text-foreground", className)}
++      {...props}
++    />
++  );
++}
++
++export {
++  Dialog,
++  DialogTrigger,
++  DialogContent,
++  DialogHeader,
++  DialogTitle,
++  DialogClose,
++  DialogPortal,
++  DialogOverlay,
++};
+diff --git a/src/components/ui/input.tsx b/src/components/ui/input.tsx
+index 7db5241..282a0a2 100644
+--- a/src/components/ui/input.tsx
++++ b/src/components/ui/input.tsx
+@@ -8,7 +8,7 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
+       <input
+         type={type}
+         className={cn(
+-          "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
++          "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
+           className,
+         )}
+         ref={ref}
+diff --git a/src/components/update-password-form.tsx b/src/components/update-password-form.tsx
+deleted file mode 100644
+index 821af68..0000000
+--- a/src/components/update-password-form.tsx
++++ /dev/null
+@@ -1,78 +0,0 @@
+-"use client";
+-
+-import { cn } from "@/lib/utils";
+-import { createClient } from "@/lib/supabase/client";
+-import { Button } from "@/components/ui/button";
+-import {
+-  Card,
+-  CardContent,
+-  CardDescription,
+-  CardHeader,
+-  CardTitle,
+-} from "@/components/ui/card";
+-import { Input } from "@/components/ui/input";
+-import { Label } from "@/components/ui/label";
+-import { useRouter } from "next/navigation";
+-import { useState } from "react";
+-
+-export function UpdatePasswordForm({
+-  className,
+-  ...props
+-}: React.ComponentPropsWithoutRef<"div">) {
+-  const [password, setPassword] = useState("");
+-  const [error, setError] = useState<string | null>(null);
+-  const [isLoading, setIsLoading] = useState(false);
+-  const router = useRouter();
+-
+-  const handleForgotPassword = async (e: React.FormEvent) => {
+-    e.preventDefault();
+-    const supabase = createClient();
+-    setIsLoading(true);
+-    setError(null);
+-
+-    try {
+-      const { error } = await supabase.auth.updateUser({ password });
+-      if (error) throw error;
+-      // Update this route to redirect to an authenticated route. The user already has an active session.
+-      router.push("/protected");
+-    } catch (error: unknown) {
+-      setError(error instanceof Error ? error.message : "An error occurred");
+-    } finally {
+-      setIsLoading(false);
+-    }
+-  };
+-
+-  return (
+-    <div className={cn("flex flex-col gap-6", className)} {...props}>
+-      <Card>
+-        <CardHeader>
+-          <CardTitle className="text-2xl">Reset Your Password</CardTitle>
+-          <CardDescription>
+-            Please enter your new password below.
+-          </CardDescription>
+-        </CardHeader>
+-        <CardContent>
+-          <form onSubmit={handleForgotPassword}>
+-            <div className="flex flex-col gap-6">
+-              <div className="grid gap-2">
+-                <Label htmlFor="password">New password</Label>
+-                <Input
+-                  id="password"
+-                  type="password"
+-                  placeholder="New password"
+-                  required
+-                  value={password}
+-                  onChange={(e) => setPassword(e.target.value)}
+-                />
+-              </div>
+-              {error && <p className="text-sm text-red-500">{error}</p>}
+-              <Button type="submit" className="w-full" disabled={isLoading}>
+-                {isLoading ? "Saving..." : "Save new password"}
+-              </Button>
+-            </div>
+-          </form>
+-        </CardContent>
+-      </Card>
+-    </div>
+-  );
+-}

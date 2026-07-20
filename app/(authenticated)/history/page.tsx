@@ -52,8 +52,7 @@ export default async function HistoryPage() {
       <div className="mb-8 max-w-xl">
         <h1 className="page-title">История</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Прошлые меню и рецепты. Оценки можно менять — без принудительного
-          экрана после готовки.
+          Прошлые меню и рецепты. Оценки можно менять в любой момент.
         </p>
       </div>
 
@@ -94,7 +93,7 @@ export default async function HistoryPage() {
               <div className="space-y-2 p-3">
                 {menu.recipes.length === 0 && menu.snacks.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
-                    Пустые слоты — блюд и Snacks нет.
+                    Пустые слоты — блюд и перекусов нет.
                   </p>
                 ) : null}
                 {menu.recipes.map((r) => (
@@ -112,9 +111,9 @@ export default async function HistoryPage() {
                     reason={r.reason}
                   />
                 ))}
-                {menu.snacks.map((s) => (
+                {menu.snacks.map((s, snackIndex) => (
                   <HistoryRatingRow
-                    key={`${menu.menuId}-${s.label}`}
+                    key={`${menu.menuId}-snack-${snackIndex}-${s.label}`}
                     kind="snack"
                     label={s.label}
                     name={s.label}

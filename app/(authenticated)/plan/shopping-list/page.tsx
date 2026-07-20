@@ -23,14 +23,15 @@ type PlanShoppingListPageProps = {
 export default async function PlanShoppingListPage({
   searchParams,
 }: PlanShoppingListPageProps) {
-  const { menuId } = await searchParams;
+  const { menuId: rawMenuId } = await searchParams;
+  const menuId = rawMenuId?.trim() ?? "";
 
   if (!menuId) {
     return (
       <div className="max-w-xl">
-        <h1 className="page-title">Shopping list</h1>
+        <h1 className="page-title">Список покупок</h1>
         <p className="mt-2 text-sm text-muted-foreground" role="status">
-          {UJ1_GATE_RU}
+          Выберите меню или создайте новое — затем перейдите к списку из состава.
         </p>
         <Link
           href="/history?create=1"
@@ -55,7 +56,7 @@ export default async function PlanShoppingListPage({
   if (!built.ok) {
     return (
       <div className="max-w-xl">
-        <h1 className="page-title">Shopping list</h1>
+        <h1 className="page-title">Список покупок</h1>
         <p className="mt-2 text-sm text-warning-fg" role="alert">
           {built.error}
         </p>
@@ -112,7 +113,7 @@ export default async function PlanShoppingListPage({
   return (
     <div className="w-full">
       <div className="mb-6 max-w-xl">
-        <h1 className="page-title">Shopping list</h1>
+        <h1 className="page-title">Список покупок</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           Один список на меню с количеством и весом (по числу человек из
           создания меню). Копия всегда доступна.

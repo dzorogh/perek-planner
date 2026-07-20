@@ -1,0 +1,126 @@
+{
+  "workflow_version": "1.2.0",
+  "timestamps": {
+    "started": "2026-07-20T15:56:12Z",
+    "last_updated": "2026-07-20T16:00:30Z",
+    "completed": "2026-07-20T16:00:30Z"
+  },
+  "mode": "initial_scan",
+  "scan_level": "exhaustive",
+  "project_root": "/Users/dzorogh/perek-planner",
+  "project_knowledge": "/Users/dzorogh/perek-planner/docs",
+  "completed_steps": [
+    {
+      "step": "step_1",
+      "status": "completed",
+      "timestamp": "2026-07-20T15:57:00Z",
+      "summary": "Classified as monolith with 1 part (web): Next.js keplo app"
+    },
+    {
+      "step": "step_2",
+      "status": "completed",
+      "timestamp": "2026-07-20T15:57:30Z",
+      "summary": "Found existing planning docs in _bmad-output + README; user_context=none"
+    },
+    {
+      "step": "step_3",
+      "status": "completed",
+      "timestamp": "2026-07-20T15:58:00Z",
+      "summary": "Tech stack: Next.js 16.2.10 on TypeScript/React 19 + Supabase + OpenRouter"
+    },
+    {
+      "step": "step_4",
+      "status": "completed",
+      "timestamp": "2026-07-20T15:59:00Z",
+      "summary": "Exhaustive scan of ~141 source files; API=server actions, data=12 active tables, components=~35"
+    },
+    {
+      "step": "step_5",
+      "status": "completed",
+      "timestamp": "2026-07-20T15:59:20Z",
+      "summary": "Source tree documented with critical folders annotated"
+    },
+    {
+      "step": "step_6",
+      "status": "completed",
+      "timestamp": "2026-07-20T15:59:30Z",
+      "summary": "Dev/deployment guides written"
+    },
+    {
+      "step": "step_7",
+      "status": "skipped",
+      "timestamp": "2026-07-20T15:59:30Z",
+      "summary": "Single-part monolith — no multi-part integration architecture"
+    },
+    {
+      "step": "step_8",
+      "status": "completed",
+      "timestamp": "2026-07-20T15:59:40Z",
+      "summary": "Architecture.md written for single app part"
+    },
+    {
+      "step": "step_9",
+      "status": "completed",
+      "timestamp": "2026-07-20T15:59:50Z",
+      "summary": "Supporting docs written"
+    },
+    {
+      "step": "step_10",
+      "status": "completed",
+      "timestamp": "2026-07-20T16:00:00Z",
+      "summary": "Master index.md generated"
+    },
+    {
+      "step": "step_11",
+      "status": "completed",
+      "timestamp": "2026-07-20T16:00:20Z",
+      "summary": "User finalized without incomplete-doc regeneration"
+    },
+    {
+      "step": "step_12",
+      "status": "completed",
+      "timestamp": "2026-07-20T16:00:30Z",
+      "summary": "Workflow complete"
+    }
+  ],
+  "current_step": "completed",
+  "findings": {
+    "project_classification": {
+      "repository_type": "monolith",
+      "parts_count": 1,
+      "primary_tech": "Next.js 16 + React 19 + Supabase + OpenRouter"
+    },
+    "technology_stack": {
+      "app": "Next 16.2.10 / React 19.2.7 / TS strict / Tailwind 4.3.3 / Supabase SSR / OpenRouter"
+    }
+  },
+  "project_types": [
+    {
+      "part_id": "app",
+      "project_type_id": "web",
+      "display_name": "keplo Next.js app"
+    }
+  ],
+  "project_parts": [
+    {
+      "part_id": "app",
+      "root_path": "/Users/dzorogh/perek-planner",
+      "project_type_id": "web",
+      "display_name": "keplo"
+    }
+  ],
+  "outputs_generated": [
+    "project-scan-report.json",
+    "project-overview.md",
+    "architecture.md",
+    "source-tree-analysis.md",
+    "component-inventory.md",
+    "development-guide.md",
+    "deployment-guide.md",
+    "api-contracts.md",
+    "data-models.md",
+    "index.md"
+  ],
+  "user_context": "none",
+  "resume_instructions": "Workflow completed"
+}

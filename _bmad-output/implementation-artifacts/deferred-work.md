@@ -35,3 +35,10 @@
 - Nutrition display — catalog has no nutrition fields yet (price-when-present shipped).
 - Author real `recipes.body_text` content (placeholder calm copy shipped).
 - Enable Supabase Auth leaked-password protection in Dashboard (project setting).
+
+## Deferred from: code review of project-context.md — Chunk 1 App+UI (2026-07-20)
+
+- `SlotCardActions` error alert layout near absolute overflow menu — polish when touching slot chrome.
+- Stacked Radix dialogs (recipe panel + comment/create) — shared modal host if focus traps bite in practice.
+- Filled slot with `recipeId` but missing `recipeName` — empty cell without actions; harden when loader contracts change.
+- `continueToPortionsAction` name vs redirect to shopping-list — rename when next touching slot-actions API.
