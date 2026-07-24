@@ -319,6 +319,15 @@ export async function generateSnacksForMenu(
     return { ok: false, error: "Не удалось сохранить перекусы." };
   }
 
+  try {
+    const { syncSnackDishesFromRows } = await import(
+      "@/domain/menu/sync-snack-dishes"
+    );
+    await syncSnackDishesFromRows(supabase, menuId, dayCount, rows);
+  } catch {
+    // Dual-write must not fail snack generation.
+  }
+
   return { ok: true, labels: pairDrafts.map((d) => d.label) };
 }
 
@@ -466,6 +475,20 @@ export async function resuggestSnackForMenu(
       return { ok: false, error: "Такой перекус уже есть в меню." };
     }
     return { ok: false, error: "Не удалось заменить перекус." };
+  }
+
+  try {
+    const { syncSnackDishesForDays } = await import(
+      "@/domain/menu/sync-snack-dishes"
+    );
+    await syncSnackDishesForDays(
+      supabase,
+      menuId,
+      dayPair,
+      proposed.draft.label,
+    );
+  } catch {
+    // best-effort dual-write
   }
 
   return { ok: true, label: proposed.draft.label };

@@ -12,7 +12,7 @@ export type RankableCandidate = {
   recentlyUsed: boolean;
   rating: RecipeRatingValue | "none";
   /** From invent persist; null/undefined = legacy/seed (treat as main-capable). */
-  plateRole?: "main" | "companion" | null;
+  plateRole?: string | null;
 };
 
 /**

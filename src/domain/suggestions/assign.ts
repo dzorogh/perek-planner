@@ -1,9 +1,18 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { maxMenuDaysForRecipes, passesFridgeKeep } from "@/domain/matching/eligibility";
+import { isMealSlot } from "@/domain/menu/constants";
+import type { PlateRole } from "@/domain/menu/meal-templates";
+import {
+  isTemplateMeal,
+  rolesForMeal,
+} from "@/domain/menu/meal-templates";
+import { replaceSlotDishes } from "@/domain/menu/slot-dishes";
 import type { SuggestionCandidate } from "@/domain/suggestions/candidates";
 import type { ProposedAssignment } from "@/domain/suggestions/openrouter-generate";
+import { legacyFksFromDishes } from "@/domain/suggestions/role-slots";
 import { isHardSuppressed, type SuppressSets } from "@/domain/suggestions/suppress";
+import { isLunchDinnerMeal } from "@/domain/suggestions/meal-fit";
 
 export type AssignResult = {
   assignedCount: number;
@@ -11,9 +20,8 @@ export type AssignResult = {
 };
 
 /**
- * Assign proposed recipes to slots (fridge-keep + suppress only).
- * On suppressed / fridge-fail proposal, try next ranked candidate for that slot.
- * Companion is written when valid; otherwise cleared.
+ * Assign proposed recipes to slots (fridge-keep + suppress on EVERY dish id).
+ * Writes full Harvard dishes + legacy FK shim.
  */
 export async function assignProposalsToSlots(
   supabase: SupabaseClient,
@@ -64,26 +72,129 @@ async function assignProposal(
   dayCount: number,
   selectedFridge: number[],
 ): Promise<boolean> {
+  const dishes = resolveProposalDishes(proposal);
+  if (dishes.length === 0) return false;
+
+  // Validate every recipe id in dishes (hard-suppress + fridge-keep).
+  const fridgeAdds: number[] = [];
+  const running = [...selectedFridge];
+  for (const d of dishes) {
+    const fridge = usableFridge(d.recipeId, fridgeById, suppress, dayCount, running);
+    if (fridge == null) {
+      // Try fallback only for primary when dishes came from legacy single-id path.
+      if (dishes.length === 1) {
+        return tryFallbackPrimary(
+          supabase,
+          menuId,
+          proposal,
+          rankedIds,
+          fridgeById,
+          suppress,
+          dayCount,
+          selectedFridge,
+        );
+      }
+      return false;
+    }
+    fridgeAdds.push(fridge);
+    running.push(fridge);
+  }
+
+  const fks = legacyFksFromDishes(dishes);
+  const updated = await updateSlot(
+    supabase,
+    menuId,
+    proposal.slotId,
+    dishes,
+    fks.recipeId,
+    fks.companionRecipeId,
+  );
+  if (!updated) return false;
+  selectedFridge.push(...fridgeAdds);
+  return true;
+}
+
+async function tryFallbackPrimary(
+  supabase: SupabaseClient,
+  menuId: string,
+  proposal: ProposedAssignment,
+  rankedIds: string[],
+  fridgeById: Map<string, number>,
+  suppress: Pick<SuppressSets, "refusedIds" | "dislikedIds">,
+  dayCount: number,
+  selectedFridge: number[],
+): Promise<boolean> {
+  const primary =
+    proposal.dishes?.[0]?.recipeId ?? proposal.recipeId ?? null;
+  if (!primary) return false;
+  const plateRole = proposal.dishes?.[0]?.plateRole ?? "main";
   const tryOrder = uniquePreserve([
-    proposal.recipeId,
-    ...rankedIds.filter((id) => id !== proposal.recipeId),
+    primary,
+    ...rankedIds.filter((id) => id !== primary),
   ]);
   for (const recipeId of tryOrder) {
     const fridge = usableFridge(recipeId, fridgeById, suppress, dayCount, selectedFridge);
     if (fridge == null) continue;
-    const companionRecipeId = resolveCompanionId(
-      proposal.companionRecipeId, recipeId, fridgeById, suppress, dayCount, [...selectedFridge, fridge],
-    );
+    const dishes = [{ plateRole, recipeId }];
+    const fks = legacyFksFromDishes(dishes);
     const updated = await updateSlot(
-      supabase, menuId, proposal.slotId, recipeId, companionRecipeId,
+      supabase,
+      menuId,
+      proposal.slotId,
+      dishes,
+      fks.recipeId,
+      fks.companionRecipeId,
     );
     if (!updated) continue;
     selectedFridge.push(fridge);
-    const companionFridge = companionRecipeId ? fridgeById.get(companionRecipeId) : null;
-    if (companionFridge != null) selectedFridge.push(companionFridge);
     return true;
   }
   return false;
+}
+
+function resolveProposalDishes(
+  proposal: ProposedAssignment,
+): Array<{ plateRole: PlateRole; recipeId: string }> {
+  if (proposal.dishes?.length) {
+    return proposal.dishes.filter((d) => d.recipeId);
+  }
+  if (!proposal.recipeId) return [];
+  // Without meal context, prefer protein; adaptDishesToMeal remaps for breakfast.
+  const dishes: Array<{ plateRole: PlateRole; recipeId: string }> = [
+    { plateRole: "protein", recipeId: proposal.recipeId },
+  ];
+  if (
+    proposal.companionRecipeId &&
+    proposal.companionRecipeId !== proposal.recipeId
+  ) {
+    dishes.push({ plateRole: "carb", recipeId: proposal.companionRecipeId });
+  }
+  return dishes;
+}
+
+/** Map legacy protein→main for breakfast-family; drop roles outside template. */
+export function adaptDishesToMeal(
+  meal: string,
+  dishes: ReadonlyArray<{ plateRole: PlateRole; recipeId: string }>,
+): Array<{ plateRole: PlateRole; recipeId: string }> {
+  if (!isTemplateMeal(meal) || meal === "snack") return [...dishes];
+  const template = new Set(rolesForMeal(meal));
+  const out: Array<{ plateRole: PlateRole; recipeId: string }> = [];
+  const seen = new Set<PlateRole>();
+  for (const d of dishes) {
+    let role = d.plateRole;
+    if (!template.has(role) && role === "protein" && template.has("main")) {
+      role = "main";
+    }
+    if (!template.has(role) || seen.has(role)) continue;
+    seen.add(role);
+    out.push({ plateRole: role, recipeId: d.recipeId });
+  }
+  // Breakfast-family legacy with only protein already remapped; drop carb noise.
+  if (!isLunchDinnerMeal(meal)) {
+    return out.filter((d) => d.plateRole === "main");
+  }
+  return out;
 }
 
 function usableFridge(
@@ -103,35 +214,28 @@ async function updateSlot(
   supabase: SupabaseClient,
   menuId: string,
   slotId: string,
-  recipeId: string,
+  dishes: Array<{ plateRole: PlateRole; recipeId: string }>,
+  recipeId: string | null,
   companionRecipeId: string | null,
 ): Promise<boolean> {
   const { data, error } = await supabase
     .from("menu_slots")
-    .update({ recipe_id: recipeId, companion_recipe_id: companionRecipeId })
+    .update({
+      recipe_id: recipeId,
+      companion_recipe_id: companionRecipeId,
+    })
     .eq("id", slotId)
     .eq("menu_id", menuId)
-    .select("id");
-  return !error && Boolean(data?.length);
-}
+    .select("id, meal");
+  if (error || !data?.length) return false;
 
-function resolveCompanionId(
-  requested: string | null | undefined,
-  mainRecipeId: string,
-  fridgeById: Map<string, number>,
-  suppress: Pick<SuppressSets, "refusedIds" | "dislikedIds">,
-  dayCount: number,
-  selectedFridgeWithMain: number[],
-): string | null {
-  if (!requested || requested === mainRecipeId) return null;
-  if (isHardSuppressed(requested, suppress)) return null;
-  const fridge = fridgeById.get(requested);
-  if (fridge == null) return null;
-  if (!passesFridgeKeep(fridge, dayCount)) return null;
-  if (maxMenuDaysForRecipes([...selectedFridgeWithMain, fridge]) < dayCount) {
-    return null;
+  const meal = data[0]?.meal;
+  if (typeof meal === "string" && isMealSlot(meal) && meal !== "snack") {
+    const adapted = adaptDishesToMeal(meal, dishes);
+    const dishesOk = await replaceSlotDishes(supabase, slotId, meal, adapted);
+    if (!dishesOk) return false;
   }
-  return requested;
+  return true;
 }
 
 function uniquePreserve(ids: string[]): string[] {

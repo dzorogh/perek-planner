@@ -57,6 +57,10 @@ Primary operator: **Sergey** — account holder and cook. Default plan feeds **t
 - **Snack** — A no-cook item on the Menu that joins the same order; can receive a Rating like a Recipe.
 - **Order** — The store purchase Sergey completes outside the app using this Menu’s Shopping list (and optional store link).
 - **Cook session** — One batch cook that covers the Menu days (not a separate cook per day).
+- **Plate role** — Functional role of a Slot dish on a meal (`soup`, `protein`, `veg`, `carb`, `main`, `snack`, …). Extensible enum owned by application code.
+- **Meal template** — Code-defined ordered set of Plate roles for a meal type (breakfast, lunch, dinner, snack, …).
+- **Harvard plate** — Template for lunch/dinner second course: protein+fat dish, vegetables, and a carb-containing dish (or one multi-role Recipe covering several).
+- **Slot dish** — One Recipe (or snack item) assigned to a meal slot under a Plate role. Uniform storage for every meal type.
 
 ## 4. Features
 
@@ -85,12 +89,14 @@ Sergey can set serving counts for a Menu; default is three meals per day for two
 
 #### FR-3: Assign meals
 
-Sergey can assign Recipes to breakfast, lunch, and dinner slots in the Portion plan. Realizes UJ-1.
+Sergey can assign Slot dishes to breakfast, lunch, dinner, and snack meals via a uniform Plate-role model. Realizes UJ-1.
 
 **Consequences (testable):**
-- Each day in the Menu has breakfast, lunch, and dinner slots.
-- Empty meal slots are allowed (Sergey need not fill every slot).
-- Only eligible Recipes (per Checked match rules) can be assigned to a slot.
+- Every planned meal type uses the same Slot dish model (Plate role + Recipe/item), including breakfast and snacks.
+- Meal templates (code-owned): breakfast / second breakfast → `[main]`; lunch → `[soup]` + Harvard second `[protein, veg, carb]`; dinner / late dinner → Harvard second `[protein, veg, carb]` (no soup); snack / перекус → `[snack]`.
+- A Recipe may cover multiple Plate roles (e.g. plov → protein+carb); covered roles are not duplicated with extra dishes.
+- Empty roles/slots are allowed (Sergey need not fill every role).
+- Only eligible Recipes (per eligibility rules) can be assigned to a role.
 
 #### FR-4: Add snacks
 
@@ -99,6 +105,7 @@ Sergey can add no-cook snacks to the same Menu and the same order. Realizes UJ-1
 **Consequences (testable):**
 - Snacks appear on the Shopping list with the rest of the Menu.
 - Snacks do not require a cook session.
+- Snacks persist as Slot dishes with Plate role `snack` (same architecture as other meals).
 
 #### FR-5: View Portion plan
 
@@ -108,6 +115,38 @@ Sergey can view the Portion plan by day and meal before purchase and cooking. Re
 - Portion plan shows every day and meal slot for the Menu (including empty slots).
 - Portions are laid out up front so the Menu can be eaten evenly across days without leftover tracking.
 - Portion plan is visible without completing checkout (checkout is out of app).
+
+#### FR-25: Harvard plate composition
+
+Lunch and dinner second courses target Harvard plate coverage: protein, vegetables, and carb (via separate Slot dishes and/or multi-role Recipes).
+
+**Consequences (testable):**
+- Lunch and dinner second-course templates include protein, veg, and carb Plate roles.
+- Multi-role Recipes may satisfy more than one of those roles without duplicate dishes.
+
+#### FR-26: Lunch soup role
+
+When lunch is planned, the meal template always includes a soup Plate role.
+
+**Consequences (testable):**
+- Lunch structure always exposes a soup role (may be empty until filled).
+- Dinner templates do not require a soup role.
+
+#### FR-27: Code-structured suggestions
+
+Meal structure and required Plate roles are decided in application code; AI invents and fills Recipe content for those roles.
+
+**Consequences (testable):**
+- Suggestion/invent paths emit role slots from meal templates before asking the model for Recipe content.
+- The model is not responsible for inventing free-form meal architecture.
+
+#### FR-28: Uniform Slot dish model
+
+All meal types (including breakfast and snacks) persist through the same Slot dish + Plate role structure.
+
+**Consequences (testable):**
+- Breakfast and snacks are not a parallel persistence architecture from lunch/dinner.
+- UI may present fewer lines for simple templates, but data/API stay uniform.
 
 ### 4.2 Recipe library & suggestions
 
@@ -337,6 +376,7 @@ Sergey can open Recipe text for dishes on the Menu while shopping or cooking.
 - Store selection, today-stock eligibility, stale catalog blocks planning — FR-16…FR-18
 - Shopping list copy + optional store link; price/nutrition when present — FR-19…FR-22
 - Recipe text as cooking aid — FR-24
+- Harvard plate + lunch soup + uniform Slot dishes + code-structured suggestions — FR-25…FR-28 (and extended FR-3 / FR-4)
 - Single operator; grocery chain; selectable store
 
 ### 6.2 Out of Scope for MVP

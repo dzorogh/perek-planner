@@ -10,20 +10,26 @@ export type RecipeBatchScale = {
 type SlotLike = {
   recipeId: string | null;
   companionRecipeId?: string | null;
+  /** All dish recipe ids on the slot (soup/veg/carb/…). */
+  dishRecipeIds?: readonly (string | null | undefined)[] | null;
+  dishes?: ReadonlyArray<{ recipeId: string | null }> | null;
   dayIndex: number;
   servings: number;
 };
 
 function slotUsesRecipe(slot: SlotLike, recipeId: string): boolean {
-  return (
-    slot.recipeId === recipeId || slot.companionRecipeId === recipeId
-  );
+  if (slot.recipeId === recipeId || slot.companionRecipeId === recipeId) {
+    return true;
+  }
+  if (slot.dishRecipeIds?.includes(recipeId)) return true;
+  if (slot.dishes?.some((d) => d.recipeId === recipeId)) return true;
+  return false;
 }
 
 /**
  * Batch scale for a recipe on a menu — matches shopping-list aggregation
- * (amount_per_serving × each slot's servings, summed). Counts both main
- * and companion placements.
+ * (amount_per_serving × each slot's servings, summed). Counts main,
+ * companion, and role-labeled dish placements.
  */
 export function recipeBatchScale(
   slots: readonly SlotLike[],

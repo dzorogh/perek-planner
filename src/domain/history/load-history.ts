@@ -46,6 +46,93 @@ function asReason(v: string | null): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+type HistRecipe = {
+  id: string;
+  name: string;
+  body_text: string;
+  critical_ingredients?: Parameters<typeof mapIngredientRows>[0];
+};
+
+type RecipeMeta = {
+  name: string;
+  bodyText: string;
+  ingredients: RecipeIngredientView[];
+};
+
+type HistRecipeJoin = HistRecipe | HistRecipe[] | null | undefined;
+
+type ScaleSlot = {
+  recipeId: string | null;
+  companionRecipeId?: string | null;
+  dayIndex: number;
+  servings: number;
+};
+
+type SlotScaleMeta = {
+  menuId: string;
+  dayIndex: number;
+  servings: number;
+  mainId: string | null;
+  companionId: string | null;
+};
+
+function mergeDishRecipesIntoHistory(
+  dishRows: ReadonlyArray<{
+    menu_slot_id: unknown;
+    recipes?: unknown;
+  }>,
+  slotIdToMenu: ReadonlyMap<string, string>,
+  slotScaleMeta: ReadonlyMap<string, SlotScaleMeta>,
+  recipeMetaByMenu: Map<string, Map<string, RecipeMeta>>,
+  seenRecipe: Map<string, Set<string>>,
+  scaleSlotsByMenu: Map<string, ScaleSlot[]>,
+  unwrapHist: (recipes: HistRecipeJoin) => HistRecipe | null,
+): void {
+  for (const d of dishRows) {
+    const slotId = d.menu_slot_id as string;
+    const menuId = slotIdToMenu.get(slotId);
+    if (!menuId) continue;
+    const recipe = unwrapHist(
+      d.recipes as HistRecipe | HistRecipe[] | null | undefined,
+    );
+    if (!recipe?.id) continue;
+    let meta = recipeMetaByMenu.get(menuId);
+    if (!meta) {
+      meta = new Map();
+      recipeMetaByMenu.set(menuId, meta);
+    }
+    let seen = seenRecipe.get(menuId);
+    if (!seen) {
+      seen = new Set();
+      seenRecipe.set(menuId, seen);
+    }
+    if (!meta.has(recipe.id)) {
+      meta.set(recipe.id, {
+        name: recipe.name,
+        bodyText: recipe.body_text ?? "",
+        ingredients: mapIngredientRows(recipe.critical_ingredients),
+      });
+    }
+    seen.add(recipe.id);
+
+    const slotMeta = slotScaleMeta.get(slotId);
+    if (!slotMeta) continue;
+    if (
+      recipe.id === slotMeta.mainId ||
+      recipe.id === slotMeta.companionId
+    ) {
+      continue;
+    }
+    const scaleSlots = scaleSlotsByMenu.get(menuId) ?? [];
+    scaleSlots.push({
+      recipeId: recipe.id,
+      dayIndex: slotMeta.dayIndex,
+      servings: slotMeta.servings,
+    });
+    scaleSlotsByMenu.set(menuId, scaleSlots);
+  }
+}
+
 export async function loadHistory(
   supabase: SupabaseClient,
   userId: string,
@@ -76,12 +163,11 @@ export async function loadHistory(
     supabase
       .from("menu_slots")
       .select(
-        `menu_id, recipe_id, companion_recipe_id, day_index, servings,
+        `id, menu_id, recipe_id, companion_recipe_id, day_index, servings,
          recipes!menu_slots_recipe_id_fkey(${RECIPE_HISTORY_WITH_INGREDIENTS_SELECT}),
          companion:recipes!menu_slots_companion_recipe_id_fkey(${RECIPE_HISTORY_WITH_INGREDIENTS_SELECT})`,
       )
-      .in("menu_id", menuIds)
-      .not("recipe_id", "is", null),
+      .in("menu_id", menuIds),
     supabase
       .from("menu_snacks")
       .select("menu_id, label")
@@ -100,10 +186,38 @@ export async function loadHistory(
     return { menus: [], error: "Не удалось загрузить историю." };
   }
 
+  const slotIdToMenu = new Map<string, string>();
+  const slotIds: string[] = [];
+  for (const row of slotsRes.data ?? []) {
+    if (row.id && row.menu_id) {
+      slotIdToMenu.set(row.id, row.menu_id);
+      slotIds.push(row.id);
+    }
+  }
+
+  const dishesRes =
+    slotIds.length > 0
+      ? await supabase
+        .from("menu_slot_dishes")
+        .select(
+          `menu_slot_id, recipe_id, snack_label,
+         recipes(${RECIPE_HISTORY_WITH_INGREDIENTS_SELECT})`,
+        )
+        .in("menu_slot_id", slotIds)
+        .not("recipe_id", "is", null)
+      : { data: [] as Array<{ menu_slot_id: string }>, error: null };
+
+  const dishRows = dishesRes.error ? [] : (dishesRes.data ?? []);
+
+  const warningParts: string[] = [];
+  if (ratingsRes.error || snackRatingsRes.error) {
+    warningParts.push("Не удалось загрузить оценки — меню показаны без звёзд.");
+  }
+  if (dishesRes.error) {
+    warningParts.push("Не удалось загрузить блюда слотов — масштабирование по ролям может быть неполным.");
+  }
   const ratingsWarning =
-    ratingsRes.error || snackRatingsRes.error
-      ? "Не удалось загрузить оценки — меню показаны без звёзд."
-      : null;
+    warningParts.length > 0 ? warningParts.join(" ") : null;
 
   const recipeRating = new Map<
     string,
@@ -129,15 +243,8 @@ export async function loadHistory(
 
   const recipesByMenu = new Map<string, HistoryRecipeRow[]>();
   const seenRecipe = new Map<string, Set<string>>();
-  const scaleSlotsByMenu = new Map<
-    string,
-    Array<{
-      recipeId: string | null;
-      companionRecipeId?: string | null;
-      dayIndex: number;
-      servings: number;
-    }>
-  >();
+  const scaleSlotsByMenu = new Map<string, ScaleSlot[]>();
+  const slotScaleMeta = new Map<string, SlotScaleMeta>();
   const recipeMetaByMenu = new Map<
     string,
     Map<
@@ -150,16 +257,7 @@ export async function loadHistory(
     >
   >();
 
-  type HistRecipe = {
-    id: string;
-    name: string;
-    body_text: string;
-    critical_ingredients?: Parameters<typeof mapIngredientRows>[0];
-  };
-
-  function unwrapHist(
-    recipes: HistRecipe | HistRecipe[] | null | undefined,
-  ): HistRecipe | null {
+  function unwrapHist(recipes: HistRecipeJoin): HistRecipe | null {
     if (!recipes) return null;
     return Array.isArray(recipes) ? (recipes[0] ?? null) : recipes;
   }
@@ -172,16 +270,31 @@ export async function loadHistory(
       (row as { companion?: HistRecipe | HistRecipe[] | null }).companion,
     );
 
+    const dayIndex = typeof row.day_index === "number" ? row.day_index : 1;
+    const servings = typeof row.servings === "number" ? row.servings : 2;
+    const mainId = main?.id ?? row.recipe_id ?? null;
+    const companionId =
+      companion?.id ??
+      (typeof row.companion_recipe_id === "string"
+        ? row.companion_recipe_id
+        : null);
+
+    if (typeof row.id === "string") {
+      slotScaleMeta.set(row.id, {
+        menuId: row.menu_id,
+        dayIndex,
+        servings,
+        mainId,
+        companionId,
+      });
+    }
+
     const scaleSlots = scaleSlotsByMenu.get(row.menu_id) ?? [];
     scaleSlots.push({
-      recipeId: main?.id ?? row.recipe_id ?? null,
-      companionRecipeId:
-        companion?.id ??
-        (typeof row.companion_recipe_id === "string"
-          ? row.companion_recipe_id
-          : null),
-      dayIndex: typeof row.day_index === "number" ? row.day_index : 1,
-      servings: typeof row.servings === "number" ? row.servings : 2,
+      recipeId: mainId,
+      companionRecipeId: companionId,
+      dayIndex,
+      servings,
     });
     scaleSlotsByMenu.set(row.menu_id, scaleSlots);
 
@@ -209,6 +322,16 @@ export async function loadHistory(
       if (!seen.has(recipe.id)) seen.add(recipe.id);
     });
   });
+
+  mergeDishRecipesIntoHistory(
+    dishRows,
+    slotIdToMenu,
+    slotScaleMeta,
+    recipeMetaByMenu,
+    seenRecipe,
+    scaleSlotsByMenu,
+    unwrapHist,
+  );
 
   recipeMetaByMenu.forEach((meta, menuId) => {
     const scaleSlots = scaleSlotsByMenu.get(menuId) ?? [];

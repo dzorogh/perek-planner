@@ -16,6 +16,38 @@ export type MenuDishSummary = {
   batchTotals: ScaledRecipeTotals;
 };
 
+type NamedDish = {
+  id: string;
+  name: string;
+  value: RecipePerServingValue;
+};
+
+function namedDishesFromSlot(slot: MenuSlotView): NamedDish[] {
+  if (slot.dishes.length > 0) {
+    return slot.dishes.flatMap((d) =>
+      d.recipeId && d.recipeName
+        ? [{ id: d.recipeId, name: d.recipeName, value: d.recipeValue }]
+        : [],
+    );
+  }
+  const out: NamedDish[] = [];
+  if (slot.recipeId && slot.recipeName) {
+    out.push({
+      id: slot.recipeId,
+      name: slot.recipeName,
+      value: slot.recipeValue,
+    });
+  }
+  if (slot.companionRecipeId && slot.companionRecipeName) {
+    out.push({
+      id: slot.companionRecipeId,
+      name: slot.companionRecipeName,
+      value: slot.companionRecipeValue,
+    });
+  }
+  return out;
+}
+
 /** Aggregate cookable recipes in a menu with how many distinct days each spans. */
 export function summarizeMenuDishes(slots: MenuSlotView[]): MenuDishSummary[] {
   const byRecipe = new Map<
@@ -24,26 +56,7 @@ export function summarizeMenuDishes(slots: MenuSlotView[]): MenuDishSummary[] {
   >();
 
   for (const slot of slots) {
-    const dishes: Array<{
-      id: string;
-      name: string;
-      value: RecipePerServingValue;
-    }> = [];
-    if (slot.recipeId && slot.recipeName) {
-      dishes.push({
-        id: slot.recipeId,
-        name: slot.recipeName,
-        value: slot.recipeValue,
-      });
-    }
-    if (slot.companionRecipeId && slot.companionRecipeName) {
-      dishes.push({
-        id: slot.companionRecipeId,
-        name: slot.companionRecipeName,
-        value: slot.companionRecipeValue,
-      });
-    }
-    for (const dish of dishes) {
+    for (const dish of namedDishesFromSlot(slot)) {
       const entry = byRecipe.get(dish.id) ?? {
         name: dish.name,
         days: new Set<number>(),

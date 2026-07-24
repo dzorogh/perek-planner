@@ -1,5 +1,5 @@
 # generated: 2026-07-20T00:32:39+03:00
-# last_updated: 2026-07-20T12:00:00+03:00
+# last_updated: 2026-07-25T02:43:33+03:00
 # project: keplo
 # project_key: NOKEY
 # tracking_system: file-system
@@ -41,7 +41,7 @@
 # - Retrospective appends its action items to action_items; sprint-status surfaces open ones
 
 generated: 2026-07-20T00:32:39+03:00
-last_updated: 2026-07-20T12:00:00+03:00
+last_updated: 2026-07-25T02:43:33+03:00
 project: keplo
 project_key: NOKEY
 tracking_system: file-system
@@ -79,6 +79,12 @@ development_status:
   4-3-view-recipe-text: done
   epic-4-retrospective: done
 
-  epic-5: in-progress
-  5-1-w1-header-wizard-chrome: review
+  epic-5: done
+  5-1-w1-header-wizard-chrome: done
   epic-5-retrospective: optional
+
+  epic-6: in-progress
+  6-1-slot-dish-roles-schema-and-templates: done
+  6-2-template-driven-ai-invent-assign: done
+  6-3-role-labeled-menu-ui-and-per-role-edit: done
+  epic-6-retrospective: optional

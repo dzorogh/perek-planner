@@ -2,6 +2,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { MealSlot } from "@/domain/menu/constants";
 import {
+  isPlateRole,
+  type PlateRole,
+} from "@/domain/menu/meal-templates";
+import {
   DEFAULT_AVAILABLE_EQUIPMENT,
   normalizeEquipmentList,
   recipeFitsAvailableEquipment,
@@ -22,6 +26,7 @@ import {
   mealsIncludeLunchOrDinner,
   stripHardcodedPairing,
 } from "@/domain/suggestions/meal-fit";
+import { parseCoversRoles } from "@/domain/suggestions/role-slots";
 import {
   loadTasteNotes,
   tasteNotesForPrompt,
@@ -62,15 +67,17 @@ export type InventIngredientDraft = {
   unit: "g" | "ml" | "pcs" | "tsp" | "tbsp" | null;
 };
 
-export type InventPlateRole = "main" | "companion";
+export type InventPlateRole = PlateRole;
 
 export type InventRecipeDraft = {
   name: string;
   bodyText: string;
   fridgeKeepDays: number;
   ingredients: InventIngredientDraft[];
-  /** Persisted on recipes.plate_role for create/resuggest pairing. */
-  plateRole: InventPlateRole;
+  /** Persisted on recipes.plate_role. */
+  plateRole: PlateRole;
+  /** Multi-role one-pot claim; persisted as recipes.covers_roles. */
+  coversRoles: PlateRole[] | null;
   /** Equipment required to cook; must be ⊆ menu.available_equipment. */
   requiredEquipment: EquipmentId[];
   /** Estimated cost per 1 adult serving in kopecks; omit when uncertain. */
@@ -101,43 +108,37 @@ function coerceNumber(raw: unknown): number {
 const INVENT_SYSTEM = `You invent NEW simple Russian home-cooking recipes for a household meal planner.
 Every recipe is created from scratch via AI.
 You alone judge culinary near-duplicates — there is no keyword filter in code. Be strict.
-Cover the meal mix requested: breakfast-appropriate cooked dishes AND lunch/dinner dishes in one batch.
-Also invent companion dishes for lunch/dinner plates that need a side or protein.
+Cover the meal mix requested: breakfast-appropriate cooked dishes AND lunch/dinner role dishes in one batch.
+Plate roles are FIXED vocabulary — invent recipe CONTENT, not meal architecture.
 Use common grocery ingredients available in Russian supermarkets.
 Respond with a single JSON object:
-{"recipes":[{"name":"...","body_text":"...","fridge_keep_days":N,"plate_role":"main"|"companion","suitable_meals":["breakfast"|"lunch"|"dinner",...],"required_equipment":["stove"|"oven"|"air_fryer"|"grill"|"multicooker"|"pressure_cooker"|"microwave",...],"price_rub_per_serving":N,"nutrition_per_serving":{"kcal":N,"protein_g":N,"fat_g":N,"carbs_g":N},"critical_ingredients":[{"name":"...","kind":"critical"|"pantry","amount":N,"unit":"g"|"ml"|"pcs"|"tsp"|"tbsp"},...]}]}.
+{"recipes":[{"name":"...","body_text":"...","fridge_keep_days":N,"plate_role":"main"|"soup"|"protein"|"veg"|"carb","covers_roles":["protein","carb"]?,"suitable_meals":["breakfast"|"lunch"|"dinner",...],"required_equipment":["stove"|"oven"|"air_fryer"|"grill"|"multicooker"|"pressure_cooker"|"microwave",...],"price_rub_per_serving":N,"nutrition_per_serving":{"kcal":N,"protein_g":N,"fat_g":N,"carbs_g":N},"critical_ingredients":[{"name":"...","kind":"critical"|"pantry","amount":N,"unit":"g"|"ml"|"pcs"|"tsp"|"tbsp"},...]}]}.
 Rules:
-- required_equipment: non-empty array of equipment ids REQUIRED to cook the dish (subset of availableEquipment from the request). Use only: stove, oven, air_fryer, grill, multicooker, pressure_cooker, microwave. Example: pan fry → ["stove"]; bake → ["oven"]; air-fry → ["air_fryer"]. HARD: never invent a dish that needs equipment outside availableEquipment.
+- required_equipment: non-empty array of equipment ids REQUIRED to cook the dish (subset of availableEquipment from the request). Use only: stove, oven, air_fryer, grill, multicooker, pressure_cooker, microwave. HARD: never invent a dish that needs equipment outside availableEquipment.
 - Prefer dishes that use the available set realistically; you need NOT use every available appliance in the batch.
 - HARD variety: never invent a near-duplicate of previousMenusDishes, avoidNames, or currentMenuDishes. You judge similarity by culinary form + base, not by exact string match.
   Too close (FORBIDDEN): оладьи≈панкейки; творожная запеканка с ягодами≈творожные запеканки с изюмом; сырники с изюмом≈сырники с ягодами; овсяная каша с яблоком≈овсянка с грушей; куриные котлеты≈котлеты из курицы.
   Distinct enough (OK): творожная запеканка vs сырники; оладьи vs яичница; картофельная запеканка vs творожная запеканка; каша vs омлет.
-  A topping/mix-in swap on the same form+base is NOT a new dish. Change the culinary form (or clearly different base) instead.
-- When currentMenuDishes is non-empty (slot replace): invent a clearly different form for that meal — do not echo what is already on the menu.
-- Include breakfast-suitable and lunch/dinner recipes as needed by meals. When breakfast is in meals, at least ~1/3 of mains must be true morning food.
-- When lunch and/or dinner are in meals: at least ONE plate_role=main MUST be a meat/fish/heavy-animal dish (котлеты, фрикадельки, запечённая курица/рыба, плов, голубцы, картофельная запеканка с фаршем, etc.). Egg/dairy/mushroom-only mains do NOT satisfy this quota.
-- Lunch/dinner mains MUST prefer meat/fish/poultry — real home dinners, not morning food. NEVER mark сырники, творожные оладьи/запеканки, каши, омлеты, or other morning forms as suitable for lunch/dinner. Potato/meat dinner bakes (запеканка с фаршем) ARE valid lunch/dinner mains.
-- Breakfast = cooked morning food ONLY (каша, яичница, омлет, сырники, оладьи, творожная запеканка, тосты с яйцом, etc.) with real cooking steps. NEVER invent roast/fried chicken, soups/broths, plov, cutlets, steaks, pasta mains, or other lunch/dinner plates as breakfast — those belong to lunch/dinner only. suitable_meals for a roast chicken must NOT include "breakfast".
-- plate_role=main: a dish that can be the primary item of a meal. Prefer lunch/dinner mains with meat/fish/poultry (мясо/птица/рыба). Complete one-pots (плов, лазанья, голубцы, пельмени, манты, паста with protein) MUST be plate_role=main — they are full meals and must NOT also be invented as a companion/гарнир for themselves. Vegetable cutlets (морковные/капустные/…) are allowed as mains but are NOT complete meals — the assign step will pair a protein companion. Breakfast mains must be standalone morning food (каша, яичница, сырники, оладьи, творожная запеканка) — never a sauce, dressing, bare garnish, or dinner main.
-- plate_role=companion: a SIMPLE side (гарнир: крупа, картофель, овощи) OR a simple protein add-on (курица/рыба/яйца/грибы) OR a simple sauce — not a second complex main and NEVER a one-pot like плов. At least 30–40% of the batch should be companions when lunch/dinner meals are requested; include several protein add-ons so veg mains can be paired. Sauces/подливы/заправки are ALWAYS companion, never breakfast mains.
-- Name companions by the dish itself («Грибной соус», «Картофельное пюре»). NEVER hardcode a pairing in the name («к пасте», «к мясу», «под курицу») — the app pairs companions with mains later.
-- NEVER invent snacks / перекусы / no-cook ready-to-eat plates. Snacks are generated in a separate pipeline and must not appear as recipes. Do not use the word «перекус» in a recipe name.
-- body_text: SHORT cooking steps in Russian. EACH step on its OWN line, numbered "1. ", "2. ", etc. Separate steps with \\n. Main: 3–5 short steps. Companion: 2–4 short steps. Include time/heat briefly where useful. Every recipe must require cooking or heating — not just plating. Be concise — no long paragraphs.
-- When menuDayCount and peoplePerMeal are provided: assume batch cooking for that household; at most ONE short phrase about fridge/reheat if the dish spans days. Do NOT multiply weights into body_text — the app scales amounts.
-- fridge_keep_days: integer 1..7, and must be >= menuDayCount when menuDayCount is set (dish must keep for the whole menu window).
+  A topping/mix-in swap on the same form+base is NOT a new dish.
+- When currentMenuDishes is non-empty (slot replace): invent a clearly different form for that meal.
+- Include breakfast-suitable and lunch/dinner recipes as needed by meals. When breakfast is in meals, at least ~1/3 of plate_role=main must be true morning food.
+- When lunch and/or dinner are in meals: at least ONE plate_role=protein MUST be a meat/fish/heavy-animal dish. Egg/dairy/mushroom-only proteins do NOT satisfy this quota.
+- Lunch/dinner protein MUST prefer meat/fish/poultry. NEVER mark сырники, творожные оладьи/запеканки, каши, омлеты as lunch/dinner protein.
+- Breakfast = cooked morning food ONLY with plate_role=main. NEVER invent roast chicken, soups, plov, cutlets as breakfast.
+- plate_role values: main (breakfast family), soup, protein, veg, carb. NEVER plate_role=snack or companion. Legacy "companion" means carb.
+- One-pots (плов, лазанья, голубцы, пельмени): plate_role=protein with covers_roles including protein+carb (and other roles they truly cover). Do NOT invent a separate carb for the same one-pot.
+- For lunch/dinner also invent soup, veg, carb sides when not covered. Sauces/подливы are carb or veg — never breakfast mains.
+- Name sides by the dish itself («Грибной соус», «Картофельное пюре»). NEVER hardcode a pairing in the name («к пасте», «к мясу»).
+- NEVER invent snacks / перекусы / no-cook ready-to-eat plates. Snacks are a separate pipeline.
+- body_text: SHORT cooking steps in Russian. EACH step on its OWN line, numbered "1. ", "2. ", etc. Protein/main: 3–5 short steps. Soup/veg/carb: 2–4. Cooking/heating required.
+- fridge_keep_days: integer 1..7, and must be >= menuDayCount when menuDayCount is set.
 - At least one ingredient with kind=critical per recipe.
-- Prefer 3–8 ingredients; pantry for salt/spices/oil when needed. Companions may have 2–5. Completeness beats the preferred count — never omit a buyable food to stay short.
-- HARD shopping-list completeness: the shopping list is built ONLY from critical_ingredients. Every buyable food named in the recipe name OR body_text MUST appear in critical_ingredients with amount+unit — including mix-ins, toppings, herbs/greens, oil, and serving accompaniments (сметана, зелень, мёд, ягоды, соус, etc.). If the name says «с яблоками» / «с зеленью», those items MUST be listed. If a step says «подавайте со сметаной» or «добавьте зелень», list them too (kind=critical, not pantry). For «можно с A или B», pick ONE primary accompaniment and list only that — do not mention the other in body_text. Do NOT mention a food in name/steps unless it is in critical_ingredients.
-- EVERY critical ingredient MUST include realistic amount + unit per 1 adult serving (e.g. 150 g chicken, 200 g cabbage, 1 pcs egg). Pantry items should also have amounts when practical (1 tbsp oil, 1 tsp salt). Never bake people×days into amount — always per 1 serving.
-- price_rub_per_serving: integer RUBLES (not kopecks, not restaurant menu price) — supermarket ingredient cost for 1 adult HOME-COOKED serving. Examples: pasta/side 40–80, salad/egg dish 60–120, chicken/pork main 120–220, fish main 200–350. NEVER above 400. NEVER send kopecks.
-- nutrition_per_serving: kcal (integer) and protein_g / fat_g / carbs_g (numbers) for 1 adult serving. Realistic Russian home-cooking estimates.
-- OMIT price_rub_per_serving and/or any nutrition field when uncertain — do NOT send zeros as fillers.
+- Prefer 3–8 ingredients; pantry for salt/spices/oil when needed. Sides may have 2–5.
+- HARD shopping-list completeness: every buyable food in name or body_text MUST be in critical_ingredients with amount+unit per 1 adult serving.
+- price_rub_per_serving: integer RUBLES; NEVER above 400. OMIT price/nutrition when uncertain — no zero fillers.
 - Within this batch, each recipe must feel clearly different from the others.
-- Respect operatorTasteNotes:
-  - constraint is PRIMARY (the operator's rule). Generalize it: «не люблю каши» / «Не предлагай каши» forbids ALL porridges/каши — never invent buckwheat porridge, oatmeal, wheat porridge, or other каши.
-  - exampleDish is secondary context only (a dish that triggered the note). Never treat a ban as limited to that exact name.
-  - kind=ban is a hard never for the constraint meaning; kind=wish is soft prefer.
-- Do not invent recipe ids.`;
+- Respect operatorTasteNotes: constraint PRIMARY (generalize bans); exampleDish secondary; ban=hard never; wish=soft prefer.
+- Do not invent recipe ids. NEVER invent plate_kind / needs_companion.`;
 
 /** Split invent count into parallel chunk sizes (max INVENT_CHUNK_SIZE each). */
 export function inventChunkSizes(count: number): number[] {
@@ -299,14 +300,23 @@ export function selectExactUniqueDrafts(
   return kept;
 }
 
-/** Count plate_role=main drafts that signal meat/fish. */
+/** Count protein/main drafts that signal meat/fish. */
 export function countHeavyAnimalMainsInDrafts(
   drafts: readonly InventRecipeDraft[],
 ): number {
   return drafts.filter(
     (d) =>
-      d.plateRole === "main" && looksLikeHeavyAnimalProteinDish(d.name),
+      (d.plateRole === "protein" || d.plateRole === "main") &&
+      looksLikeHeavyAnimalProteinDish(d.name),
   ).length;
+}
+
+function isPrimaryRole(role: PlateRole): boolean {
+  return role === "protein" || role === "main";
+}
+
+function isSideRole(role: PlateRole): boolean {
+  return role === "carb" || role === "veg" || role === "soup";
 }
 
 /** Snack/breakfast filters + meal-mix select; empty when L/D meat quota fails. */
@@ -371,8 +381,8 @@ export function selectInventDraftsForMeals(
     return true;
   };
 
-  const mains = unique.filter((d) => d.plateRole === "main");
-  const companions = unique.filter((d) => d.plateRole === "companion");
+  const mains = unique.filter((d) => isPrimaryRole(d.plateRole));
+  const sides = unique.filter((d) => isSideRole(d.plateRole));
   const heavyAnimal = mains.filter((d) =>
     looksLikeHeavyAnimalProteinDish(d.name),
   );
@@ -388,7 +398,7 @@ export function selectInventDraftsForMeals(
   if (hasBreakfast) {
     for (const draft of breakfastMains) tryAdd(draft);
   }
-  for (const draft of companions) tryAdd(draft);
+  for (const draft of sides) tryAdd(draft);
   // Fill remainder without reintroducing breakfast mains when breakfast is off.
   for (const draft of unique) {
     if (
@@ -506,7 +516,7 @@ export async function proposeInventedRecipes(
     ),
     avoidNames: uniqueExactNames(context.avoidNames ?? []).slice(0, 50),
     instruction:
-      "Invent inventCount NEW cooked recipes via AI (extras so we can keep targetKeep). Mix plate_role=main and plate_role=companion (companions ≈30–40% when lunch/dinner are in meals). HARD: you own near-duplicate judgment — never invent the same culinary form+base as anything in previousMenusDishes, currentMenuDishes, or avoidNames (topping swaps count as duplicates: творожная запеканка с ягодами ≈ с изюмом; оладьи≈панкейки). If currentMenuDishes is set, invent a clearly different form for contextMeal. Keep the batch internally diverse. Cover cooked breakfast and lunch/dinner as needed by meals — when breakfast is requested, invent real morning food (яичница/сырники/оладьи/омлет/запеканка; каша only if operatorTasteNotes allow). Never roast chicken/soup/plov/cutlets for breakfast. Breakfast mains = morning food only; sauces/sides are companion. When lunch/dinner are in meals: include at least ONE meat/fish main (фрикадельки, запечённая курица/рыба, плов, картофельная запеканка с фаршем, etc.) — egg/dairy/mushroom-only mains do NOT count. NEVER mark morning forms (сырники, творожные запеканки, каши) as suitable for lunch/dinner. Name companions without «к пасте»/«к мясу». Never invent перекусы/no-cook snacks — those are separate. If contextMeal is set, bias toward that meal. Honor operatorTasteNotes: constraint PRIMARY (generalize — «не люблю каши» forbids all каши); exampleDish secondary. Keep body_text short (3–5 steps main, 2–4 companion). HARD: every buyable food in name or body_text (including serving like сметана/зелень) MUST be in critical_ingredients — shopping list ignores the text. When menuDayCount/peoplePerMeal are set, keep ingredient amounts per 1 adult serving; fridge_keep_days >= menuDayCount. HARD: required_equipment must be non-empty and ⊆ availableEquipment.",
+      "Invent inventCount NEW cooked recipes via AI (extras so we can keep targetKeep). Mix plate_role=main (breakfast), protein/soup/veg/carb (lunch/dinner). One-pots may set covers_roles. HARD: you own near-duplicate judgment — never invent the same culinary form+base as anything in previousMenusDishes, currentMenuDishes, or avoidNames. If currentMenuDishes is set, invent a clearly different form for contextMeal. Cover cooked breakfast and lunch/dinner as needed by meals — when breakfast is requested, invent real morning food with plate_role=main. Never roast chicken/soup/plov/cutlets for breakfast. When lunch/dinner are in meals: include at least ONE meat/fish protein. NEVER mark morning forms as lunch/dinner protein. Never invent перекусы/no-cook snacks. Honor operatorTasteNotes. Keep body_text short. HARD: every buyable food in name or body_text MUST be in critical_ingredients. fridge_keep_days >= menuDayCount. HARD: required_equipment must be non-empty and ⊆ availableEquipment. NEVER plate_kind.",
     operatorTasteNotes: tasteNotesForPrompt(tasteNotes),
   });
 
@@ -602,10 +612,10 @@ export function parseInventRecipesJson(content: string): InventRecipeDraft[] {
     );
     if (!requiredEquipment) return;
 
-    const roleRaw = row.plate_role ?? row.plateRole;
-    const plateRole: InventPlateRole =
-      roleRaw === "companion" ? "companion" : "main";
+    const plateRole = parseInventPlateRole(row.plate_role ?? row.plateRole);
+    if (!plateRole) return;
 
+    const coversRoles = parseCoversRoles(row.covers_roles ?? row.coversRoles);
     const priceCentsPerServing = inventPriceToKopecks(row);
 
     const nutritionRaw =
@@ -644,6 +654,7 @@ export function parseInventRecipesJson(content: string): InventRecipeDraft[] {
       fridgeKeepDays: Math.trunc(fridgeKeepDays),
       ingredients,
       plateRole,
+      coversRoles,
       requiredEquipment,
       priceCentsPerServing,
       caloriesKcalPerServing,
@@ -654,6 +665,14 @@ export function parseInventRecipesJson(content: string): InventRecipeDraft[] {
   });
 
   return out;
+}
+
+/** Map invent JSON plate_role; legacy companion → carb. */
+export function parseInventPlateRole(raw: unknown): PlateRole | null {
+  if (typeof raw !== "string") return null;
+  if (raw === "companion") return "carb";
+  if (isPlateRole(raw) && raw !== "snack") return raw;
+  return null;
 }
 
 /** Keep invent drafts cookable with the menu's available equipment. */
@@ -736,6 +755,7 @@ export async function persistInventedRecipe(
       body_text: draft.bodyText,
       fridge_keep_days: draft.fridgeKeepDays,
       plate_role: draft.plateRole,
+      covers_roles: draft.coversRoles,
       required_equipment: draft.requiredEquipment,
       price_cents_per_serving: draft.priceCentsPerServing,
       calories_kcal_per_serving: draft.caloriesKcalPerServing,

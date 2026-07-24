@@ -100,10 +100,38 @@ function parseAssignmentsJson(
   const seenSlots = new Set();
   for (const item of parsed.assignments) {
     if (!item || typeof item !== "object") continue;
-    const { slotId, recipeId, companionRecipeId: rawCompanion } = item;
-    if (typeof slotId !== "string" || typeof recipeId !== "string") continue;
-    if (!allowedSlotIds.has(slotId) || !allowedRecipeIds.has(recipeId)) continue;
-    if (seenSlots.has(slotId)) continue;
+    const { slotId, recipeId, companionRecipeId: rawCompanion, dishes: rawDishes } =
+      item;
+    if (typeof slotId !== "string") continue;
+    if (!allowedSlotIds.has(slotId) || seenSlots.has(slotId)) continue;
+
+    if (Array.isArray(rawDishes) && rawDishes.length > 0) {
+      const dishes = [];
+      const seenRoles = new Set();
+      for (const d of rawDishes) {
+        if (!d || typeof d !== "object") continue;
+        const rid = d.recipeId;
+        let role = d.plateRole ?? d.plate_role;
+        if (role === "companion") role = "carb";
+        if (typeof rid !== "string" || typeof role !== "string") continue;
+        if (!allowedRecipeIds.has(rid) || seenRoles.has(role)) continue;
+        seenRoles.add(role);
+        dishes.push({ plateRole: role, recipeId: rid });
+      }
+      if (dishes.length === 0) continue;
+      seenSlots.add(slotId);
+      const by = new Map(dishes.map((d) => [d.plateRole, d.recipeId]));
+      out.push({
+        slotId,
+        dishes,
+        recipeId: by.get("protein") ?? by.get("main") ?? dishes[0].recipeId,
+        companionRecipeId: by.get("carb") ?? null,
+      });
+      continue;
+    }
+
+    if (typeof recipeId !== "string") continue;
+    if (!allowedRecipeIds.has(recipeId)) continue;
     seenSlots.add(slotId);
     let companionRecipeId = null;
     const meal = mealBySlot.get(slotId);
@@ -116,7 +144,16 @@ function parseAssignmentsJson(
     ) {
       companionRecipeId = rawCompanion;
     }
-    out.push({ slotId, recipeId, companionRecipeId });
+    const dishes =
+      meal && mealAllowsCompanion(meal)
+        ? [
+            { plateRole: "protein", recipeId },
+            ...(companionRecipeId
+              ? [{ plateRole: "carb", recipeId: companionRecipeId }]
+              : []),
+          ]
+        : [{ plateRole: "main", recipeId }];
+    out.push({ slotId, recipeId, companionRecipeId, dishes });
   }
   return out;
 }
@@ -328,209 +365,337 @@ function looksLikeProteinDish(name) {
   return false;
 }
 
-function resolvePlateKind(proposal, mainHasProtein) {
-  if (proposal.plateKind === "complete" && mainHasProtein) return "complete";
-  if (proposal.plateKind === "needs_companion") return "needs_companion";
-  if (proposal.companionRecipeId) return "needs_companion";
-  if (!mainHasProtein) return "needs_companion";
-  return "complete";
+
+function legacyFksFromDishes(dishes) {
+  const by = new Map(dishes.map((d) => [d.plateRole, d.recipeId]));
+  const recipeId =
+    by.get("protein") ?? by.get("main") ?? dishes[0]?.recipeId ?? null;
+  const companionRecipeId = by.get("carb") ?? null;
+  return { recipeId, companionRecipeId };
 }
 
-function createPlateAssignmentState(slots, proposals) {
-  const mealBySlot = new Map(slots.map((s) => [s.slotId, s.meal]));
-  const dayBySlot = new Map(slots.map((s) => [s.slotId, s.dayIndex]));
-  const used = new Set(
-    proposals.flatMap((p) => (p.companionRecipeId ? [p.companionRecipeId] : [])),
-  );
-  const breakfastMains = new Set(
-    proposals
-      .filter((p) => isBreakfastMeal(mealBySlot.get(p.slotId)))
-      .map((p) => p.recipeId),
-  );
-  const usedOnDay = new Map();
-  for (const p of proposals) {
-    const day = dayBySlot.get(p.slotId);
-    if (day == null) continue;
-    const set = usedOnDay.get(day) ?? new Set();
-    set.add(p.recipeId);
-    usedOnDay.set(day, set);
+function expandDishAssignments(plateRole, recipeId, coversRoles) {
+  const roles = new Set([plateRole, ...(coversRoles ?? [])]);
+  return [...roles].map((r) => ({ plateRole: r, recipeId }));
+}
+
+function remainingOpenRoles(meal, dishes) {
+  const templates = {
+    breakfast: ["main"],
+    lunch: ["soup", "protein", "veg", "carb"],
+    dinner: ["protein", "veg", "carb"],
+    afternoon_snack: ["main"],
+  };
+  const covered = new Set();
+  for (const d of dishes) {
+    covered.add(d.plateRole);
+    for (const r of d.coversRoles ?? []) covered.add(r);
   }
-  return { mealBySlot, dayBySlot, used, breakfastMains, usedOnDay };
+  return (templates[meal] ?? []).filter((r) => !covered.has(r));
 }
 
-function orderedPlateProposals(proposals, mealBySlot, dayBySlot) {
-  return [...proposals].sort((a, b) => {
-    const dayA = dayBySlot.get(a.slotId) ?? 0;
-    const dayB = dayBySlot.get(b.slotId) ?? 0;
-    if (dayA !== dayB) return dayA - dayB;
-    return (
-      mealOrderIndex(mealBySlot.get(a.slotId)) -
-      mealOrderIndex(mealBySlot.get(b.slotId))
-    );
+/** Identity / legacy convert — no plateKind architecture. */
+function normalizePlateAssignments(slots, proposals, _candidates) {
+  const mealBySlot = new Map(slots.map((s) => [s.slotId, s.meal]));
+  return proposals.map((p) => {
+    if (p.dishes?.length) {
+      const fks = legacyFksFromDishes(p.dishes);
+      return {
+        slotId: p.slotId,
+        dishes: p.dishes,
+        recipeId: fks.recipeId ?? p.recipeId,
+        companionRecipeId: fks.companionRecipeId,
+      };
+    }
+    const meal = mealBySlot.get(p.slotId);
+    const recipeId = p.recipeId;
+    if (!recipeId) {
+      return { slotId: p.slotId, dishes: [], recipeId: "", companionRecipeId: null };
+    }
+    const dishes =
+      meal === "lunch" || meal === "dinner" || meal === "late_dinner"
+        ? [
+            { plateRole: "protein", recipeId },
+            ...(p.companionRecipeId && p.companionRecipeId !== recipeId
+              ? [{ plateRole: "carb", recipeId: p.companionRecipeId }]
+              : []),
+          ]
+        : [{ plateRole: "main", recipeId }];
+    const fks = legacyFksFromDishes(dishes);
+    return {
+      slotId: p.slotId,
+      dishes,
+      recipeId: fks.recipeId ?? recipeId,
+      companionRecipeId: fks.companionRecipeId,
+    };
   });
 }
 
-function directCompanion(proposal, candidates, avoidAsCompanion) {
-  const companion = proposal.companionRecipeId;
-  if (!companion || companion === proposal.recipeId) return null;
-  if (avoidAsCompanion.has(companion)) return null;
-  return candidates.some((c) => c.recipeId === companion) ? companion : null;
+function mergeDishAssignments(existing, incoming) {
+  const incomingRoles = new Set(incoming.map((d) => d.plateRole));
+  const kept = existing.filter((d) => !incomingRoles.has(d.plateRole));
+  return [...kept, ...incoming];
 }
 
-function recordCompanion(companion, day, used, usedOnDay) {
-  if (!companion) return;
-  used.add(companion);
-  if (day == null) return;
-  const set = usedOnDay.get(day) ?? new Set();
-  set.add(companion);
-  usedOnDay.set(day, set);
-}
-
-function normalizePlateAssignments(slots, proposals, candidates) {
-  const { mealBySlot, dayBySlot, used, breakfastMains, usedOnDay } =
-    createPlateAssignmentState(slots, proposals);
-  const nameById = new Map(candidates.map((c) => [c.recipeId, c.name]));
-  const ordered = orderedPlateProposals(proposals, mealBySlot, dayBySlot);
-  const outBySlot = new Map();
-  for (const proposal of ordered) {
-    const meal = mealBySlot.get(proposal.slotId);
-    const mainName = nameById.get(proposal.recipeId) ?? "";
-    const mainHasProtein = looksLikeProteinDish(mainName);
-    const mainIsHeavy = looksLikeHeavyAnimalProteinDish(mainName);
-    if (!meal || !mealAllowsCompanion(meal)) {
-      outBySlot.set(proposal.slotId, {
-        slotId: proposal.slotId,
-        recipeId: proposal.recipeId,
-        companionRecipeId: null,
-      });
-      continue;
-    }
-    const kind = resolvePlateKind(proposal, mainHasProtein);
-    if (kind === "complete") {
-      outBySlot.set(proposal.slotId, {
-        slotId: proposal.slotId,
-        recipeId: proposal.recipeId,
-        companionRecipeId: null,
-      });
-      continue;
-    }
-    const day = dayBySlot.get(proposal.slotId);
-    const dayUsed = day != null ? (usedOnDay.get(day) ?? new Set()) : new Set();
-    const avoidAsCompanion = new Set([...breakfastMains, ...dayUsed]);
-    let companion = directCompanion(proposal, candidates, avoidAsCompanion);
-    if (
-      companion &&
-      !mainHasProtein &&
-      !looksLikeProteinDish(nameById.get(companion) ?? "")
-    ) {
-      companion = null;
-    }
-    const companionName = companion ? (nameById.get(companion) ?? "") : "";
-    if (
-      companion &&
-      mainIsHeavy &&
-      looksLikeHeavyAnimalProteinDish(companionName) &&
-      !looksLikeCompanionOnly(companionName)
-    ) {
-      companion = null;
-    }
-    if (!companion) {
-      companion = pickCompanionCandidate(
-        candidates,
-        proposal.recipeId,
-        used,
-        avoidAsCompanion,
-        {
-          requireProtein: !mainHasProtein,
-          forbidHeavyAnimal: mainHasProtein,
-        },
-      );
-    }
-    recordCompanion(companion, day, used, usedOnDay);
-    outBySlot.set(proposal.slotId, {
-      slotId: proposal.slotId,
-      recipeId: proposal.recipeId,
-      companionRecipeId: companion,
-    });
+function buildProposalsFromExpanded(dishes, slotByKey) {
+  const groups = new Map();
+  for (const d of dishes) {
+    const key = `${d.meal}:${d.dayPair[0]}-${d.dayPair[1]}`;
+    const list = groups.get(key) ?? [];
+    list.push(d);
+    groups.set(key, list);
   }
-  return proposals.map(
-    (p) =>
-      outBySlot.get(p.slotId) ?? {
-        slotId: p.slotId,
-        recipeId: p.recipeId,
-        companionRecipeId: null,
-      },
-  );
+  const proposals = [];
+  for (const group of groups.values()) {
+    const first = group[0];
+    const ordered = [...group].sort(
+      (a, b) => (b.coversRoles?.length ?? 0) - (a.coversRoles?.length ?? 0),
+    );
+    const dishRows = [];
+    const seen = new Set();
+    for (const d of ordered) {
+      for (const row of expandDishAssignments(d.plateRole, d.recipeId, d.coversRoles)) {
+        if (seen.has(row.plateRole)) continue;
+        seen.add(row.plateRole);
+        dishRows.push(row);
+      }
+    }
+    const fks = legacyFksFromDishes(dishRows);
+    for (const day of first.dayPair) {
+      const slot = slotByKey.get(`${day}:${first.meal}`);
+      if (!slot) continue;
+      proposals.push({
+        slotId: slot.slotId,
+        dishes: dishRows,
+        recipeId: fks.recipeId,
+        companionRecipeId: fks.companionRecipeId,
+      });
+    }
+  }
+  return proposals;
 }
 
-const plateSlots = [
-  { slotId: "s1", dayIndex: 1, meal: "lunch" },
-  { slotId: "s2", dayIndex: 1, meal: "dinner" },
-];
-const plateCands = [
-  { recipeId: "main-a", name: "Куриное филе" },
-  { recipeId: "side-a", name: "Пюре" },
-  { recipeId: "plov", name: "Плов с курицей" },
-];
 check(
-  "pickCompanionCandidate prefers plateRole=companion",
-  pickCompanionCandidate(
-    [
-      { recipeId: "main-a", name: "Филе", plateRole: "main" },
-      { recipeId: "side-b", name: "Гречка", plateRole: "companion" },
-      { recipeId: "main-b", name: "Котлеты", plateRole: "main" },
-    ],
-    "main-a",
-  ) === "side-b",
+  "legacyFks: protein+carb → recipeId + companion",
+  (() => {
+    const fks = legacyFksFromDishes([
+      { plateRole: "protein", recipeId: "p1" },
+      { plateRole: "carb", recipeId: "c1" },
+      { plateRole: "veg", recipeId: "v1" },
+    ]);
+    return fks.recipeId === "p1" && fks.companionRecipeId === "c1";
+  })(),
 );
-const filledBare = normalizePlateAssignments(
-  plateSlots,
+
+check(
+  "legacyFks: main only",
+  legacyFksFromDishes([{ plateRole: "main", recipeId: "m1" }]).recipeId ===
+    "m1" &&
+    legacyFksFromDishes([{ plateRole: "main", recipeId: "m1" }])
+      .companionRecipeId == null,
+);
+
+check(
+  "expandDishAssignments plov covers protein+carb",
+  expandDishAssignments("protein", "plov", ["protein", "carb"]).length === 2 &&
+    expandDishAssignments("protein", "plov", ["protein", "carb"]).every(
+      (d) => d.recipeId === "plov",
+    ),
+);
+
+check(
+  "remainingOpenRoles after plov → soup+veg",
+  remainingOpenRoles("lunch", [
+    { plateRole: "protein", coversRoles: ["protein", "carb"] },
+  ]).join(",") === "soup,veg",
+);
+
+check(
+  "remainingOpenRoles dinner after plov → veg",
+  remainingOpenRoles("dinner", [
+    { plateRole: "protein", coversRoles: ["protein", "carb"] },
+  ]).join(",") === "veg",
+);
+
+const normIdentity = normalizePlateAssignments(
+  [{ slotId: "s1", dayIndex: 1, meal: "lunch" }],
   [
     {
       slotId: "s1",
-      recipeId: "main-a",
-      companionRecipeId: null,
-      plateKind: "needs_companion",
-    },
-    {
-      slotId: "s2",
-      recipeId: "plov",
-      companionRecipeId: "side-a",
-      plateKind: "complete",
+      dishes: [
+        { plateRole: "soup", recipeId: "soup1" },
+        { plateRole: "protein", recipeId: "prot1" },
+        { plateRole: "veg", recipeId: "veg1" },
+        { plateRole: "carb", recipeId: "carb1" },
+      ],
     },
   ],
-  plateCands,
+  [],
 );
 check(
-  "normalize fills needs_companion lunch when AI omitted companion id",
-  filledBare.find((a) => a.slotId === "s1")?.companionRecipeId === "side-a",
+  "normalize identity keeps dishes[]",
+  normIdentity[0]?.dishes?.length === 4 &&
+    normIdentity[0]?.recipeId === "prot1" &&
+    normIdentity[0]?.companionRecipeId === "carb1",
+);
+
+const normLegacy = normalizePlateAssignments(
+  [
+    { slotId: "s1", dayIndex: 1, meal: "lunch" },
+    { slotId: "s2", dayIndex: 1, meal: "breakfast" },
+  ],
+  [
+    { slotId: "s1", recipeId: "prot1", companionRecipeId: "carb1" },
+    { slotId: "s2", recipeId: "main1", companionRecipeId: "ignored" },
+  ],
+  [],
 );
 check(
-  "normalize trusts plateKind=complete and strips companion",
-  filledBare.find((a) => a.slotId === "s2")?.companionRecipeId == null,
+  "normalize legacy lunch → protein+carb dishes",
+  normLegacy.find((a) => a.slotId === "s1")?.dishes?.map((d) => d.plateRole).join(",") ===
+    "protein,carb",
 );
 check(
-  "normalize does not invent companion without AI plateKind/companion",
-  normalizePlateAssignments(
-    [{ slotId: "d1", dayIndex: 1, meal: "dinner" }],
-    [{ slotId: "d1", recipeId: "plov", companionRecipeId: null }],
-    plateCands,
-  ).find((a) => a.slotId === "d1")?.companionRecipeId == null,
+  "normalize legacy breakfast → main only (strip companion)",
+  normLegacy.find((a) => a.slotId === "s2")?.dishes?.length === 1 &&
+    normLegacy.find((a) => a.slotId === "s2")?.dishes?.[0]?.plateRole === "main" &&
+    normLegacy.find((a) => a.slotId === "s2")?.companionRecipeId == null,
+);
+
+const slotByKey = new Map([
+  ["1:lunch", { slotId: "l1", dayIndex: 1, meal: "lunch" }],
+  ["2:lunch", { slotId: "l2", dayIndex: 2, meal: "lunch" }],
+]);
+const built = buildProposalsFromExpanded(
+  [
+    {
+      meal: "lunch",
+      dayPair: [1, 2],
+      plateRole: "protein",
+      recipeId: "plov",
+      coversRoles: ["protein", "carb"],
+    },
+    {
+      meal: "lunch",
+      dayPair: [1, 2],
+      plateRole: "soup",
+      recipeId: "borscht",
+    },
+    {
+      meal: "lunch",
+      dayPair: [1, 2],
+      plateRole: "veg",
+      recipeId: "salad",
+    },
+  ],
+  slotByKey,
 );
 check(
-  "normalize honors AI needs_companion pairing (no keyword override)",
-  normalizePlateAssignments(
-    [{ slotId: "d3", dayIndex: 3, meal: "dinner" }],
-    [
+  "buildProposals expands covers + one proposal per day",
+  built.length === 2 &&
+    built.every((p) => p.dishes.length === 4) &&
+    built.every((p) => p.recipeId === "plov") &&
+    built.every((p) => p.companionRecipeId === "plov") &&
+    built.every(
+      (p) =>
+        p.dishes.some((d) => d.plateRole === "soup" && d.recipeId === "borscht") &&
+        p.dishes.some((d) => d.plateRole === "carb" && d.recipeId === "plov") &&
+        p.dishes.some((d) => d.plateRole === "veg" && d.recipeId === "salad"),
+    ),
+);
+
+check(
+  "AC6 lunch write-set includes soup (not protein+carb only)",
+  built[0]?.dishes?.some((d) => d.plateRole === "soup") === true &&
+    built[0]?.dishes?.some((d) => d.plateRole === "veg") === true &&
+    built[0]?.dishes?.map((d) => d.plateRole).sort().join(",") ===
+      "carb,protein,soup,veg",
+);
+
+check(
+  "mergeDishAssignments keeps soup/veg when replacing protein",
+  (() => {
+    const merged = mergeDishAssignments(
+      [
+        { plateRole: "soup", recipeId: "s1" },
+        { plateRole: "protein", recipeId: "old" },
+        { plateRole: "veg", recipeId: "v1" },
+        { plateRole: "carb", recipeId: "c1" },
+      ],
+      [{ plateRole: "protein", recipeId: "new" }],
+    );
+    return (
+      merged.find((d) => d.plateRole === "soup")?.recipeId === "s1" &&
+      merged.find((d) => d.plateRole === "veg")?.recipeId === "v1" &&
+      merged.find((d) => d.plateRole === "protein")?.recipeId === "new" &&
+      merged.find((d) => d.plateRole === "carb")?.recipeId === "c1"
+    );
+  })(),
+);
+
+check(
+  "dropHeavyHeavy keeps one-pot carb (same recipeId)",
+  (() => {
+    const protein = { plateRole: "protein", recipeId: "plov" };
+    const carb = { plateRole: "carb", recipeId: "plov" };
+    // Mirror generate-menu guard.
+    if (protein.recipeId === carb.recipeId) return true;
+    return false;
+  })(),
+);
+
+check(
+  "flatten prefers covers over earlier separate carb",
+  (() => {
+    const group = [
+      { plateRole: "carb", recipeId: "rice", coversRoles: null },
       {
-        slotId: "d3",
+        plateRole: "protein",
         recipeId: "plov",
-        companionRecipeId: "side-a",
-        plateKind: "needs_companion",
+        coversRoles: ["protein", "carb"],
+      },
+    ];
+    const ordered = [...group].sort(
+      (a, b) => (b.coversRoles?.length ?? 0) - (a.coversRoles?.length ?? 0),
+    );
+    const seen = new Set();
+    const rows = [];
+    for (const d of ordered) {
+      for (const row of expandDishAssignments(
+        d.plateRole,
+        d.recipeId,
+        d.coversRoles,
+      )) {
+        if (seen.has(row.plateRole)) continue;
+        seen.add(row.plateRole);
+        rows.push(row);
+      }
+    }
+    return rows.find((r) => r.plateRole === "carb")?.recipeId === "plov";
+  })(),
+);
+
+const dishesAssign = parseAssignmentsJson(
+  JSON.stringify({
+    assignments: [
+      {
+        slotId: "s1",
+        dishes: [
+          { plateRole: "protein", recipeId: "rec-a" },
+          { plateRole: "carb", recipeId: "rec-side" },
+        ],
       },
     ],
-    plateCands,
-  ).find((a) => a.slotId === "d3")?.companionRecipeId === "side-a",
+  }),
+  allowedR,
+  allowedS,
+  mealBySlot,
+);
+check(
+  "parseAssignmentsJson prefers dishes[]",
+  dishesAssign[0]?.dishes?.length === 2 &&
+    dishesAssign[0]?.recipeId === "rec-a" &&
+    dishesAssign[0]?.companionRecipeId === "rec-side",
 );
 
 check(
@@ -548,48 +713,6 @@ check(
 check(
   "protein: potato pancakes are not protein",
   !looksLikeProteinDish("Картофельные оладьи с укропом"),
-);
-
-const proteinPlate = normalizePlateAssignments(
-  [{ slotId: "d1", dayIndex: 1, meal: "dinner" }],
-  [
-    {
-      slotId: "d1",
-      recipeId: "pancakes",
-      companionRecipeId: "carrot-salad",
-      plateKind: "needs_companion",
-    },
-  ],
-  [
-    { recipeId: "pancakes", name: "Картофельные оладьи с укропом" },
-    { recipeId: "carrot-salad", name: "Морковный салат с чесноком" },
-    { recipeId: "chicken", name: "Куриная грудка" },
-  ],
-);
-check(
-  "normalize replaces veg+veg dinner with protein companion",
-  proteinPlate.find((a) => a.slotId === "d1")?.companionRecipeId === "chicken",
-);
-
-const proteinLessComplete = normalizePlateAssignments(
-  [{ slotId: "d2", dayIndex: 1, meal: "dinner" }],
-  [
-    {
-      slotId: "d2",
-      recipeId: "pancakes",
-      companionRecipeId: null,
-      plateKind: "complete",
-    },
-  ],
-  [
-    { recipeId: "pancakes", name: "Картофельные оладьи с укропом" },
-    { recipeId: "chicken", name: "Куриная грудка", plateRole: "companion" },
-  ],
-);
-check(
-  "normalize rejects protein-less plateKind=complete",
-  proteinLessComplete.find((a) => a.slotId === "d2")?.companionRecipeId ===
-    "chicken",
 );
 
 check(
@@ -619,198 +742,6 @@ check(
 check(
   "heavy animal: herring is heavy",
   looksLikeHeavyAnimalProteinDish("Сельдь под шубой"),
-);
-
-const chickenFishPlate = normalizePlateAssignments(
-  [{ slotId: "d1", dayIndex: 1, meal: "dinner" }],
-  [
-    {
-      slotId: "d1",
-      recipeId: "chicken",
-      companionRecipeId: "fish",
-      plateKind: "needs_companion",
-    },
-  ],
-  [
-    {
-      recipeId: "chicken",
-      name: "Куриные грудки запечённые с овощами",
-    },
-    {
-      recipeId: "fish",
-      name: "Запечённая рыба с лимоном",
-      plateRole: "companion",
-    },
-    {
-      recipeId: "puree",
-      name: "Картофельное пюре",
-      plateRole: "companion",
-    },
-  ],
-);
-check(
-  "normalize replaces chicken+fish with carb side",
-  chickenFishPlate.find((a) => a.slotId === "d1")?.companionRecipeId ===
-    "puree",
-);
-
-const chickenOnlyFish = normalizePlateAssignments(
-  [{ slotId: "d1", dayIndex: 1, meal: "dinner" }],
-  [
-    {
-      slotId: "d1",
-      recipeId: "chicken",
-      companionRecipeId: "fish",
-      plateKind: "needs_companion",
-    },
-  ],
-  [
-    {
-      recipeId: "chicken",
-      name: "Куриные грудки запечённые с овощами",
-    },
-    {
-      recipeId: "fish",
-      name: "Запечённая рыба с лимоном",
-      plateRole: "companion",
-    },
-  ],
-);
-check(
-  "normalize clears companion when only fish left for chicken main",
-  chickenOnlyFish.find((a) => a.slotId === "d1")?.companionRecipeId == null,
-);
-
-const chickenSauce = normalizePlateAssignments(
-  [{ slotId: "d1", dayIndex: 1, meal: "dinner" }],
-  [
-    {
-      slotId: "d1",
-      recipeId: "chicken",
-      companionRecipeId: "sauce",
-      plateKind: "needs_companion",
-    },
-  ],
-  [
-    { recipeId: "chicken", name: "Куриная грудка" },
-    {
-      recipeId: "sauce",
-      name: "Грибной соус",
-      plateRole: "companion",
-    },
-  ],
-);
-check(
-  "normalize keeps mushroom sauce with chicken main",
-  chickenSauce.find((a) => a.slotId === "d1")?.companionRecipeId === "sauce",
-);
-
-const vegFish = normalizePlateAssignments(
-  [{ slotId: "d1", dayIndex: 1, meal: "dinner" }],
-  [
-    {
-      slotId: "d1",
-      recipeId: "cutlets",
-      companionRecipeId: "fish",
-      plateKind: "needs_companion",
-    },
-  ],
-  [
-    { recipeId: "cutlets", name: "Морковные котлеты" },
-    {
-      recipeId: "fish",
-      name: "Запечённая рыба с лимоном",
-      plateRole: "companion",
-    },
-  ],
-);
-check(
-  "normalize keeps fish companion for vegetable cutlets",
-  vegFish.find((a) => a.slotId === "d1")?.companionRecipeId === "fish",
-);
-
-const chickenAutofill = normalizePlateAssignments(
-  [{ slotId: "d1", dayIndex: 1, meal: "dinner" }],
-  [
-    {
-      slotId: "d1",
-      recipeId: "chicken",
-      companionRecipeId: null,
-      plateKind: "needs_companion",
-    },
-  ],
-  [
-    { recipeId: "chicken", name: "Куриная грудка" },
-    {
-      recipeId: "fish",
-      name: "Запечённая рыба с лимоном",
-      plateRole: "companion",
-    },
-    {
-      recipeId: "puree",
-      name: "Картофельное пюре",
-      plateRole: "companion",
-    },
-  ],
-);
-check(
-  "normalize auto-fill for protein main prefers puree over fish",
-  chickenAutofill.find((a) => a.slotId === "d1")?.companionRecipeId ===
-    "puree",
-);
-
-const meatMeatPlate = normalizePlateAssignments(
-  [{ slotId: "d1", dayIndex: 1, meal: "dinner" }],
-  [
-    {
-      slotId: "d1",
-      recipeId: "cutlets",
-      companionRecipeId: "chicken",
-      plateKind: "needs_companion",
-    },
-  ],
-  [
-    { recipeId: "cutlets", name: "Котлеты из говядины" },
-    {
-      recipeId: "chicken",
-      name: "Куриная грудка",
-      plateRole: "companion",
-    },
-    {
-      recipeId: "puree",
-      name: "Картофельное пюре",
-      plateRole: "companion",
-    },
-  ],
-);
-check(
-  "normalize replaces meat+meat with carb side",
-  meatMeatPlate.find((a) => a.slotId === "d1")?.companionRecipeId === "puree",
-);
-
-const chickenEggCompanion = normalizePlateAssignments(
-  [{ slotId: "d1", dayIndex: 1, meal: "dinner" }],
-  [
-    {
-      slotId: "d1",
-      recipeId: "chicken",
-      companionRecipeId: "egg",
-      plateKind: "needs_companion",
-    },
-  ],
-  [
-    { recipeId: "chicken", name: "Куриная грудка" },
-    {
-      recipeId: "egg",
-      name: "Шпинатный салат с яйцом",
-      plateRole: "companion",
-    },
-  ],
-);
-check(
-  "normalize keeps egg companion with chicken main",
-  chickenEggCompanion.find((a) => a.slotId === "d1")?.companionRecipeId ===
-    "egg",
 );
 
 function groupSlotsByMeal(slots) {
@@ -1681,7 +1612,6 @@ check(
       p.slotId === "l1"
         ? {
             ...p,
-            plateKind: "needs_companion",
             companionRecipeId: "sauce",
           }
         : p,
@@ -1690,9 +1620,13 @@ check(
   );
   const lunchCompanion = plated.find((a) => a.slotId === "l1")?.companionRecipeId;
   check(
-    "normalize keeps AI sauce companion and clears breakfast companion",
+    "normalize legacy lunch keeps carb; breakfast has no carb",
     lunchCompanion === "sauce" &&
-      plated.find((a) => a.slotId === "b1")?.companionRecipeId == null,
+      plated.find((a) => a.slotId === "l1")?.dishes?.some(
+        (d) => d.plateRole === "carb" && d.recipeId === "sauce",
+      ) &&
+      plated.find((a) => a.slotId === "b1")?.companionRecipeId == null &&
+      plated.find((a) => a.slotId === "b1")?.dishes?.[0]?.plateRole === "main",
   );
 }
 
@@ -1746,17 +1680,14 @@ check(
   );
   const lunch = swapped.find((a) => a.slotId === "l1");
   const dinner = swapped.find((a) => a.slotId === "d1");
-  const dayIds = [
-    lunch?.recipeId,
-    lunch?.companionRecipeId,
-    dinner?.recipeId,
-    dinner?.companionRecipeId,
-  ].filter(Boolean);
+  // Identity normalize: converts legacy pair → dishes; culinary swap rejection
+  // is no longer plateKind's job (roles come from templates + invent).
   check(
-    "normalize rejects same-day potato/chicken swap",
-    new Set(dayIds).size === dayIds.length &&
-      lunch?.companionRecipeId !== "chicken" &&
-      dinner?.companionRecipeId !== "potato",
+    "normalize legacy convert keeps dishes protein+carb",
+    lunch?.dishes?.map((d) => d.plateRole).join(",") === "protein,carb" &&
+      dinner?.dishes?.map((d) => d.plateRole).join(",") === "protein,carb" &&
+      lunch?.recipeId === "potato" &&
+      lunch?.companionRecipeId === "chicken",
   );
 }
 

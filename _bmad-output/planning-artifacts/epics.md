@@ -22,8 +22,8 @@ This document provides the complete epic and story breakdown for keplo, decompos
 
 FR1: Operator can create a Menu by choosing 1, 2, 3, or 4 days and receiving Recipe suggestions for that length (not slot-by-slot from scratch first).
 FR2: Operator can set serving counts; new Menu defaults to 3 meals/day × 2 people; changeable before Shopping list copy.
-FR3: Operator can assign/edit Recipes to breakfast, lunch, and dinner slots; empty slots allowed; only eligible Recipes assignable.
-FR4: Operator can add no-cook Snacks to the same Menu and Order.
+FR3: Operator can assign/edit Slot dishes on breakfast, lunch, dinner, and snack meals via a uniform Plate-role model; empty roles allowed; only eligible Recipes assignable; lunch includes soup + Harvard second course; dinner is Harvard second course; breakfast/snack use simpler templates on the same structure.
+FR4: Operator can add no-cook Snacks to the same Menu and Order (persisted as Slot dishes with role snack).
 FR5: Operator can view Portion plan by day and meal before purchase/cook; portions laid out without leftover tracking.
 FR6: Operator can replace a slot via AI resuggest (no separate Recipe library or manual History pick in v1). AI generation also reintroduces Recipes not cooked for ~2+ weeks, weighted by Rating (high more often, medium less).
 FR7: Operator can receive AI suggestions informed by cook recency, Refusals, and Ratings; biased to simple home batch food (Model C); reintroduces Recipes idle ~2+ weeks (high Rating more often, medium less); new AI Recipes gated by Checked matches and today-stock.
@@ -45,6 +45,10 @@ FR22: Operator can open Recipe text from Menu, History, or Shopping list anytime
 FR23: UJ-1 flow gate — Create Menu → slot edit → Portion plan → Shopping list; cannot skip slot edit to Shopping list.
 FR24: History surface lists past Menus/Recipes for review and Rating; feeds AI cook-recency / Rating weights (not a manual slot-pick UI).
 FR25: Post sign-in lands on Create Menu / planning (not empty dashboard).
+FR26: Lunch/dinner second course targets Harvard plate coverage — protein, vegetables, and carb (via separate Slot dishes and/or multi-role Recipes).
+FR27: Lunch meal template always includes a soup Plate role.
+FR28: Meal templates and required Plate roles are decided in application code; AI invents/fills Recipe content for those roles, not free-form meal architecture.
+FR29: All meal types (including breakfast and snacks) persist through the same Slot dish + Plate role structure.
 
 ### NonFunctional Requirements
 
@@ -93,17 +97,18 @@ UX-DR13: `recipe-text-panel` as Dialog (one modal depth); Esc closes without dis
 UX-DR14: State treatments — cold-load Skeleton; generating disables day-length-picker; copy success «Список скопирован.»; store link absent does not block copy.
 UX-DR15: Interaction — desktop mouse primary + keyboard adequate; Tab order matches layout; focus rings visible; no hover-only critical actions; modal depth one level.
 UX-DR16: Visual/UX non-goals — no match-review, fallback flow, ready packs, Pantry screen, stock badges, cook timer/duration UI, batch-component layer, dark mode, UJ-2 reuse surface.
+UX-DR17: Every `slot-cell` shows ordered `slot-dish-line` rows with explicit Russian Plate role labels (Суп / Белок / Овощи / Углеводы / Основное / Перекус); multi-role one-pots show coverage on the line; overflow actions target a role.
 
 ### PRD ↔ Epics FR Crosswalk
 
-Epics inventory IDs (FR1–FR25 below) are **not** the same numbers as PRD `FR-1`…`FR-24`. Use this table for traceability.
+Epics inventory IDs (FR1–FR29 below) are **not** always the same numbers as PRD `FR-1`…`FR-28`. Use this table for traceability.
 
 | PRD | Epics inventory | Notes |
 | --- | --------------- | ----- |
 | FR-1 | FR1 | Create Menu |
 | FR-2 | FR2 | Servings |
-| FR-3 | FR3 | Assign meals |
-| FR-4 | FR4 | Snacks |
+| FR-3 | FR3 | Assign meals (extended: Slot dishes + templates) |
+| FR-4 | FR4 | Snacks (Slot dish role snack) |
 | FR-5 | FR5 | Portion plan |
 | FR-6 | FR6 | Slot AI replace; long-idle in Story 2.3 |
 | FR-7 | FR7 | AI suggestions |
@@ -127,13 +132,18 @@ Epics inventory IDs (FR1–FR25 below) are **not** the same numbers as PRD `FR-1
 | (UX) | FR23 | UJ-1 flow gate |
 | (UX) | FR24 | History surface |
 | (UX) | FR25 | Post sign-in → Create Menu |
+| FR-25 | FR26 | Harvard plate composition |
+| FR-26 | FR27 | Lunch soup Plate role |
+| FR-27 | FR28 | Code-structured suggestions |
+| FR-28 | FR29 | Uniform Slot dish model |
+| (UX) | UX-DR17 | Role-labeled slot-dish-line |
 
 ### FR Coverage Map
 
 FR1: Epic 2 — Create Menu by day length + suggestions
 FR2: Epic 3 — Configure servings (default 3×2)
-FR3: Epic 2 — Edit breakfast/lunch/dinner slots
-FR4: Epic 2 — Add Snacks
+FR3: Epic 2 (baseline slots) + Epic 6 — Slot dishes / meal templates / Harvard + soup
+FR4: Epic 2 (baseline snacks) + Epic 6 — snacks as Slot dishes (role snack)
 FR5: Epic 3 — View/adjust Portion plan
 FR6: Epic 2 — Slot replace via AI resuggest; AI reuses long-idle Recipes by Rating weight
 FR7: Epic 2 — AI suggestions (cook recency/Refusal/Rating, Model C)
@@ -155,6 +165,11 @@ FR22: Epic 4 — View Recipe text
 FR23: Epic 2 + Epic 3 — UJ-1 flow gate (slot edit then Portion plan → list)
 FR24: Epic 4 — History surface
 FR25: Epic 1 — Post sign-in lands on Create Menu / planning
+FR26: Epic 6 — Harvard plate coverage for lunch/dinner second course
+FR27: Epic 6 — Lunch soup Plate role
+FR28: Epic 6 — Code-structured meal templates; AI fills role slots
+FR29: Epic 6 — Uniform Slot dish model for all meal types
+UX-DR17: Epic 6 — Role-labeled slot-dish-line UI
 
 ## Epic List
 
@@ -177,6 +192,10 @@ Operator reviews past Menus/Recipes in History, rates Recipes/Snacks (editable a
 ### Epic 5: App chrome alignment (post-MVP UX)
 Operator gets W1 header/wizard chrome from finalized UX spines — brand mark + Keplo, Create Menu CTA, plan steps separated from global nav — without false active states on History/Settings.
 **FRs covered:** UX-DR4 (revised 2026-07-20)
+
+### Epic 6: Harvard plate meal composition
+Operator gets a uniform Slot dish model for every meal type; lunch/dinner follow Harvard plate (lunch includes soup); complex one-pots cover multiple roles; AI invents into code-defined meal templates.
+**FRs covered:** FR3 (extended), FR4 (extended), FR6, FR7, FR26–FR29, UX-DR17
 
 ## Epic 1: Sign in, workspace & store catalog
 
@@ -624,3 +643,94 @@ So that Create Menu, History, and plan steps do not fight for the same active st
 **When** comparing to `mockups/mock-header-nav-w1-2026-07-20.html`
 **Then** layout matches W1 (two rows; Soft Workshop / Lavender tokens; pill active styles unchanged in spirit)
 **And** older mocks that put pills inside the global header are ignored for chrome
+
+## Epic 6: Harvard plate meal composition
+
+Bring every meal onto a uniform Slot dish + Plate role model; lunch always has soup plus a Harvard second course; dinner is Harvard only; breakfast and snacks use simpler templates on the same structure; AI fills code-emitted role slots; UI labels each dish’s role.
+
+**Meal templates (code-owned, v1):**
+- breakfast / second_breakfast: `[main]`
+- lunch: `[soup, protein, veg, carb]`
+- dinner / late_dinner: `[protein, veg, carb]`
+- snack / перекус: `[snack]`
+
+### Story 6.1: Slot dish roles schema and meal templates
+
+As an operator (Sergey),
+I want every meal to store role-labeled Slot dishes (including breakfast and snacks) with composition rules for Harvard plate and lunch soup,
+So that the plan data matches how I eat and complex one-pots do not spawn duplicate sides.
+
+**Acceptance Criteria:**
+
+**Given** a Menu with breakfast, lunch, dinner, and snack meals selected
+**When** slots are persisted
+**Then** each meal uses the same Slot dish persistence (`MenuSlot` → `MenuSlotDish[]` with Plate role + Recipe/item ref)
+**And** breakfast/second_breakfast template is `[main]`; snack template is `[snack]`; lunch is `[soup, protein, veg, carb]`; dinner/late_dinner is `[protein, veg, carb]` (FR3, FR27, FR29)
+
+**Given** a multi-role Recipe (e.g. plov) with `coversRoles` including protein and carb
+**When** composition rules run for lunch or dinner
+**Then** separate Slot dishes are not required for already-covered roles
+**And** uncovered required roles remain available to fill (FR26)
+
+**Given** existing menus that used `recipe_id` / `companion_recipe_id` and/or ad-hoc `menu_snacks`
+**When** migration/adapters run
+**Then** load, shopping list, and history can read the new Slot dish shape without dropping assigned dishes (FR17 path preserved)
+
+**Given** domain verify scripts
+**When** composition matrix cases run
+**Then** lunch soup role presence, Harvard coverage, breakfast/snack templates, and coversRoles skip-duplicate behavior PASS
+
+### Story 6.2: Template-driven AI invent and assign
+
+As an operator (Sergey),
+I want generation to fill a fixed meal structure decided in code,
+So that the model spends capacity on suitable recipes, not inventing meal architecture.
+
+**Acceptance Criteria:**
+
+**Given** create-menu or resuggest invent runs for selected meals
+**When** the planner expands work for the AI
+**Then** role slots are emitted from meal templates in code before invent/expand
+**And** prompts ask for Recipe content per role slot (and optional coversRoles), not free-form `plateKind` meal architecture (FR28, FR7)
+
+**Given** lunch is in the meal selection
+**When** invent+assign completes successfully
+**Then** the lunch template includes a soup role and Harvard second-course roles (protein, veg, carb), subject to coversRoles compression (FR26, FR27)
+
+**Given** dinner is in the meal selection
+**When** invent+assign completes successfully
+**Then** dinner has Harvard second-course roles and no soup role requirement (FR26)
+
+**Given** Refusal / dislike hard-suppress and fridge-keep eligibility
+**When** invent/assign places Recipes into role slots
+**Then** those gates still apply on every path (FR6, FR7, FR8, AD-3/AD-4)
+
+**Given** a complex one-pot that covers multiple roles
+**When** assign normalizes the plate
+**Then** duplicate invent/assign for covered roles is skipped
+
+### Story 6.3: Role-labeled Menu UI and per-role edit
+
+As an operator (Sergey),
+I want each dish line to show its Plate role clearly and to replace one role without breaking the whole meal,
+So that I always know what each dish is for.
+
+**Acceptance Criteria:**
+
+**Given** a filled lunch or dinner `slot-cell`
+**When** the Menu meal-lane renders
+**Then** each Slot dish appears as a `slot-dish-line` with Russian role label (Суп / Белок / Овощи / Углеводы) and dish name (UX-DR17)
+**And** multi-role one-pots show coverage on the line (e.g. «Белок · Углеводы»)
+
+**Given** breakfast or snack `slot-cell`
+**When** the Menu renders
+**Then** the same `slot-dish-line` chrome is used (labels Основное / Перекус) — not a separate widget class (FR29, UX-DR17)
+
+**Given** `slot-overflow` on a role line
+**When** the operator chooses replace or Refusal
+**Then** the action targets that Plate role / dish (FR6, FR8)
+**And** UI copy does not narrate abandoned companion/гарнир scope
+
+**Given** empty roles
+**When** the cell renders
+**Then** empty role lines remain valid (empty slots/roles allowed) and the operator can still proceed toward Shopping list per UJ-1

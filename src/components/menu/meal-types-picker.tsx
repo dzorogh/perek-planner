@@ -1,16 +1,18 @@
 "use client";
 
 import {
+  COOKABLE_MEAL_SLOTS,
   DEFAULT_INCLUDE_SNACKS,
   DEFAULT_MEAL_SELECTION,
   MEAL_LABELS_RU,
-  MEAL_SLOTS,
   type MealSlot,
 } from "@/domain/menu/constants";
 import { cn } from "@/lib/utils";
 
+export type CookableMealSlot = Exclude<MealSlot, "snack">;
+
 export type MealTypesSelection = {
-  meals: Record<MealSlot, boolean>;
+  meals: Record<CookableMealSlot, boolean>;
   includeSnacks: boolean;
 };
 
@@ -38,13 +40,13 @@ export function MealTypesPicker({
   disabled = false,
 }: MealTypesPickerProps) {
   const selectedCount =
-    MEAL_SLOTS.filter((m) => value.meals[m]).length +
+    COOKABLE_MEAL_SLOTS.filter((m) => value.meals[m]).length +
     (value.includeSnacks ? 1 : 0);
 
-  function toggleMeal(meal: MealSlot, checked: boolean) {
+  function toggleMeal(meal: CookableMealSlot, checked: boolean) {
     const nextMeals = { ...value.meals, [meal]: checked };
     const nextCount =
-      MEAL_SLOTS.filter((m) => nextMeals[m]).length +
+      COOKABLE_MEAL_SLOTS.filter((m) => nextMeals[m]).length +
       (value.includeSnacks ? 1 : 0);
     if (nextCount === 0) return;
     onChange({ ...value, meals: nextMeals });
@@ -52,13 +54,14 @@ export function MealTypesPicker({
 
   function toggleSnacks(checked: boolean) {
     const nextCount =
-      MEAL_SLOTS.filter((m) => value.meals[m]).length + (checked ? 1 : 0);
+      COOKABLE_MEAL_SLOTS.filter((m) => value.meals[m]).length +
+      (checked ? 1 : 0);
     if (nextCount === 0) return;
     onChange({ ...value, includeSnacks: checked });
   }
 
   const chips: MealChip[] = [
-    ...MEAL_SLOTS.map((meal) => ({
+    ...COOKABLE_MEAL_SLOTS.map((meal) => ({
       key: meal,
       label: MEAL_LABELS_RU[meal],
       checked: value.meals[meal],
@@ -119,7 +122,7 @@ export function MealTypesPicker({
 }
 
 export function selectedMealSlots(selection: MealTypesSelection): MealSlot[] {
-  return MEAL_SLOTS.filter((m) => selection.meals[m]);
+  return COOKABLE_MEAL_SLOTS.filter((m) => selection.meals[m]);
 }
 
 export function mealSelectionSummary(selection: MealTypesSelection): string {

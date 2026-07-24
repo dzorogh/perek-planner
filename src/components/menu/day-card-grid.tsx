@@ -1,26 +1,26 @@
 "use client";
 
-import { SlotCardActions } from "@/components/menu/slot-card-actions";
 import { MenuSlotBusyProvider } from "@/components/menu/menu-slot-busy";
+import { SlotDishLine } from "@/components/menu/slot-dish-line";
 import { SnackSlotCard } from "@/components/menu/snack-slot-card";
-import { RecipeTextPanel } from "@/components/recipes/recipe-text-panel";
-import { RecipeValueLine } from "@/components/recipes/recipe-value-line";
 import {
   MEAL_LABELS_RU,
   MEAL_SLOTS,
-  mealAllowsCompanion,
   type MealSlot,
 } from "@/domain/menu/constants";
-import type { MenuSlotView, MenuSnackView } from "@/domain/menu/load-menu";
+import type { MenuSlotDishView, MenuSlotView, MenuSnackView } from "@/domain/menu/load-menu";
+import {
+  isTemplateMeal,
+  rolesForMeal,
+  type PlateRole,
+} from "@/domain/menu/meal-templates";
 import {
   recipeBatchScale,
   type RecipeBatchScale,
 } from "@/domain/recipes/batch-scale";
-import type { RecipeIngredientView } from "@/domain/recipes/load-recipe";
 import {
   formatCompactValueLine,
   sumDayTotals,
-  type RecipePerServingValue,
 } from "@/domain/recipes/scale-totals";
 
 type DayCardGridProps = {
@@ -30,64 +30,121 @@ type DayCardGridProps = {
   snacks: MenuSnackView[];
 };
 
-function DishLine({
-  menuId,
-  slotId,
-  recipeId,
-  recipeName,
-  recipeBodyText,
-  recipeIngredients,
-  recipeValue,
-  slotServings,
-  batch,
-  target,
-  canClear,
-  canAddCompanion,
-}: {
-  menuId: string;
-  slotId: string;
-  recipeId: string;
-  recipeName: string;
-  recipeBodyText: string | null;
-  recipeIngredients: RecipeIngredientView[];
-  recipeValue: RecipePerServingValue;
-  slotServings: number;
-  batch: RecipeBatchScale;
-  target: "main" | "companion";
-  canClear?: boolean;
-  canAddCompanion?: boolean;
-}) {
-  return (
-    <div
-      data-component="slot-dish"
-      data-target={target}
-      className="relative min-h-10 rounded-md bg-empty-slot px-3.5 py-3"
-    >
-      <div className="pr-8">
-        <RecipeTextPanel
-          recipeId={recipeId}
-          recipeName={recipeName}
-          bodyText={recipeBodyText ?? ""}
-          ingredients={recipeIngredients}
-          value={recipeValue}
-          totalServings={batch.totalServings}
-          peoplePerMeal={batch.peoplePerMeal}
-          dayCount={batch.dayCount}
-          triggerClassName="text-left text-sm font-semibold text-foreground underline decoration-border underline-offset-2 hover:text-primary"
-        />
-        <RecipeValueLine value={recipeValue} servings={slotServings} />
-      </div>
-      <SlotCardActions
-        menuId={menuId}
-        slotId={slotId}
-        hasRecipe
-        recipeId={recipeId}
-        target={target}
-        canClear={canClear}
-        canAddCompanion={canAddCompanion}
-      />
-    </div>
-  );
+const EMPTY_BATCH: RecipeBatchScale = {
+  totalServings: 1,
+  peoplePerMeal: 1,
+  dayCount: 1,
+};
+
+function shimDish(
+  slot: MenuSlotView,
+  plateRole: PlateRole,
+  sortOrder: number,
+  recipeId: string,
+  recipeName: string | null,
+  recipeBodyText: string | null,
+  recipeIngredients: MenuSlotView["recipeIngredients"],
+  recipeValue: MenuSlotView["recipeValue"],
+): MenuSlotDishView {
+  return {
+    id: `${slot.id}-legacy-${plateRole}`,
+    plateRole,
+    sortOrder,
+    recipeId,
+    recipeName,
+    recipeBodyText,
+    recipeIngredients,
+    recipeValue,
+    coversRoles: null,
+    snackLabel: null,
+  };
+}
+
+function legacyDishesFromFks(
+  slot: MenuSlotView,
+  template: readonly PlateRole[],
+): MenuSlotDishView[] {
+  const dishes: MenuSlotDishView[] = [];
+  const primaryRole: PlateRole = template.includes("protein")
+    ? "protein"
+    : (template[0] ?? "main");
+  if (slot.recipeId) {
+    dishes.push(
+      shimDish(
+        slot,
+        primaryRole,
+        template.indexOf(primaryRole),
+        slot.recipeId,
+        slot.recipeName,
+        slot.recipeBodyText,
+        slot.recipeIngredients,
+        slot.recipeValue,
+      ),
+    );
+  }
+  if (slot.companionRecipeId && template.includes("carb")) {
+    dishes.push(
+      shimDish(
+        slot,
+        "carb",
+        template.indexOf("carb"),
+        slot.companionRecipeId,
+        slot.companionRecipeName,
+        slot.companionRecipeBodyText,
+        slot.companionRecipeIngredients,
+        slot.companionRecipeValue,
+      ),
+    );
+  }
+  return dishes;
+}
+
+function primaryDishByRole(
+  dishes: readonly MenuSlotDishView[],
+): Map<PlateRole, MenuSlotDishView> {
+  const byRole = new Map<PlateRole, MenuSlotDishView>();
+  for (const dish of dishes) {
+    const prev = byRole.get(dish.plateRole);
+    if (!prev || (!prev.recipeId && dish.recipeId)) {
+      byRole.set(dish.plateRole, dish);
+    }
+  }
+  return byRole;
+}
+
+function rolesCoveredByOnePots(
+  dishes: readonly MenuSlotDishView[],
+): Set<PlateRole> {
+  const covered = new Set<PlateRole>();
+  for (const dish of dishes) {
+    if (!dish.recipeId) continue;
+    for (const r of dish.coversRoles ?? []) {
+      if (r !== dish.plateRole) covered.add(r);
+    }
+  }
+  return covered;
+}
+
+function roleLinesForSlot(slot: MenuSlotView): Array<{
+  role: PlateRole;
+  dish: MenuSlotDishView | null;
+  template: readonly PlateRole[];
+}> {
+  const template: readonly PlateRole[] = isTemplateMeal(slot.meal)
+    ? rolesForMeal(slot.meal)
+    : ["main"];
+
+  const sourceDishes =
+    slot.dishes.length > 0 ? slot.dishes : legacyDishesFromFks(slot, template);
+  const primaryByRole = primaryDishByRole(sourceDishes);
+  const rolesFilledByCover = rolesCoveredByOnePots(sourceDishes);
+
+  return template.flatMap((role) => {
+    const dish = primaryByRole.get(role) ?? null;
+    // One-pot coverage: skip empty covered roles (filled cover host stays).
+    if (rolesFilledByCover.has(role) && !dish?.recipeId) return [];
+    return [{ role, dish, template }];
+  });
 }
 
 function SlotCell({
@@ -99,60 +156,32 @@ function SlotCell({
   slot: MenuSlotView;
   allSlots: MenuSlotView[];
 }) {
-  if (!slot.recipeId) {
-    return (
-      <div
-        data-component="slot-cell"
-        data-empty="true"
-        className="relative min-h-14 rounded-md bg-empty-slot px-3.5 py-3"
-      >
-        <div className="pr-8">
-          <p className="text-sm text-slot-label">Пустой слот</p>
-        </div>
-        <SlotCardActions
-          menuId={menuId}
-          slotId={slot.id}
-          hasRecipe={false}
-          target="main"
-        />
-      </div>
-    );
-  }
+  const lines = roleLinesForSlot(slot);
+  const anyFilled = lines.some((l) => Boolean(l.dish?.recipeId));
 
   return (
-    <div data-component="slot-cell" data-empty="false" className="space-y-2">
-      {slot.recipeId ? (
-        <DishLine
+    <div
+      data-component="slot-cell"
+      data-empty={anyFilled ? "false" : "true"}
+      className="space-y-2"
+    >
+      {lines.map(({ role, dish, template }) => (
+        <SlotDishLine
+          key={role}
           menuId={menuId}
           slotId={slot.id}
-          recipeId={slot.recipeId}
-          recipeName={slot.recipeName ?? "Рецепт недоступен"}
-          recipeBodyText={slot.recipeBodyText}
-          recipeIngredients={slot.recipeIngredients}
-          recipeValue={slot.recipeValue}
+          plateRole={role}
+          templateOrder={template}
+          dish={dish}
           slotServings={slot.servings}
-          batch={recipeBatchScale(allSlots, slot.recipeId)}
-          target="main"
-          canAddCompanion={
-            mealAllowsCompanion(slot.meal) && !slot.companionRecipeId
+          batch={
+            dish?.recipeId
+              ? recipeBatchScale(allSlots, dish.recipeId)
+              : EMPTY_BATCH
           }
+          canClear={role === "carb" && Boolean(dish?.recipeId)}
         />
-      ) : null}
-      {slot.companionRecipeId ? (
-        <DishLine
-          menuId={menuId}
-          slotId={slot.id}
-          recipeId={slot.companionRecipeId}
-          recipeName={slot.companionRecipeName ?? "Компаньон недоступен"}
-          recipeBodyText={slot.companionRecipeBodyText}
-          recipeIngredients={slot.companionRecipeIngredients}
-          recipeValue={slot.companionRecipeValue}
-          slotServings={slot.servings}
-          batch={recipeBatchScale(allSlots, slot.companionRecipeId)}
-          target="companion"
-          canClear
-        />
-      ) : null}
+      ))}
     </div>
   );
 }

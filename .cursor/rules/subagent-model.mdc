@@ -1,0 +1,12 @@
+---
+description: Always use Cursor Grok 4.5 High Fast for Task/subagents
+alwaysApply: true
+---
+
+# Subagent model
+
+When launching any Task / subagent (`Task` tool), always set:
+
+`model: cursor-grok-4.5-high-fast`
+
+Do not omit the model (do not inherit the parent default). Do not use other models unless the user explicitly requests a different one for that specific run.

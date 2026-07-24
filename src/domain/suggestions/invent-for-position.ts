@@ -3,10 +3,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   DEFAULT_DAY_COUNT,
   MEAL_LABELS_RU,
-  mealAllowsCompanion,
   type MealSlot,
   type MenuDayPair,
 } from "@/domain/menu/constants";
+import type { PlateRole } from "@/domain/menu/meal-templates";
 import {
   clampRequiredEquipmentToAvailable,
   recipeFitsAvailableEquipment,
@@ -24,12 +24,14 @@ import {
 } from "@/domain/suggestions/invent-recipes";
 import {
   isBreakfastMeal,
+  isLunchDinnerMeal,
   looksLikeBreakfastDish,
   looksLikeLunchDinnerOnlyMain,
   looksLikeNoCookSnack,
   stripHardcodedPairing,
 } from "@/domain/suggestions/meal-fit";
-import { parsePlateKind } from "@/domain/suggestions/plate-complete";
+import { resolvePositionPlateRole } from "@/domain/suggestions/plan-menu-names";
+import { parseCoversRoles } from "@/domain/suggestions/role-slots";
 import {
   loadTasteNotes,
   tasteNotesForPrompt,
@@ -41,13 +43,12 @@ import {
   type ChatCompletionsFn,
 } from "@/lib/openrouter/client";
 
-export type PositionPlateKind = "complete" | "needs_companion";
-
 export type InventPositionOk = {
   ok: true;
   recipeId: string;
   name: string;
-  plateKind: PositionPlateKind | null;
+  plateRole: PlateRole;
+  coversRoles: PlateRole[] | null;
 };
 
 export type InventPositionErr = {
@@ -60,88 +61,73 @@ export type InventPositionResult = InventPositionOk | InventPositionErr;
 export type InventPositionContext = {
   meal: MealSlot;
   dayPair: MenuDayPair;
-  role: "main" | "companion";
-  /** Required when role=companion — the main already invented for this pair. */
-  mainDishName?: string;
+  plateRole: PlateRole;
+  /** @deprecated mapped to plateRole via resolvePositionPlateRole */
+  role?: "main" | "companion";
   avoidNames?: string[];
-  /** Dishes already planned on THIS menu (stronger than history avoid). */
   currentMenuDishes?: string[];
   previousMenusDishes?: string[];
-  /** Short reason from variety analyzer when reinventing a flagged slot. */
   repairReason?: string;
-  /** Full menu length — fridge_keep must cover it. */
   menuDayCount?: number;
   peoplePerMeal?: number;
-  /** Hard equipment ceiling for this menu. */
   availableEquipment: readonly EquipmentId[];
   chat?: ChatCompletionsFn;
   userId: string;
 };
 
-const POSITION_MAIN_SYSTEM = `You invent ONE new Russian home-cooking recipe for a household meal planner.
+const POSITION_SYSTEM = `You invent ONE new Russian home-cooking recipe for a household meal planner.
 This dish will be cooked once and eaten on TWO consecutive menu days (batch cook).
+Plate role is FIXED by the app — invent recipe content for that role only.
 Respond with a single JSON object:
-{"recipe":{"name":"...","body_text":"...","fridge_keep_days":N,"plate_role":"main","plate_kind":"complete"|"needs_companion","required_equipment":["stove"|"oven"|"air_fryer"|"grill"|"multicooker"|"pressure_cooker"|"microwave",...],"price_rub_per_serving":N,"nutrition_per_serving":{"kcal":N,"protein_g":N,"fat_g":N,"carbs_g":N},"critical_ingredients":[{"name":"...","kind":"critical"|"pantry","amount":N,"unit":"g"|"ml"|"pcs"|"tsp"|"tbsp"},...]}}.
-Rules:
-- required_equipment: non-empty; MUST be ⊆ availableEquipment from the request. HARD: never invent a dish needing equipment outside availableEquipment.
-- Invent exactly ONE plate_role=main recipe for the requested meal only.
-- HARD: never invent a near-duplicate of currentMenuDishes / avoidNames / previousMenusDishes (culinary form+base; topping swaps and word-order swaps are duplicates).
-  Too close (FORBIDDEN): куриные рулеты с сыром и шпинатом ≈ куриные рулетики с шпинатом и сыром; котлеты из курицы ≈ куриные котлеты.
-- HARD: if currentMenuDishes already has lunch/dinner mains for the SAME dayPair, invent a clearly DIFFERENT culinary form (not another рулет/котлета/запеканка of the same family).
-- fridge_keep_days: integer 1..7, MUST be >= menuDayCount from the request (covers the full menu).
-- body_text: SHORT Russian steps, each on its own line numbered "1. ", "2. ", … (3–5 steps). Cooking/heating required.
-- HARD shopping-list completeness: every buyable food in name or body_text MUST appear in critical_ingredients with amount+unit per 1 adult serving.
-- At least one kind=critical ingredient. Prefer 3–8 ingredients.
-- price_rub_per_serving: integer RUBLES supermarket cost for 1 adult home serving; NEVER above 400; omit if uncertain (no zeros).
-- nutrition_per_serving: realistic; omit fields if uncertain (no zero fillers).
-- Breakfast / second_breakfast / afternoon_snack: morning food ONLY (яичница, омлет, сырники, оладьи, творожная запеканка, тосты с яйцом; каша only if taste notes allow). NEVER roast chicken, soup, plov, cutlets, pasta mains. For these meals set plate_kind="complete" always (no companion).
-- Lunch / dinner / late_dinner: real savory meal. Prefer meat/fish/poultry as the protein. NEVER morning forms (сырники, творожные оладьи/запеканки, каши, омлет as the lunch/dinner main).
-- plate_kind (lunch/dinner/late_dinner ONLY — YOU decide):
-  - "complete": the dish is already a full plate (плов, лазанья, голубцы, пельмени, pasta with protein, stew with sides built in, casserole that is a full meal, etc.). No гарнир needed.
-  - "needs_companion": the main alone is NOT a full plate (cutlets, schnitzel, fried fish, veg cutlets, simple protein) — a side or sauce will be invented separately.
-- NEVER invent snacks / перекусы. Do not invent recipe ids.
-- Honor operatorTasteNotes: constraint PRIMARY (generalize bans); exampleDish secondary; ban=hard never; wish=soft prefer.`;
-
-const POSITION_COMPANION_SYSTEM = `You invent ONE simple Russian companion dish (гарнир, simple protein add-on, or sauce) for a household meal planner.
-It will be cooked once and eaten on TWO consecutive menu days with a given main.
-Respond with a single JSON object:
-{"recipe":{"name":"...","body_text":"...","fridge_keep_days":N,"plate_role":"companion","required_equipment":["stove"|"oven"|"air_fryer"|"grill"|"multicooker"|"pressure_cooker"|"microwave",...],"price_rub_per_serving":N,"nutrition_per_serving":{"kcal":N,"protein_g":N,"fat_g":N,"carbs_g":N},"critical_ingredients":[{"name":"...","kind":"critical"|"pantry","amount":N,"unit":"g"|"ml"|"pcs"|"tsp"|"tbsp"},...]}}.
+{"recipe":{"name":"...","body_text":"...","fridge_keep_days":N,"plate_role":"main"|"soup"|"protein"|"veg"|"carb","covers_roles":["protein","carb"]?,"required_equipment":["stove"|"oven"|"air_fryer"|"grill"|"multicooker"|"pressure_cooker"|"microwave",...],"price_rub_per_serving":N,"nutrition_per_serving":{"kcal":N,"protein_g":N,"fat_g":N,"carbs_g":N},"critical_ingredients":[{"name":"...","kind":"critical"|"pantry","amount":N,"unit":"g"|"ml"|"pcs"|"tsp"|"tbsp"},...]}}.
 Rules:
 - required_equipment: non-empty; MUST be ⊆ availableEquipment. HARD: never invent a dish needing equipment outside availableEquipment.
-- Invent exactly ONE plate_role=companion. NEVER a second complex main or one-pot (плов, лазанья).
-- Name the dish itself («Картофельное пюре», «Грибной соус») — NEVER «к пасте» / «к мясу» / «под курицу».
-- When the main already has meat/fish, invent a carb/veg/sauce side — NOT a second meat/fish dish.
-- When the main is vegetable/carb-only, invent a simple protein add-on (chicken, fish, eggs, mushrooms) OR a fitting side — your judgment.
-- fridge_keep_days >= menuDayCount. body_text: 2–4 short numbered Russian cooking steps.
-- HARD shopping-list completeness for name+steps. Amounts per 1 adult serving.
-- Never invent snacks. Honor operatorTasteNotes (constraint PRIMARY).
-- HARD: never near-duplicate of avoidNames / previousMenusDishes / the main dish.`;
+- Invent exactly ONE recipe for the requested plate_role.
+- Optional covers_roles for one-pots (e.g. плов as protein covering protein+carb). Only claim roles the dish truly covers.
+- HARD: never invent a near-duplicate of currentMenuDishes / avoidNames / previousMenusDishes.
+- fridge_keep_days: integer 1..7, MUST be >= menuDayCount from the request.
+- body_text: SHORT Russian steps, each on its own line numbered "1. ", "2. ", … (protein/main 3–5; soup/veg/carb 2–4).
+- HARD shopping-list completeness: every buyable food in name or body_text MUST appear in critical_ingredients with amount+unit per 1 adult serving.
+- At least one kind=critical ingredient. Prefer 3–8 ingredients (sides 2–5).
+- price_rub_per_serving: integer RUBLES; NEVER above 400; omit if uncertain (no zeros).
+- Breakfast / second_breakfast / afternoon_snack: morning food ONLY; plate_role=main. NEVER roast chicken, soup, plov, cutlets.
+- Lunch / dinner / late_dinner protein: real savory meal; prefer meat/fish. NEVER morning forms.
+- NEVER invent snacks / перекусы. Do not invent recipe ids. NEVER plate_kind / companion.
+- Honor operatorTasteNotes: constraint PRIMARY; exampleDish secondary.`;
 
 /**
- * Invent + persist one recipe for a fixed (meal × day-pair × role) position.
+ * Invent + persist one recipe for a fixed (meal × day-pair × plateRole) position.
  */
 export async function inventForPosition(
   supabase: SupabaseClient,
   context: InventPositionContext,
 ): Promise<InventPositionResult> {
+  const plateRole =
+    context.plateRole ??
+    (context.role
+      ? resolvePositionPlateRole(context.meal, context.role)
+      : null);
+  if (!plateRole) return { ok: false, reason: "parse" };
+
   const tasteNotes = await loadTasteNotes(supabase, context.userId);
   if (!tasteNotes) return { ok: false, reason: "query" };
 
   const chat = context.chat ?? openRouterChatCompletions;
   let draft: InventRecipeDraft;
-  let plateKind: PositionPlateKind | null;
 
   try {
-    const proposed = await proposePositionRecipe(chat, tasteNotes, context);
+    const proposed = await proposePositionRecipe(chat, tasteNotes, {
+      ...context,
+      plateRole,
+    });
     if (!proposed) return { ok: false, reason: "parse" };
-    draft = proposed.draft;
-    plateKind = proposed.plateKind;
+    draft = proposed;
   } catch (err) {
     if (err instanceof OpenRouterError) return { ok: false, reason: "openrouter" };
     throw err;
   }
 
-  if (!passesPositionMealFit(draft, context)) {
+  if (!passesPositionMealFit(draft, { ...context, plateRole })) {
     return { ok: false, reason: "parse" };
   }
   if (context.availableEquipment?.length) {
@@ -166,31 +152,25 @@ export async function inventForPosition(
     ok: true,
     recipeId: persisted.recipeId,
     name: draft.name,
-    plateKind:
-      context.role === "main" && mealAllowsCompanion(context.meal)
-        ? plateKind ?? "needs_companion"
-        : null,
+    plateRole,
+    coversRoles: draft.coversRoles,
   };
 }
 
 async function proposePositionRecipe(
   chat: ChatCompletionsFn,
   tasteNotes: TasteNote[],
-  context: InventPositionContext,
-): Promise<{ draft: InventRecipeDraft; plateKind: PositionPlateKind | null } | null> {
+  context: InventPositionContext & { plateRole: PlateRole },
+): Promise<InventRecipeDraft | null> {
   const mealRu = MEAL_LABELS_RU[context.meal];
   const daysLabel = `${context.dayPair[0]}–${context.dayPair[1]}`;
-  const system =
-    context.role === "companion" ? POSITION_COMPANION_SYSTEM : POSITION_MAIN_SYSTEM;
-
   const menuDayCount = context.menuDayCount ?? DEFAULT_DAY_COUNT;
   const userContent = JSON.stringify({
     meal: context.meal,
     mealLabelRu: mealRu,
     dayPair: [...context.dayPair],
     daysLabel,
-    role: context.role,
-    mainDishName: context.mainDishName ?? null,
+    plate_role: context.plateRole,
     menuDayCount,
     peoplePerMeal: context.peoplePerMeal ?? 2,
     availableEquipment: [...context.availableEquipment],
@@ -210,21 +190,37 @@ async function proposePositionRecipe(
 
   const content = await chat({
     messages: [
-      { role: "system", content: system },
+      { role: "system", content: POSITION_SYSTEM },
       { role: "user", content: userContent },
     ],
     responseFormatJson: true,
     temperature: 0.85,
   });
 
-  return parsePositionInventJson(content, { ...context, menuDayCount });
+  return parsePositionInventJson(content, {
+    plateRole: context.plateRole,
+    meal: context.meal,
+    menuDayCount,
+  });
 }
 
 /** Pure parser for single-recipe position invent JSON. */
 export function parsePositionInventJson(
   content: string,
-  context: Pick<InventPositionContext, "role" | "meal" | "menuDayCount">,
-): { draft: InventRecipeDraft; plateKind: PositionPlateKind | null } | null {
+  context: {
+    plateRole: PlateRole;
+    meal: MealSlot;
+    menuDayCount?: number;
+    role?: "main" | "companion";
+  },
+): InventRecipeDraft | null {
+  const plateRole =
+    context.plateRole ??
+    (context.role
+      ? resolvePositionPlateRole(context.meal, context.role)
+      : null);
+  if (!plateRole) return null;
+
   let parsed: unknown;
   try {
     parsed = JSON.parse(extractJsonObject(content));
@@ -234,7 +230,6 @@ export function parsePositionInventJson(
   if (!parsed || typeof parsed !== "object") return null;
   const root = parsed as Record<string, unknown>;
 
-  // Accept {"recipe":{...}} or {"recipes":[{...}]} with one item.
   let row: Record<string, unknown> | null = null;
   if (root.recipe && typeof root.recipe === "object") {
     row = root.recipe as Record<string, unknown>;
@@ -243,16 +238,13 @@ export function parsePositionInventJson(
   }
   if (!row) return null;
 
-  // Reuse batch parser by wrapping as recipes array.
   const drafts = parseInventRecipesJson(
     JSON.stringify({
       recipes: [
         {
           ...row,
-          plate_role:
-            context.role === "companion"
-              ? "companion"
-              : row.plate_role ?? row.plateRole ?? "main",
+          plate_role: plateRole,
+          covers_roles: row.covers_roles ?? row.coversRoles ?? null,
           fridge_keep_days: coerceFridgeKeep(
             row.fridge_keep_days ?? row.fridgeKeepDays,
             context.menuDayCount,
@@ -264,27 +256,18 @@ export function parsePositionInventJson(
   const draft = drafts[0];
   if (!draft) return null;
 
-  // Force role from position context.
-  draft.plateRole = context.role;
+  draft.plateRole = plateRole;
+  draft.coversRoles =
+    parseCoversRoles(row.covers_roles ?? row.coversRoles) ?? draft.coversRoles;
   const minFridge = context.menuDayCount ?? DEFAULT_DAY_COUNT;
   if (draft.fridgeKeepDays < minFridge) {
     draft.fridgeKeepDays = minFridge;
   }
 
-  let plateKind: PositionPlateKind | null = null;
-  if (context.role === "main" && mealAllowsCompanion(context.meal)) {
-    plateKind = parsePlateKind(row.plate_kind ?? row.plateKind);
-    if (!plateKind) plateKind = "needs_companion";
-  } else if (context.role === "main") {
-    plateKind = "complete";
-  }
-
-  // Normalize name pairing strip already in parseInventRecipesJson path —
-  // re-apply if we mutated.
   draft.name = stripHardcodedPairing(draft.name);
   draft.bodyText = normalizeRecipeBodyText(draft.bodyText);
 
-  return { draft, plateKind };
+  return draft;
 }
 
 function coerceFridgeKeep(raw: unknown, menuDayCount?: number): number {
@@ -295,33 +278,33 @@ function coerceFridgeKeep(raw: unknown, menuDayCount?: number): number {
 }
 
 function positionInventInstruction(
-  context: InventPositionContext,
+  context: InventPositionContext & { plateRole: PlateRole },
   mealRu: string,
   daysLabel: string,
 ): string {
   const repair = context.repairReason
     ? ` REPAIR: previous pick failed variety audit — ${context.repairReason}. Invent a clearly different culinary form.`
     : "";
-  if (context.role === "companion") {
-    return `Invent ONE companion for «${context.mainDishName ?? "main"}» on ${mealRu}, days ${daysLabel}. plate_role=companion. fridge_keep_days>=4. Respect currentMenuDishes — no near-duplicates.${repair}`;
-  }
-  const plateKindHint = mealAllowsCompanion(context.meal)
-    ? "Set plate_kind to complete OR needs_companion."
-    : "Set plate_kind=complete.";
-  return `Invent ONE main for ${mealRu}, days ${daysLabel}. plate_role=main. ${plateKindHint} fridge_keep_days>=4. Respect currentMenuDishes — different form from other meals on the same dayPair.${repair}`;
+  return `Invent ONE ${context.plateRole} dish for ${mealRu}, days ${daysLabel}. plate_role=${context.plateRole}. fridge_keep_days>=4. Respect currentMenuDishes — different form from other meals on the same dayPair.${repair}`;
 }
 
 function passesPositionMealFit(
   draft: InventRecipeDraft,
-  context: InventPositionContext,
+  context: InventPositionContext & { plateRole: PlateRole },
 ): boolean {
   const name = draft.name;
   if (!normalizeDishName(name) || looksLikeNoCookSnack(name)) return false;
-  if (context.role === "companion") return draft.plateRole === "companion";
+  if (draft.plateRole !== context.plateRole) return false;
   if (isBreakfastMeal(context.meal) || context.meal === "afternoon_snack") {
-    return !looksLikeLunchDinnerOnlyMain(name);
+    return context.plateRole === "main" && !looksLikeLunchDinnerOnlyMain(name);
   }
-  return !looksLikeBreakfastDish(name);
+  if (
+    isLunchDinnerMeal(context.meal) &&
+    (context.plateRole === "protein" || context.plateRole === "main")
+  ) {
+    return !looksLikeBreakfastDish(name);
+  }
+  return true;
 }
 
 function extractJsonObject(text: string): string {

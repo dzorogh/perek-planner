@@ -84,7 +84,7 @@ export async function buildCandidates(
 
     const rating = suppress.ratings.get(recipe.id) ?? "none";
     const plateRole =
-      recipe.plate_role === "main" || recipe.plate_role === "companion"
+      typeof recipe.plate_role === "string" && recipe.plate_role.length > 0
         ? recipe.plate_role
         : null;
     eligible.push({

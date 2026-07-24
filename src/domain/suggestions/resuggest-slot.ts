@@ -6,6 +6,7 @@ import {
   type MealSlot,
   type MenuDayPair,
 } from "@/domain/menu/constants";
+import { isPlateRole, type PlateRole } from "@/domain/menu/meal-templates";
 import {
   DEFAULT_AVAILABLE_EQUIPMENT,
   normalizeEquipmentList,
@@ -29,6 +30,7 @@ import {
 } from "@/domain/suggestions/expand-menu-recipes";
 import { loadRecentMenuDishNames } from "@/domain/suggestions/history";
 import {
+  isLunchDinnerMeal,
   looksLikeHeavyAnimalProteinDish,
   looksLikeNoCookSnack,
 } from "@/domain/suggestions/meal-fit";
@@ -39,6 +41,12 @@ import {
   proposePositionNamePlan,
   type PositionModifySource,
 } from "@/domain/suggestions/plan-menu-names";
+import {
+  expandDishAssignments,
+  mergeDishAssignments,
+  type SlotDishAssignment,
+  legacyFksFromDishes,
+} from "@/domain/suggestions/role-slots";
 import { loadSuppressSets } from "@/domain/suggestions/suppress";
 import { loadTasteNotes } from "@/domain/suggestions/taste-notes";
 import {
@@ -61,7 +69,48 @@ export type ResuggestSlotResult =
   | { ok: true }
   | { ok: false; error: string };
 
-export type SlotDishTarget = "main" | "companion";
+/** UI still uses main|companion; mapped to protein|main / carb internally. */
+export type SlotDishTarget = "main" | "companion" | PlateRole;
+
+function plateRoleForTarget(meal: MealSlot, target: SlotDishTarget): PlateRole {
+  if (target === "companion" || target === "carb") return "carb";
+  if (target === "main") {
+    return isLunchDinnerMeal(meal) ? "protein" : "main";
+  }
+  if (target === "snack") return isLunchDinnerMeal(meal) ? "protein" : "main";
+  return target;
+}
+
+function isCarbTarget(target: SlotDishTarget): boolean {
+  return target === "companion" || target === "carb";
+}
+
+function isPrimaryTarget(meal: MealSlot, target: SlotDishTarget): boolean {
+  return (
+    plateRoleForTarget(meal, target) === plateRoleForTarget(meal, "main")
+  );
+}
+
+/** Resolve the recipe on a slot for an overflow target (dishes first, FK shim fallback). */
+async function resolveRecipeIdForTarget(
+  supabase: SupabaseClient,
+  slot: SlotRow,
+  target: SlotDishTarget,
+): Promise<string | null> {
+  const meal = slot.meal as MealSlot;
+  const role = plateRoleForTarget(meal, target);
+  const { data } = await supabase
+    .from("menu_slot_dishes")
+    .select("recipe_id")
+    .eq("menu_slot_id", slot.id)
+    .eq("plate_role", role)
+    .not("recipe_id", "is", null)
+    .maybeSingle();
+  if (typeof data?.recipe_id === "string") return data.recipe_id;
+  if (role === "carb") return slot.companion_recipe_id;
+  if (role === "protein" || role === "main") return slot.recipe_id;
+  return null;
+}
 
 type SlotRow = {
   id: string;
@@ -106,9 +155,10 @@ async function loadMenuPlanDishes(
   const { data, error } = await supabase
     .from("menu_slots")
     .select(
-      `day_index, meal, recipe_id, companion_recipe_id,
+      `id, day_index, meal, recipe_id, companion_recipe_id,
        recipes!menu_slots_recipe_id_fkey(name),
-       companion:recipes!menu_slots_companion_recipe_id_fkey(name)`,
+       companion:recipes!menu_slots_companion_recipe_id_fkey(name),
+       menu_slot_dishes(plate_role, recipe_id, recipes(name))`,
     )
     .eq("menu_id", menuId);
 
@@ -120,7 +170,7 @@ async function loadMenuPlanDishes(
   const push = (
     meal: string,
     dayIndex: number,
-    role: "main" | "companion",
+    plateRole: PlateRole,
     recipeId: string | null,
     recipes: { name: string } | { name: string }[] | null | undefined,
   ) => {
@@ -130,28 +180,99 @@ async function loadMenuPlanDishes(
     const recipe = Array.isArray(recipes) ? recipes[0] : recipes;
     const name = recipe?.name?.trim();
     if (!name) return;
-    const key = `${meal}:${dayPair[0]}-${dayPair[1]}:${role}`;
+    const key = `${meal}:${dayPair[0]}-${dayPair[1]}:${plateRole}`;
     if (byKey.has(key)) return;
     byKey.set(key, {
       meal: meal as MealSlot,
       dayPair,
-      role,
+      plateRole,
       name,
       recipeId,
     });
   };
 
-  for (const row of data as MenuSlotNameRow[]) {
-    push(row.meal, row.day_index, "main", row.recipe_id, row.recipes);
+  for (const row of data as Array<
+    MenuSlotNameRow & {
+      menu_slot_dishes?: Array<{
+        plate_role?: string;
+        recipe_id?: string | null;
+        recipes?: { name: string } | { name: string }[] | null;
+      }> | null;
+    }
+  >) {
+    const meal = row.meal as MealSlot;
+    const primaryRole: PlateRole = isLunchDinnerMeal(meal) ? "protein" : "main";
+    push(row.meal, row.day_index, primaryRole, row.recipe_id, row.recipes);
     push(
       row.meal,
       row.day_index,
-      "companion",
+      "carb",
       row.companion_recipe_id,
       row.companion,
     );
+    for (const dish of row.menu_slot_dishes ?? []) {
+      if (typeof dish.plate_role !== "string" || !isPlateRole(dish.plate_role)) {
+        continue;
+      }
+      if (dish.plate_role === "snack") continue;
+      push(
+        row.meal,
+        row.day_index,
+        dish.plate_role,
+        typeof dish.recipe_id === "string" ? dish.recipe_id : null,
+        dish.recipes,
+      );
+    }
   }
   return [...byKey.values()];
+}
+
+async function loadExistingDishAssignments(
+  supabase: SupabaseClient,
+  slotIds: string[],
+): Promise<Map<string, SlotDishAssignment[]>> {
+  const bySlot = new Map<string, SlotDishAssignment[]>();
+  if (slotIds.length === 0) return bySlot;
+  const { data } = await supabase
+    .from("menu_slot_dishes")
+    .select("menu_slot_id, plate_role, recipe_id")
+    .in("menu_slot_id", slotIds)
+    .not("recipe_id", "is", null);
+  for (const row of data ?? []) {
+    if (
+      typeof row.menu_slot_id !== "string" ||
+      typeof row.plate_role !== "string" ||
+      !isPlateRole(row.plate_role) ||
+      row.plate_role === "snack" ||
+      typeof row.recipe_id !== "string"
+    ) {
+      continue;
+    }
+    const list = bySlot.get(row.menu_slot_id) ?? [];
+    list.push({ plateRole: row.plate_role, recipeId: row.recipe_id });
+    bySlot.set(row.menu_slot_id, list);
+  }
+  return bySlot;
+}
+
+function proposalsMergingExisting(
+  pairSlots: SlotRow[],
+  incoming: SlotDishAssignment[],
+  existingBySlot: Map<string, SlotDishAssignment[]>,
+): ProposedAssignment[] {
+  return pairSlots.map((s) => {
+    const merged = mergeDishAssignments(
+      existingBySlot.get(s.id) ?? [],
+      incoming,
+    );
+    const fks = legacyFksFromDishes(merged);
+    return {
+      slotId: s.id,
+      dishes: merged,
+      recipeId: fks.recipeId ?? incoming[0]?.recipeId,
+      companionRecipeId: fks.companionRecipeId,
+    };
+  });
 }
 
 async function loadMenuMeta(
@@ -318,8 +439,7 @@ async function inventPositionViaNamePlan(
   position: {
     meal: MealSlot;
     dayPair: MenuDayPair;
-    role: "main" | "companion";
-    mainName?: string;
+    plateRole: PlateRole;
   },
   ctx: {
     keepDishes: MenuPlanDish[];
@@ -373,7 +493,7 @@ async function inventPositionViaNamePlan(
       ...plan.map((d) => ({
         meal: d.meal,
         dayPair: d.dayPair,
-        role: d.role,
+        plateRole: d.plateRole,
         name: d.name,
         recipeId: planKey(d),
       })),
@@ -417,8 +537,7 @@ async function inventPositionViaModifyPlan(
   position: {
     meal: MealSlot;
     dayPair: MenuDayPair;
-    role: "main" | "companion";
-    mainName?: string;
+    plateRole: PlateRole;
   },
   ctx: {
     keepDishes: MenuPlanDish[];
@@ -426,7 +545,7 @@ async function inventPositionViaModifyPlan(
     previousMenusDishes: string[];
     sourceDish: PositionModifySource;
     userWish: string;
-    keepExistingCompanion?: boolean;
+    keepExistingCarb?: boolean;
   },
   options: ResuggestOptions & {
     peoplePerMeal?: number;
@@ -443,7 +562,7 @@ async function inventPositionViaModifyPlan(
   const planned = await proposePositionModifyPlan(position, {
     sourceDish: ctx.sourceDish,
     userWish: ctx.userWish,
-    keepExistingCompanion: ctx.keepExistingCompanion,
+    keepExistingCarb: ctx.keepExistingCarb,
     keepDishes: ctx.keepDishes,
     previousMenusDishes: ctx.previousMenusDishes,
     avoidNames: ctx.avoidNames,
@@ -504,14 +623,25 @@ async function assignPairProposals(
       .map((c) => [c.recipeId, c.name] as const),
   );
   const sanitized = proposals.map((p) => {
-    if (!p.companionRecipeId) return p;
-    const mainName = nameById.get(p.recipeId) ?? "";
-    const sideName = nameById.get(p.companionRecipeId) ?? "";
+    const dishes = p.dishes ?? [];
+    const protein = dishes.find((d) => d.plateRole === "protein");
+    const carb = dishes.find((d) => d.plateRole === "carb");
+    if (!protein || !carb) return p;
+    if (protein.recipeId === carb.recipeId) return p;
+    const proteinName = nameById.get(protein.recipeId) ?? "";
+    const carbName = nameById.get(carb.recipeId) ?? "";
     if (
-      looksLikeHeavyAnimalProteinDish(mainName) &&
-      looksLikeHeavyAnimalProteinDish(sideName)
+      looksLikeHeavyAnimalProteinDish(proteinName) &&
+      looksLikeHeavyAnimalProteinDish(carbName)
     ) {
-      return { ...p, companionRecipeId: null, plateKind: "complete" as const };
+      const next = dishes.filter((d) => d.plateRole !== "carb");
+      const fks = legacyFksFromDishes(next);
+      return {
+        ...p,
+        dishes: next,
+        recipeId: fks.recipeId ?? p.recipeId,
+        companionRecipeId: null,
+      };
     }
     return p;
   });
@@ -524,7 +654,8 @@ async function assignPairProposals(
 
   const neededIds = new Set<string>(inventedIds);
   for (const p of sanitized) {
-    neededIds.add(p.recipeId);
+    if (p.recipeId) neededIds.add(p.recipeId);
+    for (const d of p.dishes ?? []) neededIds.add(d.recipeId);
     if (p.companionRecipeId) neededIds.add(p.companionRecipeId);
   }
   const assignPool = built.candidates.filter((c) => neededIds.has(c.recipeId));
@@ -580,10 +711,21 @@ export async function resuggestSlotForUser(
     return { ok: false, error: "Слот не найден." };
   }
 
-  if (target === "companion") {
+  const meal = slot.meal as MealSlot;
+  if (isCarbTarget(target)) {
     return resuggestCompanionForPair(supabase, userId, menuId, slot, options);
   }
-  return resuggestMainForPair(supabase, userId, menuId, slot, options);
+  if (isPrimaryTarget(meal, target)) {
+    return resuggestMainForPair(supabase, userId, menuId, slot, options);
+  }
+  return resuggestRoleForPair(
+    supabase,
+    userId,
+    menuId,
+    slot,
+    plateRoleForTarget(meal, target),
+    options,
+  );
 }
 
 async function resuggestMainForPair(
@@ -617,10 +759,11 @@ async function resuggestMainForPair(
   const inventedIds: string[] = [];
 
   try {
+    const plateRole = plateRoleForTarget(meal, "main");
     const invented = await inventPositionViaNamePlan(
       supabase,
       userId,
-      { meal, dayPair, role: "main" },
+      { meal, dayPair, plateRole },
       ctx,
       {
         ...options,
@@ -632,25 +775,32 @@ async function resuggestMainForPair(
     if (!invented.ok) return invented;
     inventedIds.push(...invented.inventedIds);
 
-    const main = invented.dishes.find((d) => d.role === "main");
-    if (!main) {
+    const primary = invented.dishes.find((d) => d.plateRole === plateRole);
+    if (!primary) {
       await cleanupRecipes(supabase, inventedIds);
       return planFail("parse");
     }
-    const companion = invented.dishes.find((d) => d.role === "companion");
-    const companionRecipeId = companion?.recipeId ?? null;
-    const plateKind = resolveResuggestPlateKind(
-      meal,
-      main.plateKind,
-      companionRecipeId,
+    const dishRows = expandDishAssignments(
+      primary.plateRole,
+      primary.recipeId,
+      primary.coversRoles,
     );
-
-    const proposals: ProposedAssignment[] = pairSlots.map((s) => ({
-      slotId: s.id,
-      recipeId: main.recipeId,
-      companionRecipeId,
-      plateKind,
-    }));
+    // Keep existing carb FK when invent didn't cover carb.
+    for (const s of pairSlots) {
+      if (s.companion_recipe_id && !dishRows.some((d) => d.plateRole === "carb")) {
+        dishRows.push({ plateRole: "carb", recipeId: s.companion_recipe_id });
+        break;
+      }
+    }
+    const existingBySlot = await loadExistingDishAssignments(
+      supabase,
+      pairSlots.map((s) => s.id),
+    );
+    const proposals = proposalsMergingExisting(
+      pairSlots,
+      dishRows,
+      existingBySlot,
+    );
 
     const assigned = await assignPairProposals(
       supabase,
@@ -679,7 +829,10 @@ async function resuggestCompanionForPair(
 ): Promise<ResuggestSlotResult> {
   const meal = slot.meal as MealSlot;
   if (!mealAllowsCompanion(meal)) {
-    return { ok: false, error: "Для этого приёма компаньон не используется." };
+    return {
+      ok: false,
+      error: "Для этого приёма углеводная роль не используется.",
+    };
   }
   if (!slot.recipe_id) {
     return { ok: false, error: "Сначала выберите основное блюдо." };
@@ -743,8 +896,7 @@ async function resuggestCompanionForPair(
       {
         meal,
         dayPair,
-        role: "companion",
-        mainName: mainDishName,
+        plateRole: "carb",
       },
       {
         ...ctx,
@@ -760,18 +912,26 @@ async function resuggestCompanionForPair(
     if (!invented.ok) return invented;
     inventedIds.push(...invented.inventedIds);
 
-    const companion = invented.dishes.find((d) => d.role === "companion");
+    const companion = invented.dishes.find((d) => d.plateRole === "carb");
     if (!companion) {
       await cleanupRecipes(supabase, inventedIds);
       return planFail("parse");
     }
 
-    const proposals: ProposedAssignment[] = pairSlots.map((s) => ({
-      slotId: s.id,
-      recipeId: slot.recipe_id!,
-      companionRecipeId: companion.recipeId,
-      plateKind: "needs_companion",
-    }));
+    const primaryRole: PlateRole = isLunchDinnerMeal(meal) ? "protein" : "main";
+    const dishRows: SlotDishAssignment[] = [
+      { plateRole: primaryRole, recipeId: slot.recipe_id! },
+      { plateRole: "carb", recipeId: companion.recipeId },
+    ];
+    const existingBySlot = await loadExistingDishAssignments(
+      supabase,
+      pairSlots.map((s) => s.id),
+    );
+    const proposals = proposalsMergingExisting(
+      pairSlots,
+      dishRows,
+      existingBySlot,
+    );
 
     const assigned = await assignPairProposals(
       supabase,
@@ -789,6 +949,128 @@ async function resuggestCompanionForPair(
     await cleanupRecipes(supabase, inventedIds);
     return { ok: false, error: resuggestFailMessage(err) };
   }
+}
+
+function excludeRecipeIdsFromPair(
+  pairSlots: SlotRow[],
+  existingBySlot: Map<string, SlotDishAssignment[]>,
+): Set<string> {
+  const excludeIds = new Set<string>();
+  for (const s of pairSlots) {
+    if (s.recipe_id) excludeIds.add(s.recipe_id);
+    if (s.companion_recipe_id) excludeIds.add(s.companion_recipe_id);
+    for (const d of existingBySlot.get(s.id) ?? []) {
+      excludeIds.add(d.recipeId);
+    }
+  }
+  return excludeIds;
+}
+
+/** Invent / replace a non-primary role (soup, veg, …) on the day-pair. */
+async function resuggestRoleForPair(
+  supabase: SupabaseClient,
+  userId: string,
+  menuId: string,
+  slot: SlotRow,
+  plateRole: PlateRole,
+  options: ResuggestOptions,
+): Promise<ResuggestSlotResult> {
+  const meal = slot.meal as MealSlot;
+  if (plateRole === "snack") {
+    return { ok: false, error: "Перекус меняется в своей линии." };
+  }
+  const dayPair = menuDayPairForDay(slot.day_index);
+  if (!dayPair) {
+    return { ok: false, error: SUGGESTION_FAIL_RU.query };
+  }
+
+  const pairSlots = await loadPairSlots(supabase, menuId, meal, dayPair);
+  if (!pairSlots?.length) {
+    return { ok: false, error: "Слот не найден." };
+  }
+
+  const existingBySlot = await loadExistingDishAssignments(
+    supabase,
+    pairSlots.map((s) => s.id),
+  );
+  const ctx = await resuggestNameContext(
+    supabase,
+    userId,
+    menuId,
+    excludeRecipeIdsFromPair(pairSlots, existingBySlot),
+  );
+  if (!ctx) return planFail("query");
+
+  const menuMeta = await loadMenuMeta(supabase, menuId);
+  if (!menuMeta) return planFail("query");
+  const inventedIds: string[] = [];
+
+  try {
+    const invented = await inventPositionViaNamePlan(
+      supabase,
+      userId,
+      { meal, dayPair, plateRole },
+      ctx,
+      {
+        ...options,
+        peoplePerMeal: menuMeta.peoplePerMeal,
+        menuDayCount: menuMeta.dayCount,
+        availableEquipment: menuMeta.availableEquipment,
+      },
+    );
+    if (!invented.ok) return invented;
+    inventedIds.push(...invented.inventedIds);
+
+    const dish = invented.dishes.find((d) => d.plateRole === plateRole);
+    if (!dish) {
+      await cleanupRecipes(supabase, inventedIds);
+      return planFail("parse");
+    }
+
+    const assigned = await assignPairProposals(
+      supabase,
+      userId,
+      menuId,
+      proposalsMergingExisting(
+        pairSlots,
+        expandDishAssignments(dish.plateRole, dish.recipeId, dish.coversRoles),
+        existingBySlot,
+      ),
+      inventedIds,
+      options.forceSuppressIds,
+    );
+    if (!assigned.ok) {
+      await cleanupRecipes(supabase, inventedIds);
+    }
+    return assigned;
+  } catch (err) {
+    await cleanupRecipes(supabase, inventedIds);
+    return { ok: false, error: resuggestFailMessage(err) };
+  }
+}
+
+async function resuggestForJobRole(
+  supabase: SupabaseClient,
+  userId: string,
+  menuId: string,
+  job: PairReplaceJob,
+  options: ResuggestOptions,
+): Promise<ResuggestSlotResult> {
+  const anchor = job.slots[0]!;
+  if (isCarbTarget(job.role)) {
+    return resuggestCompanionForPair(supabase, userId, menuId, anchor, options);
+  }
+  if (isPrimaryTarget(job.meal, job.role)) {
+    return resuggestMainForPair(supabase, userId, menuId, anchor, options);
+  }
+  return resuggestRoleForPair(
+    supabase,
+    userId,
+    menuId,
+    anchor,
+    plateRoleForTarget(job.meal, job.role),
+    options,
+  );
 }
 
 async function cleanupRecipes(
@@ -813,12 +1095,12 @@ export async function clearCompanionForSlot(
     .maybeSingle();
 
   if (slotError || !slot) {
-    return { ok: false, error: "Не удалось убрать компаньон." };
+    return { ok: false, error: "Не удалось убрать углеводное блюдо." };
   }
 
   const dayPair = menuDayPairForDay(slot.day_index);
   if (!dayPair) {
-    return { ok: false, error: "Не удалось убрать компаньон." };
+    return { ok: false, error: "Не удалось убрать углеводное блюдо." };
   }
 
   const { data: updated, error } = await supabase
@@ -830,19 +1112,21 @@ export async function clearCompanionForSlot(
     .select("id");
 
   if (error || !updated?.length) {
-    return { ok: false, error: "Не удалось убрать компаньон." };
+    return { ok: false, error: "Не удалось убрать углеводное блюдо." };
+  }
+
+  const slotIds = updated.map((u) => u.id as string);
+  if (slotIds.length > 0) {
+    const { error: dishError } = await supabase
+      .from("menu_slot_dishes")
+      .delete()
+      .in("menu_slot_id", slotIds)
+      .eq("plate_role", "carb");
+    if (dishError) {
+      return { ok: false, error: "Не удалось убрать углеводное блюдо." };
+    }
   }
   return { ok: true };
-}
-
-function resolveResuggestPlateKind(
-  meal: MealSlot,
-  plateKind: ExpandedDish["plateKind"],
-  companionRecipeId: string | null,
-): ProposedAssignment["plateKind"] {
-  if (!mealAllowsCompanion(meal)) return null;
-  if (plateKind) return plateKind;
-  return companionRecipeId ? "needs_companion" : "complete";
 }
 
 /**
@@ -871,7 +1155,11 @@ export async function resuggestRecipeAcrossMenu(
     return { ok: false, error: "Слот не найден." };
   }
 
-  const recipeId = selectedRecipeId(slot, target);
+  const recipeId = await resolveRecipeIdForTarget(
+    supabase,
+    slot as SlotRow,
+    target,
+  );
   if (!recipeId) {
     return { ok: false, error: missingTargetMessage(target) };
   }
@@ -923,7 +1211,11 @@ export async function modifyRecipeAcrossMenu(
     return { ok: false, error: "Слот не найден." };
   }
 
-  const recipeId = selectedRecipeId(slot, target);
+  const recipeId = await resolveRecipeIdForTarget(
+    supabase,
+    slot as SlotRow,
+    target,
+  );
   if (!recipeId) {
     return { ok: false, error: missingTargetMessage(target) };
   }
@@ -984,7 +1276,11 @@ export async function refuseAndReplaceRecipeAcrossMenu(
     return { ok: false, error: "Слот не найден." };
   }
 
-  const refusedRecipeId = selectedRecipeId(slot, target);
+  const refusedRecipeId = await resolveRecipeIdForTarget(
+    supabase,
+    slot as SlotRow,
+    target,
+  );
   if (!refusedRecipeId) {
     return { ok: false, error: missingTargetMessage(target) };
   }
@@ -1033,15 +1329,10 @@ export async function refuseAndReplaceRecipeAcrossMenu(
   return replaced;
 }
 
-function selectedRecipeId(
-  slot: { recipe_id: string | null; companion_recipe_id: string | null },
-  target: SlotDishTarget,
-): string | null {
-  return target === "companion" ? slot.companion_recipe_id : slot.recipe_id;
-}
-
 function missingTargetMessage(target: SlotDishTarget): string {
-  if (target === "companion") return "В слоте нет компаньона.";
+  if (isCarbTarget(target)) return "В слоте нет углеводного блюда.";
+  if (target === "soup") return "В слоте нет супа.";
+  if (target === "veg") return "В слоте нет овощного блюда.";
   return "В слоте нет блюда.";
 }
 
@@ -1069,7 +1360,8 @@ async function replaceRecipeIdAcrossMenu(
     return { ok: false, error: "Не удалось найти слоты с этим блюдом." };
   }
 
-  const jobs = collectPairReplaceJobs(
+  const jobs = await collectPairReplaceJobs(
+    supabase,
     allSlots as SlotRow[],
     recipeId,
     preferredTarget,
@@ -1080,23 +1372,13 @@ async function replaceRecipeIdAcrossMenu(
 
   // Replace each unique meal×pair×role once (covers both days).
   for (const job of jobs) {
-    const anchor = job.slots[0]!;
-    const result =
-      job.role === "companion"
-        ? await resuggestCompanionForPair(
-          supabase,
-          userId,
-          menuId,
-          anchor,
-          options,
-        )
-        : await resuggestMainForPair(
-          supabase,
-          userId,
-          menuId,
-          anchor,
-          options,
-        );
+    const result = await resuggestForJobRole(
+      supabase,
+      userId,
+      menuId,
+      job,
+      options,
+    );
     if (!result.ok) return result;
   }
   return { ok: true };
@@ -1121,7 +1403,8 @@ async function modifyRecipeIdAcrossMenu(
     return { ok: false, error: "Не удалось найти слоты с этим блюдом." };
   }
 
-  const jobs = collectPairReplaceJobs(
+  const jobs = await collectPairReplaceJobs(
+    supabase,
     allSlots as SlotRow[],
     recipeId,
     preferredTarget,
@@ -1137,31 +1420,66 @@ async function modifyRecipeIdAcrossMenu(
 
   // One invent per meal×role — same variant recipe ids applied to every pair.
   for (const group of groupModifyJobsByMealRole(jobs)) {
-    const result =
-      group.role === "companion"
-        ? await modifyCompanionGroup(
-          supabase,
-          userId,
-          menuId,
-          recipeId,
-          group.jobs,
-          sourceDish,
-          userWish,
-          modifyOpts,
-        )
-        : await modifyMainGroup(
-          supabase,
-          userId,
-          menuId,
-          recipeId,
-          group.jobs,
-          sourceDish,
-          userWish,
-          modifyOpts,
-        );
+    const result = await modifyGroupForRole(
+      supabase,
+      userId,
+      menuId,
+      recipeId,
+      group,
+      sourceDish,
+      userWish,
+      modifyOpts,
+    );
     if (!result.ok) return result;
   }
   return { ok: true };
+}
+
+async function modifyGroupForRole(
+  supabase: SupabaseClient,
+  userId: string,
+  menuId: string,
+  recipeId: string,
+  group: { meal: MealSlot; role: SlotDishTarget; jobs: PairReplaceJob[] },
+  sourceDish: PositionModifySource,
+  userWish: string,
+  options: ResuggestOptions,
+): Promise<ResuggestSlotResult> {
+  if (isCarbTarget(group.role)) {
+    return modifyCompanionGroup(
+      supabase,
+      userId,
+      menuId,
+      recipeId,
+      group.jobs,
+      sourceDish,
+      userWish,
+      options,
+    );
+  }
+  if (isPrimaryTarget(group.meal, group.role)) {
+    return modifyMainGroup(
+      supabase,
+      userId,
+      menuId,
+      recipeId,
+      group.jobs,
+      sourceDish,
+      userWish,
+      options,
+    );
+  }
+  return modifyRoleGroup(
+    supabase,
+    userId,
+    menuId,
+    recipeId,
+    plateRoleForTarget(group.meal, group.role),
+    group.jobs,
+    sourceDish,
+    userWish,
+    options,
+  );
 }
 
 function groupModifyJobsByMealRole(
@@ -1183,15 +1501,28 @@ function groupModifyJobsByMealRole(
   return [...groups.values()];
 }
 
-function pairSlotsMatchSource(
+function pairSlotsMatchSourceFk(
   pairSlots: SlotRow[],
   sourceRecipeId: string,
   role: SlotDishTarget,
 ): boolean {
-  if (role === "companion") {
+  if (isCarbTarget(role)) {
     return pairSlots.every((s) => s.companion_recipe_id === sourceRecipeId);
   }
   return pairSlots.every((s) => s.recipe_id === sourceRecipeId);
+}
+
+function pairSlotsMatchSourceDishes(
+  pairSlots: SlotRow[],
+  sourceRecipeId: string,
+  plateRole: PlateRole,
+  existingBySlot: Map<string, SlotDishAssignment[]>,
+): boolean {
+  return pairSlots.every((s) =>
+    (existingBySlot.get(s.id) ?? []).some(
+      (d) => d.plateRole === plateRole && d.recipeId === sourceRecipeId,
+    ),
+  );
 }
 
 function collectCompanionIds(
@@ -1219,16 +1550,33 @@ async function loadValidatedPairSlots(
   if (!pairSlots?.length) {
     return { ok: false, error: "Слот не найден." };
   }
-  if (!pairSlotsMatchSource(pairSlots, sourceRecipeId, role)) {
-    return {
-      ok: false,
-      error:
-        role === "companion"
-          ? "Пара дней должна иметь один компаньон."
-          : "Пара дней должна иметь одно основное блюдо.",
-    };
+  const plateRole = plateRoleForTarget(meal, role);
+  if (
+    (isCarbTarget(role) || isPrimaryTarget(meal, role)) &&
+    pairSlotsMatchSourceFk(pairSlots, sourceRecipeId, role)
+  ) {
+    return { ok: true, slots: pairSlots };
   }
-  return { ok: true, slots: pairSlots };
+  const existingBySlot = await loadExistingDishAssignments(
+    supabase,
+    pairSlots.map((s) => s.id),
+  );
+  if (
+    pairSlotsMatchSourceDishes(
+      pairSlots,
+      sourceRecipeId,
+      plateRole,
+      existingBySlot,
+    )
+  ) {
+    return { ok: true, slots: pairSlots };
+  }
+  return {
+    ok: false,
+    error: isCarbTarget(role)
+      ? "Пара дней должна иметь одно углеводное блюдо."
+      : "Пара дней должна иметь одно основное блюдо.",
+  };
 }
 
 async function assignModifiedDishesToJobs(
@@ -1244,45 +1592,99 @@ async function assignModifiedDishesToJobs(
   forceSuppressIds: string[] | undefined,
 ): Promise<ResuggestSlotResult> {
   for (const job of jobs) {
-    const loaded = await loadValidatedPairSlots(
-      supabase,
-      menuId,
-      meal,
-      job.dayPair,
-      sourceRecipeId,
-      role,
-    );
-    if (!loaded.ok) {
-      await cleanupRecipes(supabase, inventedIds);
-      return loaded;
-    }
-    const proposals = buildProposals(loaded.slots);
-    if (!proposals?.length) {
-      await cleanupRecipes(supabase, inventedIds);
-      return {
-        ok: false,
-        error: "Пара дней должна иметь одно основное блюдо.",
-      };
-    }
-    const poolIds = new Set(inventedIds);
-    for (const p of proposals) {
-      poolIds.add(p.recipeId);
-      if (p.companionRecipeId) poolIds.add(p.companionRecipeId);
-    }
-    const assigned = await assignPairProposals(
+    const result = await assignOneModifiedJob(
       supabase,
       userId,
       menuId,
-      proposals,
-      [...poolIds],
+      meal,
+      job,
+      sourceRecipeId,
+      role,
+      buildProposals,
+      inventedIds,
       forceSuppressIds,
     );
-    if (!assigned.ok) {
-      await cleanupRecipes(supabase, inventedIds);
-      return assigned;
-    }
+    if (!result.ok) return result;
   }
   return { ok: true };
+}
+
+async function assignOneModifiedJob(
+  supabase: SupabaseClient,
+  userId: string,
+  menuId: string,
+  meal: MealSlot,
+  job: PairReplaceJob,
+  sourceRecipeId: string,
+  role: SlotDishTarget,
+  buildProposals: (pairSlots: SlotRow[]) => ProposedAssignment[] | null,
+  inventedIds: string[],
+  forceSuppressIds: string[] | undefined,
+): Promise<ResuggestSlotResult> {
+  const loaded = await loadValidatedPairSlots(
+    supabase,
+    menuId,
+    meal,
+    job.dayPair,
+    sourceRecipeId,
+    role,
+  );
+  if (!loaded.ok) {
+    await cleanupRecipes(supabase, inventedIds);
+    return loaded;
+  }
+  const proposals = buildProposals(loaded.slots);
+  if (!proposals?.length) {
+    await cleanupRecipes(supabase, inventedIds);
+    return {
+      ok: false,
+      error: "Пара дней должна иметь одно основное блюдо.",
+    };
+  }
+  const existingBySlot = await loadExistingDishAssignments(
+    supabase,
+    loaded.slots.map((s) => s.id),
+  );
+  const merged = proposals.map((p) => {
+    const incoming = p.dishes ?? [];
+    const dishes = mergeDishAssignments(
+      existingBySlot.get(p.slotId) ?? [],
+      incoming,
+    );
+    const fks = legacyFksFromDishes(dishes);
+    return {
+      ...p,
+      dishes,
+      recipeId: fks.recipeId ?? p.recipeId,
+      companionRecipeId: fks.companionRecipeId,
+    };
+  });
+  const assigned = await assignPairProposals(
+    supabase,
+    userId,
+    menuId,
+    merged,
+    [...collectProposalRecipeIds(merged, inventedIds)],
+    forceSuppressIds,
+  );
+  if (!assigned.ok) {
+    await cleanupRecipes(supabase, inventedIds);
+    return assigned;
+  }
+  return { ok: true };
+}
+
+function collectProposalRecipeIds(
+  proposals: ProposedAssignment[],
+  inventedIds: string[],
+): Set<string> {
+  const poolIds = new Set(inventedIds);
+  for (const p of proposals) {
+    if (p.recipeId) poolIds.add(p.recipeId);
+    for (const d of p.dishes ?? []) poolIds.add(d.recipeId);
+    if (p.companionRecipeId) poolIds.add(p.companionRecipeId);
+  }
+  return poolIds;
 }
 
 function jobsHaveCompanion(jobs: PairReplaceJob[]): boolean {
@@ -1304,10 +1706,11 @@ async function modifyMainGroup(
   const anchor = jobs[0];
   if (!anchor) return { ok: false, error: "Слот не найден." };
   const meal = anchor.meal;
-  const keepExistingCompanion = jobsHaveCompanion(jobs);
+  const keepExistingCarb = jobsHaveCompanion(jobs);
+  const plateRole = plateRoleForTarget(meal, "main");
 
   // When keeping the side, leave companion recipes in keepDishes (name context).
-  const excludeIds = keepExistingCompanion
+  const excludeIds = keepExistingCarb
     ? new Set([sourceRecipeId])
     : collectCompanionIds(jobs, sourceRecipeId);
 
@@ -1322,8 +1725,8 @@ async function modifyMainGroup(
     const invented = await inventPositionViaModifyPlan(
       supabase,
       userId,
-      { meal, dayPair: anchor.dayPair, role: "main" },
-      { ...ctx, sourceDish, userWish, keepExistingCompanion },
+      { meal, dayPair: anchor.dayPair, plateRole },
+      { ...ctx, sourceDish, userWish, keepExistingCarb },
       {
         ...options,
         peoplePerMeal: menuMeta.peoplePerMeal,
@@ -1334,16 +1737,16 @@ async function modifyMainGroup(
     if (!invented.ok) return invented;
     inventedIds.push(...invented.inventedIds);
 
-    const main = invented.dishes.find((d) => d.role === "main");
+    const main = invented.dishes.find((d) => d.plateRole === plateRole);
     if (!main) {
       await cleanupRecipes(supabase, inventedIds);
       return planFail("parse");
     }
-    const inventedCompanion = invented.dishes.find((d) => d.role === "companion");
-    // Modify targets the main only — never drop an existing garnish.
-    if (keepExistingCompanion && inventedCompanion) {
-      await cleanupRecipes(supabase, [inventedCompanion.recipeId]);
-      const idx = inventedIds.indexOf(inventedCompanion.recipeId);
+    const inventedCarb = invented.dishes.find((d) => d.plateRole === "carb");
+    // Modify targets the protein/main only — never drop an existing carb.
+    if (keepExistingCarb && inventedCarb) {
+      await cleanupRecipes(supabase, [inventedCarb.recipeId]);
+      const idx = inventedIds.indexOf(inventedCarb.recipeId);
       if (idx >= 0) inventedIds.splice(idx, 1);
     }
 
@@ -1357,18 +1760,26 @@ async function modifyMainGroup(
       "main",
       (pairSlots) =>
         pairSlots.map((s) => {
-          const companionRecipeId = keepExistingCompanion
+          const dishRows = expandDishAssignments(
+            main.plateRole,
+            main.recipeId,
+            keepExistingCarb ? null : main.coversRoles,
+          );
+          const companionRecipeId = keepExistingCarb
             ? s.companion_recipe_id
-            : (inventedCompanion?.recipeId ?? s.companion_recipe_id ?? null);
+            : (inventedCarb?.recipeId ?? s.companion_recipe_id ?? null);
+          if (
+            companionRecipeId &&
+            !dishRows.some((d) => d.plateRole === "carb")
+          ) {
+            dishRows.push({ plateRole: "carb", recipeId: companionRecipeId });
+          }
+          const fks = legacyFksFromDishes(dishRows);
           return {
             slotId: s.id,
-            recipeId: main.recipeId,
-            companionRecipeId,
-            plateKind: resolveResuggestPlateKind(
-              meal,
-              keepExistingCompanion ? "needs_companion" : main.plateKind,
-              companionRecipeId,
-            ),
+            dishes: dishRows,
+            recipeId: fks.recipeId ?? main.recipeId,
+            companionRecipeId: fks.companionRecipeId,
           };
         }),
       inventedIds,
@@ -1394,7 +1805,10 @@ async function modifyCompanionGroup(
   if (!anchor) return { ok: false, error: "Слот не найден." };
   const meal = anchor.meal;
   if (!mealAllowsCompanion(meal)) {
-    return { ok: false, error: "Для этого приёма компаньон не используется." };
+    return {
+      ok: false,
+      error: "Для этого приёма углеводная роль не используется.",
+    };
   }
 
   const anchorSlot = anchor.slots[0];
@@ -1431,8 +1845,7 @@ async function modifyCompanionGroup(
       {
         meal,
         dayPair: anchor.dayPair,
-        role: "companion",
-        mainName: mainDishName,
+        plateRole: "carb",
       },
       {
         ...ctx,
@@ -1450,7 +1863,7 @@ async function modifyCompanionGroup(
     if (!invented.ok) return invented;
     inventedIds.push(...invented.inventedIds);
 
-    const companion = invented.dishes.find((d) => d.role === "companion");
+    const companion = invented.dishes.find((d) => d.plateRole === "carb");
     if (!companion) {
       await cleanupRecipes(supabase, inventedIds);
       return planFail("parse");
@@ -1472,11 +1885,18 @@ async function modifyCompanionGroup(
         );
         if (mainIds.size !== 1) return null;
         const mainRecipeId = [...mainIds][0]!;
+        const primaryRole: PlateRole = isLunchDinnerMeal(meal)
+          ? "protein"
+          : "main";
+        const dishRows = [
+          { plateRole: primaryRole, recipeId: mainRecipeId },
+          { plateRole: "carb" as const, recipeId: companion.recipeId },
+        ];
         return pairSlots.map((s) => ({
           slotId: s.id,
+          dishes: dishRows,
           recipeId: mainRecipeId,
           companionRecipeId: companion.recipeId,
-          plateKind: "needs_companion" as const,
         }));
       },
       inventedIds,
@@ -1488,40 +1908,190 @@ async function modifyCompanionGroup(
   }
 }
 
-function collectPairReplaceJobs(
+/** Modify a non-primary role (soup, veg, …) across matching pairs. */
+async function modifyRoleGroup(
+  supabase: SupabaseClient,
+  userId: string,
+  menuId: string,
+  sourceRecipeId: string,
+  plateRole: PlateRole,
+  jobs: PairReplaceJob[],
+  sourceDish: PositionModifySource,
+  userWish: string,
+  options: ResuggestOptions,
+): Promise<ResuggestSlotResult> {
+  const anchor = jobs[0];
+  if (!anchor) return { ok: false, error: "Слот не найден." };
+  const meal = anchor.meal;
+
+  const ctx = await modifyNameContext(
+    supabase,
+    userId,
+    menuId,
+    new Set([sourceRecipeId]),
+  );
+  if (!ctx) return planFail("query");
+
+  const menuMeta = await loadMenuMeta(supabase, menuId);
+  if (!menuMeta) return planFail("query");
+  const inventedIds: string[] = [];
+
+  try {
+    const invented = await inventPositionViaModifyPlan(
+      supabase,
+      userId,
+      { meal, dayPair: anchor.dayPair, plateRole },
+      { ...ctx, sourceDish, userWish },
+      {
+        ...options,
+        peoplePerMeal: menuMeta.peoplePerMeal,
+        menuDayCount: menuMeta.dayCount,
+        availableEquipment: menuMeta.availableEquipment,
+      },
+    );
+    if (!invented.ok) return invented;
+    inventedIds.push(...invented.inventedIds);
+
+    const dish = invented.dishes.find((d) => d.plateRole === plateRole);
+    if (!dish) {
+      await cleanupRecipes(supabase, inventedIds);
+      return planFail("parse");
+    }
+
+    return assignModifiedDishesToJobs(
+      supabase,
+      userId,
+      menuId,
+      meal,
+      jobs,
+      sourceRecipeId,
+      plateRole,
+      (pairSlots) => {
+        const dishRows = expandDishAssignments(
+          dish.plateRole,
+          dish.recipeId,
+          dish.coversRoles,
+        );
+        const fks = legacyFksFromDishes(dishRows);
+        return pairSlots.map((s) => ({
+          slotId: s.id,
+          dishes: dishRows,
+          recipeId: fks.recipeId ?? s.recipe_id ?? undefined,
+          companionRecipeId:
+            fks.companionRecipeId ?? s.companion_recipe_id ?? undefined,
+        }));
+      },
+      inventedIds,
+      options.forceSuppressIds,
+    );
+  } catch (err) {
+    await cleanupRecipes(supabase, inventedIds);
+    return { ok: false, error: resuggestFailMessage(err) };
+  }
+}
+
+type DishRoleHit = { menu_slot_id: string; plate_role: string };
+
+function pushPairReplaceJob(
+  jobs: Map<string, PairReplaceJob>,
+  slot: SlotRow,
+  role: SlotDishTarget,
+): void {
+  const meal = slot.meal as MealSlot;
+  const dayPair = menuDayPairForDay(slot.day_index);
+  if (!dayPair) return;
+  const key = `${meal}:${dayPair[0]}-${dayPair[1]}:${role}`;
+  const existing = jobs.get(key);
+  if (existing) {
+    if (!existing.slots.some((s) => s.id === slot.id)) {
+      existing.slots.push(slot);
+    }
+    return;
+  }
+  jobs.set(key, { meal, dayPair, role, slots: [slot] });
+}
+
+function cookableDishRole(value: string): PlateRole | null {
+  if (!isPlateRole(value) || value === "snack") return null;
+  return value;
+}
+
+function pushJobsFromDishHits(
+  jobs: Map<string, PairReplaceJob>,
+  dishRows: DishRoleHit[],
+  slotById: Map<string, SlotRow>,
+  preferredTarget: SlotDishTarget | null,
+): void {
+  for (const d of dishRows) {
+    const plateRole = cookableDishRole(d.plate_role);
+    if (!plateRole) continue;
+    const slot = slotById.get(d.menu_slot_id);
+    if (!slot) continue;
+    if (
+      preferredTarget &&
+      plateRole !== plateRoleForTarget(slot.meal as MealSlot, preferredTarget)
+    ) {
+      continue;
+    }
+    pushPairReplaceJob(jobs, slot, plateRole);
+  }
+}
+
+function pushJobsFromLegacyFks(
+  jobs: Map<string, PairReplaceJob>,
   allSlots: SlotRow[],
   recipeId: string,
-  preferredTarget: SlotDishTarget,
-): PairReplaceJob[] {
-  const jobs = new Map<string, PairReplaceJob>();
-
-  const push = (slot: SlotRow, role: SlotDishTarget) => {
-    const meal = slot.meal as MealSlot;
-    const dayPair = menuDayPairForDay(slot.day_index);
-    if (!dayPair) return;
-    const key = `${meal}:${dayPair[0]}-${dayPair[1]}:${role}`;
-    const existing = jobs.get(key);
-    if (existing) {
-      if (!existing.slots.some((s) => s.id === slot.id)) {
-        existing.slots.push(slot);
-      }
-      return;
-    }
-    jobs.set(key, { meal, dayPair, role, slots: [slot] });
-  };
-
+  preferredTarget: SlotDishTarget | null,
+): void {
   for (const slot of allSlots) {
     const asMain = slot.recipe_id === recipeId;
     const asCompanion = slot.companion_recipe_id === recipeId;
-    if (preferredTarget === "main" && asMain) push(slot, "main");
-    if (preferredTarget === "companion" && asCompanion) push(slot, "companion");
+    if (preferredTarget) {
+      if (isPrimaryTarget(slot.meal as MealSlot, preferredTarget) && asMain) {
+        pushPairReplaceJob(jobs, slot, "main");
+      }
+      if (isCarbTarget(preferredTarget) && asCompanion) {
+        pushPairReplaceJob(jobs, slot, "companion");
+      }
+      continue;
+    }
+    if (asMain) pushPairReplaceJob(jobs, slot, "main");
+    if (asCompanion) pushPairReplaceJob(jobs, slot, "companion");
   }
+}
 
+async function collectPairReplaceJobs(
+  supabase: SupabaseClient,
+  allSlots: SlotRow[],
+  recipeId: string,
+  preferredTarget: SlotDishTarget,
+): Promise<PairReplaceJob[]> {
+  const jobs = new Map<string, PairReplaceJob>();
+  const slotIds = allSlots.map((s) => s.id);
+  const slotById = new Map(allSlots.map((s) => [s.id, s]));
+  const { data: dishRows } =
+    slotIds.length === 0
+      ? { data: [] as DishRoleHit[] }
+      : await supabase
+        .from("menu_slot_dishes")
+        .select("menu_slot_id, plate_role")
+        .in("menu_slot_id", slotIds)
+        .eq("recipe_id", recipeId);
+
+  const hits = (dishRows ?? []).filter(
+    (d): d is DishRoleHit =>
+      typeof d.menu_slot_id === "string" && typeof d.plate_role === "string",
+  );
+
+  pushJobsFromDishHits(jobs, hits, slotById, preferredTarget);
   if (jobs.size > 0) return [...jobs.values()];
 
-  for (const slot of allSlots) {
-    if (slot.recipe_id === recipeId) push(slot, "main");
-    if (slot.companion_recipe_id === recipeId) push(slot, "companion");
-  }
+  pushJobsFromDishHits(jobs, hits, slotById, null);
+  if (jobs.size > 0) return [...jobs.values()];
+
+  pushJobsFromLegacyFks(jobs, allSlots, recipeId, preferredTarget);
+  if (jobs.size > 0) return [...jobs.values()];
+
+  pushJobsFromLegacyFks(jobs, allSlots, recipeId, null);
   return [...jobs.values()];
 }

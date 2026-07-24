@@ -4,7 +4,7 @@ baseline_commit: e20cd4b14f3783c6c3058b48dc677895355d90ac
 
 # Story 5.1: W1 header and wizard chrome
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 

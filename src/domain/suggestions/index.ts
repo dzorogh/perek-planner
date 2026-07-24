@@ -27,7 +27,9 @@ export {
   proposePositionModifyPlan,
   proposePositionNamePlan,
   repairMenuNamePlan,
+  resolvePositionPlateRole,
 } from "@/domain/suggestions/plan-menu-names";
+export { buildProposalsFromExpanded } from "@/domain/suggestions/generate-menu";
 export {
   analyzeMenuVariety,
   parseAnalyzeMenuVarietyJson,
@@ -58,6 +60,19 @@ export {
   rankCandidates,
   ratingWeight,
 } from "@/domain/suggestions/rank";
+export {
+  emitRoleSlots,
+  expandDishAssignments,
+  filterCoversToMeal,
+  legacyFksFromDishes,
+  mealDayPairKey,
+  mergeDishAssignments,
+  parseCoversRoles,
+  parseCoversRolesForMeal,
+  remainingOpenRoles,
+  roleSlotKey,
+} from "@/domain/suggestions/role-slots";
+export { adaptDishesToMeal } from "@/domain/suggestions/assign";
 export { isHardSuppressed } from "@/domain/suggestions/suppress";
 export {
   namesEqual,

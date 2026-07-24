@@ -20,6 +20,7 @@ import {
 } from "@/domain/suggestions/dish-similarity";
 import type { PlannedDish } from "@/domain/suggestions/plan-menu-names";
 import { planKey } from "@/domain/suggestions/plan-menu-names";
+import { parseCoversRoles } from "@/domain/suggestions/role-slots";
 import {
   tasteNotesForPrompt,
   type TasteNote,
@@ -40,20 +41,23 @@ export type ExpandMenuRecipesResult =
 
 const EXPAND_SYSTEM = `You write full Russian home-cooking recipes for LOCKED dish names on a household meal planner.
 Names are final — do NOT rename, swap, or invent different dishes.
+Plate roles are FIXED by the app — write content for the given plate_role.
 Respond with a single JSON object:
-{"recipes":[{"key":"meal:1-2:main","name":"...","body_text":"...","fridge_keep_days":N,"plate_role":"main"|"companion","required_equipment":["stove"|"oven"|"air_fryer"|"grill"|"multicooker"|"pressure_cooker"|"microwave",...],"price_rub_per_serving":N,"nutrition_per_serving":{"kcal":N,"protein_g":N,"fat_g":N,"carbs_g":N},"critical_ingredients":[{"name":"...","kind":"critical"|"pantry","amount":N,"unit":"g"|"ml"|"pcs"|"tsp"|"tbsp"},...]}]}.
+{"recipes":[{"key":"meal:1-2:protein","name":"...","body_text":"...","fridge_keep_days":N,"plate_role":"main"|"soup"|"protein"|"veg"|"carb","covers_roles":["protein","carb"]?,"required_equipment":["stove"|"oven"|"air_fryer"|"grill"|"multicooker"|"pressure_cooker"|"microwave",...],"price_rub_per_serving":N,"nutrition_per_serving":{"kcal":N,"protein_g":N,"fat_g":N,"carbs_g":N},"critical_ingredients":[{"name":"...","kind":"critical"|"pantry","amount":N,"unit":"g"|"ml"|"pcs"|"tsp"|"tbsp"},...]}]}.
 
 Rules:
 - One recipe object per input dish. key MUST match the input key exactly. name MUST match the locked name (same dish).
-- plate_role from input. fridge_keep_days integer 1..7, MUST be >= menuDayCount from the request.
-- required_equipment: non-empty; only stove|oven|air_fryer|grill|multicooker|pressure_cooker|microwave; MUST be ⊆ availableEquipment. HARD: never require equipment outside availableEquipment.
-- body_text: SHORT Russian steps, each on its own line numbered "1. ", "2. ", … Main 3–5 steps, companion 2–4. Cooking/heating required.
+- plate_role from input (PlateRole). Optional covers_roles for one-pots — prefer the plan's covers_roles when provided.
+- fridge_keep_days integer 1..7, MUST be >= menuDayCount from the request.
+- required_equipment: non-empty; only stove|oven|air_fryer|grill|multicooker|pressure_cooker|microwave; MUST be ⊆ availableEquipment.
+- body_text: SHORT Russian steps, each on its own line numbered "1. ", "2. ", … Protein/main 3–5 steps, soup/veg/carb 2–4. Cooking/heating required.
 - HARD shopping-list completeness: every buyable food in name or body_text MUST be in critical_ingredients with amount+unit per 1 adult serving.
-- At least one kind=critical. Prefer 3–8 ingredients (companions 2–5).
+- At least one kind=critical. Prefer 3–8 ingredients (sides 2–5).
 - price_rub_per_serving: integer RUBLES, never above 400; omit if uncertain (no zeros).
 - nutrition_per_serving: realistic; omit if uncertain.
 - Honor operatorTasteNotes for ingredients/technique when relevant, but keep the locked name.
-- When modificationWish is set: adapt ingredients/technique to the wish; prefer adapting sourceRecipe when provided; still keep each locked name.`;
+- When modificationWish is set: adapt ingredients/technique to the wish; prefer adapting sourceRecipe when provided; still keep each locked name.
+- NEVER plate_kind / companion.`;
 
 export type ExpandModificationContext = {
   wish: string;
@@ -122,9 +126,9 @@ async function fetchExpandDrafts(
     meal: d.meal,
     mealLabelRu: MEAL_LABELS_RU[d.meal],
     dayPair: [...d.dayPair],
-    role: d.role,
+    plate_role: d.plateRole,
+    covers_roles: d.coversRoles ?? undefined,
     name: d.name,
-    plate_role: d.role,
   }));
   const wish = args.modification?.wish.trim();
   const sourceRecipe = args.modification?.sourceRecipe;
@@ -246,7 +250,11 @@ async function persistExpandedPlan(
       return { ok: false, reason: "persist" };
     }
     inventedIds.push(persisted.recipeId);
-    expanded.push({ ...dish, recipeId: persisted.recipeId });
+    expanded.push({
+      ...dish,
+      coversRoles: draft.coversRoles ?? dish.coversRoles ?? null,
+      recipeId: persisted.recipeId,
+    });
   }
 
   return { ok: true, dishes: expanded };
@@ -261,7 +269,12 @@ export function prepareExpandDraft(
 ): InventRecipeDraft | null {
   if (!draft) return null;
   draft.name = dish.name.slice(0, 120);
-  draft.plateRole = dish.role;
+  draft.plateRole = dish.plateRole;
+  // Prefer plan covers when AI omits.
+  draft.coversRoles =
+    dish.coversRoles ??
+    draft.coversRoles ??
+    parseCoversRoles(null);
   if (draft.fridgeKeepDays < menuDayCount) {
     draft.fridgeKeepDays = menuDayCount;
   }
@@ -348,7 +361,9 @@ function draftFromKeyedRow(
         {
           ...row,
           name: dish.name,
-          plate_role: dish.role,
+          plate_role: dish.plateRole,
+          covers_roles:
+            row.covers_roles ?? row.coversRoles ?? dish.coversRoles ?? null,
           fridge_keep_days:
             row.fridge_keep_days ?? row.fridgeKeepDays ?? DEFAULT_DAY_COUNT,
         },
@@ -357,7 +372,8 @@ function draftFromKeyedRow(
   )[0];
   if (!one) return null;
   one.name = dish.name;
-  one.plateRole = dish.role;
+  one.plateRole = dish.plateRole;
+  one.coversRoles = dish.coversRoles ?? one.coversRoles;
   return one;
 }
 
@@ -374,7 +390,8 @@ function takeDraftByName(
   );
   if (!match) return null;
   match.name = dish.name;
-  match.plateRole = dish.role;
+  match.plateRole = dish.plateRole;
+  match.coversRoles = dish.coversRoles ?? match.coversRoles;
   return match;
 }
 

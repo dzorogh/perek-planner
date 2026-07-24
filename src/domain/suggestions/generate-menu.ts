@@ -5,9 +5,10 @@ import {
   expectedSlotCount,
   isMealSlot,
   isValidDayCount,
-  mealAllowsCompanion,
+  mealsForSkeleton,
   type MealSlot,
 } from "@/domain/menu/constants";
+import type { PlateRole } from "@/domain/menu/meal-templates";
 import {
   DEFAULT_AVAILABLE_EQUIPMENT,
   dishNameEquipmentConflicts,
@@ -41,6 +42,12 @@ import {
   looksLikeHeavyAnimalProteinDish,
   looksLikeNoCookSnack,
 } from "@/domain/suggestions/meal-fit";
+import {
+  expandDishAssignments,
+  legacyFksFromDishes,
+  mealDayPairKey,
+  type SlotDishAssignment,
+} from "@/domain/suggestions/role-slots";
 import { loadSuppressSets } from "@/domain/suggestions/suppress";
 import { loadTasteNotes } from "@/domain/suggestions/taste-notes";
 import {
@@ -102,7 +109,7 @@ export async function generateBuyableMenuForUser(
 
   const created = await createMenuSkeletonForUser(supabase, userId, dayCount, {
     peopleCount: options.peopleCount,
-    meals,
+    meals: mealsForSkeleton(meals, includeSnacks),
     equipment,
   });
   if (!created.ok) {
@@ -234,7 +241,7 @@ async function fillCookableSlots(
       return {
         meal: d.meal,
         dayPair: d.dayPair,
-        role: d.role,
+        plateRole: d.plateRole,
         reason: `Name implies ${missing.join(",")} but availableEquipment is only [${equipment.join(",")}]. Invent a clearly different name cookable with that set (no unavailable appliance words).`,
       };
     });
@@ -255,7 +262,7 @@ async function fillCookableSlots(
     plan.map((d) => ({
       meal: d.meal,
       dayPair: d.dayPair,
-      role: d.role,
+      plateRole: d.plateRole,
       name: d.name,
       recipeId: planKey(d),
     })),
@@ -308,42 +315,67 @@ async function fillCookableSlots(
   }
 }
 
-function buildProposalsFromExpanded(
+/** Exported for logic verify. */
+export function buildProposalsFromExpanded(
   dishes: Array<PlannedDish & { recipeId: string }>,
   slotByKey: Map<string, SlotPrompt>,
 ): ProposedAssignment[] {
-  const mains = dishes.filter((d) => d.role === "main");
-  const companions = dishes.filter((d) => d.role === "companion");
-  const companionByMainKey = new Map<string, string>();
-  for (const c of companions) {
-    companionByMainKey.set(
-      `${c.meal}:${c.dayPair[0]}-${c.dayPair[1]}`,
-      c.recipeId,
-    );
-  }
-
+  const groups = groupExpandedByMealDayPair(dishes);
   const proposals: ProposedAssignment[] = [];
-  for (const main of mains) {
-    const key = `${main.meal}:${main.dayPair[0]}-${main.dayPair[1]}`;
-    const companionRecipeId = mealAllowsCompanion(main.meal)
-      ? (companionByMainKey.get(key) ?? null)
-      : null;
-    const plateKind = resolveAssignPlateKind(main, companionRecipeId);
-
-    for (const day of main.dayPair) {
-      const slot = slotByKey.get(`${day}:${main.meal}`);
+  for (const group of groups.values()) {
+    const first = group[0]!;
+    const dishRows = flattenExpandedGroupToDishes(group);
+    const fks = legacyFksFromDishes(dishRows);
+    for (const day of first.dayPair) {
+      const slot = slotByKey.get(`${day}:${first.meal}`);
       if (!slot) {
         throw new SuggestionError("query", SUGGESTION_FAIL_RU.query);
       }
       proposals.push({
         slotId: slot.slotId,
-        recipeId: main.recipeId,
-        companionRecipeId,
-        plateKind,
+        dishes: dishRows,
+        recipeId: fks.recipeId ?? dishRows[0]?.recipeId,
+        companionRecipeId: fks.companionRecipeId,
       });
     }
   }
   return proposals;
+}
+
+function groupExpandedByMealDayPair(
+  dishes: Array<PlannedDish & { recipeId: string }>,
+): Map<string, Array<PlannedDish & { recipeId: string }>> {
+  const groups = new Map<string, Array<PlannedDish & { recipeId: string }>>();
+  for (const d of dishes) {
+    const key = mealDayPairKey(d.meal, d.dayPair);
+    const list = groups.get(key) ?? [];
+    list.push(d);
+    groups.set(key, list);
+  }
+  return groups;
+}
+
+function flattenExpandedGroupToDishes(
+  group: Array<PlannedDish & { recipeId: string }>,
+): SlotDishAssignment[] {
+  // Prefer cover-declaring dishes so one-pots claim roles before sides.
+  const ordered = [...group].sort(
+    (a, b) => (b.coversRoles?.length ?? 0) - (a.coversRoles?.length ?? 0),
+  );
+  const dishRows: SlotDishAssignment[] = [];
+  const seenRoles = new Set<PlateRole>();
+  for (const d of ordered) {
+    for (const row of expandDishAssignments(
+      d.plateRole,
+      d.recipeId,
+      d.coversRoles,
+    )) {
+      if (seenRoles.has(row.plateRole)) continue;
+      seenRoles.add(row.plateRole);
+      dishRows.push(row);
+    }
+  }
+  return dishRows;
 }
 
 async function loadSlotKeyMap(
@@ -365,28 +397,32 @@ async function loadSlotKeyMap(
   return new Map(slots.map((s) => [`${s.dayIndex}:${s.meal}`, s] as const));
 }
 
-function resolveAssignPlateKind(
-  main: PlannedDish,
-  companionRecipeId: string | null,
-): ProposedAssignment["plateKind"] {
-  if (!mealAllowsCompanion(main.meal)) return null;
-  if (main.plateKind) return main.plateKind;
-  return companionRecipeId ? "needs_companion" : "complete";
-}
-
+/** Drop carb dish when both protein and carb are heavy animal (not one-pot covers). */
 function dropHeavyHeavyCompanions(
   proposals: ProposedAssignment[],
   nameById: Map<string, string>,
 ): ProposedAssignment[] {
   return proposals.map((p) => {
-    if (!p.companionRecipeId) return p;
-    const mainName = nameById.get(p.recipeId) ?? "";
-    const sideName = nameById.get(p.companionRecipeId) ?? "";
+    const dishes = p.dishes ?? [];
+    const protein = dishes.find((d) => d.plateRole === "protein");
+    const carb = dishes.find((d) => d.plateRole === "carb");
+    if (!protein || !carb) return p;
+    // One-pot covers: same recipe fills protein+carb — never strip.
+    if (protein.recipeId === carb.recipeId) return p;
+    const proteinName = nameById.get(protein.recipeId) ?? "";
+    const carbName = nameById.get(carb.recipeId) ?? "";
     if (
-      looksLikeHeavyAnimalProteinDish(mainName) &&
-      looksLikeHeavyAnimalProteinDish(sideName)
+      looksLikeHeavyAnimalProteinDish(proteinName) &&
+      looksLikeHeavyAnimalProteinDish(carbName)
     ) {
-      return { ...p, companionRecipeId: null, plateKind: "complete" as const };
+      const next = dishes.filter((d) => d.plateRole !== "carb");
+      const fks = legacyFksFromDishes(next);
+      return {
+        ...p,
+        dishes: next,
+        recipeId: fks.recipeId ?? p.recipeId,
+        companionRecipeId: null,
+      };
     }
     return p;
   });

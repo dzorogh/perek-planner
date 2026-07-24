@@ -64,6 +64,10 @@ type SlotLike = {
   companionRecipeId?: string | null;
   recipeValue?: RecipePerServingValue | null;
   companionRecipeValue?: RecipePerServingValue | null;
+  dishes?: ReadonlyArray<{
+    recipeId: string | null;
+    recipeValue?: RecipePerServingValue | null;
+  }> | null;
 };
 
 type SnackLike = {
@@ -108,8 +112,32 @@ function accumulateValue(
   };
 }
 
+function accumulateSlotDishes(
+  acc: ScaledRecipeTotals,
+  slot: SlotLike,
+): ScaledRecipeTotals {
+  const servings = resolveServings(slot.servings, 2);
+  if (slot.dishes && slot.dishes.length > 0) {
+    let next = acc;
+    for (const dish of slot.dishes) {
+      if (dish.recipeId) {
+        next = accumulateValue(next, dish.recipeValue, servings);
+      }
+    }
+    return next;
+  }
+  let next = acc;
+  if (slot.recipeId) {
+    next = accumulateValue(next, slot.recipeValue, servings);
+  }
+  if (slot.companionRecipeId) {
+    next = accumulateValue(next, slot.companionRecipeValue, servings);
+  }
+  return next;
+}
+
 /**
- * Sum menu totals across main + companion placements (+ optional snacks).
+ * Sum menu totals across role dishes (or legacy main + companion) + snacks.
  * Only known values contribute; missing fields stay null if never seen.
  */
 export function sumMenuTotals(
@@ -121,13 +149,7 @@ export function sumMenuTotals(
   let acc: ScaledRecipeTotals = { ...EMPTY_TOTALS };
 
   for (const slot of slots) {
-    const servings = resolveServings(slot.servings, 2);
-    if (slot.recipeId) {
-      acc = accumulateValue(acc, slot.recipeValue, servings);
-    }
-    if (slot.companionRecipeId) {
-      acc = accumulateValue(acc, slot.companionRecipeValue, servings);
-    }
+    acc = accumulateSlotDishes(acc, slot);
   }
 
   for (const snack of snacks) {

@@ -7,8 +7,8 @@ paradigm: 'BaaS-backed modular Next'
 scope: 'keplo initiative — Next app, Supabase cloud, Dokploy-hosted Python catalog sync'
 status: final
 created: '2026-07-19'
-updated: '2026-07-20'
-binds: ['FR-1..FR-24', 'UJ-1', 'ai-suggestions', 'ingredient-shopping-list']
+updated: '2026-07-25'
+binds: ['FR-1..FR-28', 'UJ-1', 'ai-suggestions', 'ingredient-shopping-list', 'harvard-plate']
 sources:
   - '_bmad-output/planning-artifacts/prds/prd-keplo-2026-07-19/prd.md'
   - '_bmad-output/planning-artifacts/ux-designs/ux-keplo-2026-07-19/DESIGN.md'
@@ -53,10 +53,10 @@ flowchart TB
 - **Binds:** fridge-keep, ai-suggestions
 - **Rule:** Eligibility for suggest/assign is **fridge-keep** (`fridge_keep_days >= menu.day_count`) plus **Refusal/dislike** hard-suppress. No product/SKU matching.
 
-### AD-4 — AI via OpenRouter from Next only [ADOPTED · revised 2026-07-20]
+### AD-4 — AI via OpenRouter from Next only [ADOPTED · revised 2026-07-25]
 
-- **Binds:** FR-7, FR-8, FR-10, FR-12
-- **Rule:** Recipe suggestions call **OpenRouter** from Next server code only. Model id is runtime config. Secrets never ship to the browser. AI may **invent** recipes and persist them to the shared library, then assign **only persisted ids**. **Refusal** and **dislike Rating** hard-suppress that Recipe/Snack from future suggestions (never bypassed by a second path).
+- **Binds:** FR-7, FR-8, FR-10, FR-12, FR-27
+- **Rule:** Recipe suggestions call **OpenRouter** from Next server code only. Model id is runtime config. Secrets never ship to the browser. AI may **invent** recipes and persist them to the shared library, then assign **only persisted ids**. **Refusal** and **dislike Rating** hard-suppress that Recipe/Snack from future suggestions (never bypassed by a second path). Assign only into **code-emitted role slots** from the meal template (AD-12); the model must not invent free-form meal architecture.
 
 ### AD-5 — Auth & tenancy [ADOPTED]
 
@@ -93,6 +93,11 @@ flowchart LR
 ### AD-11 — Shopping list handoff snapshot [ADOPTED · revised 2026-07-20]
 
 - **Rule:** `buildShoppingList(menuId)` materializes a snapshot of distinct ingredient names from recipes on the Menu **plus** snack labels. Copy uses that snapshot. No prices, no store URL, no in-app list edit.
+
+### AD-12 — Meal templates & Slot dishes [ADOPTED · 2026-07-25]
+
+- **Binds:** FR-3, FR-4, FR-25…FR-28, FR-6/FR-7 invent paths
+- **Rule:** Every meal type uses **`MenuSlot` → `MenuSlotDish[]`** (Plate role + recipe/item ref). No parallel persistence architecture for breakfast vs lunch vs snack. **Meal templates** live in domain code (`src/domain/menu/…`): ordered Plate roles per meal type. v1 templates: breakfast / second_breakfast → `[main]`; lunch → `[soup, protein, veg, carb]`; dinner / late_dinner → `[protein, veg, carb]`; snack / перекус → `[snack]`. A Recipe may declare **`covers_roles`** (multi-role / one-pot); assign skips inventing dishes for already-covered roles. Binary `recipe_id` + `companion_recipe_id` (and ad-hoc-only snack shape) are superseded as the long-term model; migrate in Epic 6 Story 6.1. Shopping list / history / resuggest iterate all Slot dishes.
 
 ## Consistency Conventions
 
@@ -144,26 +149,19 @@ keplo/
 
 ```mermaid
 erDiagram
-  User ||--o| UserSettings : has
-  UserSettings }o--|| Store : selected
   User ||--o{ Menu : owns
-  Menu }o--|| Store : snapshot
   Menu ||--|{ MenuSlot : contains
-  MenuSlot }o--o| Recipe : meal_or_null
-  Menu ||--o{ Snack : includes
+  MenuSlot ||--|{ MenuSlotDish : has
+  MenuSlotDish }o--o| Recipe : role_assignment
   Recipe ||--|{ CriticalIngredient : has
   Recipe ||--o| FridgeKeep : has
-  CriticalIngredient ||--o{ CheckedMatch : resolved_on_menu
-  CheckedMatch }o--|| Product : picks
-  CheckedMatch }o--|| Menu : belongs
-  Store ||--o{ Product : catalogs
-  Store ||--o{ CatalogSyncRun : syncs
   User ||--o{ Rating : records
   User ||--o{ Refusal : records
   Menu ||--o| ShoppingList : handoff
   ShoppingList ||--|{ ShoppingListLine : has
-  ShoppingListLine }o--o| CheckedMatch : from_match
 ```
+
+Notes: `MenuSlotDish.plate_role` is the Plate role enum; `Recipe.covers_roles` (optional) lists roles a multi-role dish satisfies. Snack meals use Slot dishes with role `snack` (not a second architecture). Legacy Store / CheckedMatch / companion FK shapes are superseded per AD-2/AD-7/AD-12.
 
 ## Capability → Architecture Map
 
@@ -171,8 +169,8 @@ erDiagram
 | --- | --- | --- |
 | Account (FR-23) | Supabase Auth + Next middleware | AD-5 |
 | Settings / store picker | Next UI + `UserSettings` | AD-9, UX |
-| Menu & Portion plan (FR-1…FR-5) | Next domain + Supabase | AD-1, AD-7, AD-9, AD-10 |
-| Suggestions / Rating / Refusal / Recipe text (FR-6…FR-10, FR-24) | Next domain + OpenRouter + History UX | AD-3, AD-4 |
+| Menu & Portion plan (FR-1…FR-5, FR-25…FR-28) | Next domain + Supabase (Slot dishes) | AD-1, AD-10, AD-12 |
+| Suggestions / Rating / Refusal / Recipe text (FR-6…FR-10, FR-24, FR-27) | Next domain + OpenRouter + History UX | AD-3, AD-4, AD-12 |
 | Checked matches & eligibility (FR-11…FR-15, FR-17) | Next matching module; rows in Supabase | AD-3, AD-7, AD-10 |
 | Catalog & store (FR-16…FR-18) | Python sync → Supabase; Next reads | AD-2, AD-8, AD-9 |
 | Shopping list & handoff (FR-19…FR-22) | Next handoff snapshot from CheckedMatch (+ staples) | AD-7, AD-11, UX |

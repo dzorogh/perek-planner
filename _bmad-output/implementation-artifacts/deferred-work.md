@@ -87,3 +87,20 @@ All previously open items were closed in the deferred-work sweep. Strikethrough 
 - source_spec: `_bmad-output/implementation-artifacts/spec-ai-debug-logs-db.md`
   summary: RLS smoke for ai_debug_logs only covers anon SELECT deny, not anon INSERT or cross-user isolation.
   evidence: Review noted verify-rls-ai-debug-logs.mjs selects only; authenticated A↛B needs a second operator like other RLS suites.
+
+## Deferred from: code review of 6-1-slot-dish-roles-schema-and-templates.md (2026-07-25)
+
+- Wire `covers_roles` into invent/assign (helpers-only in 6.1) — Story 6.2
+- Full Harvard soup/veg persistence on assign dual-write (currently protein+carb legacy map) — Story 6.2
+- Deduplicate meal templates in `verify-meal-composition-logic.mjs` vs domain modules — project verify-mjs pattern
+
+## Deferred from: code review of 6-2-template-driven-ai-invent-assign.md (2026-07-25)
+
+- Non-atomic `menu_slots` FK update before `replaceSlotDishes` — pre-existing dual-write pattern (`assign.ts`)
+- `inventAndPersistRecipes` still free-mixes plate roles — not on create-menu path; batch invent remains secondary
+
+## Deferred from: code review of 6-3-role-labeled-menu-ui-and-per-role-edit.md (2026-07-25)
+
+- `canClear` only for carb — MVP secondary clear scope from story; not expanding clear to veg/soup in 6.3
+- `verify-plate-role-labels-logic.mjs` duplicates domain helpers — same pure-script pattern as other verify:logic files
+- Parallel empty-role «Предложить» lacks cell-level busy — busy overlay still keyed on shared `recipeId`; empty lines can race

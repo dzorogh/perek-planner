@@ -1,5 +1,7 @@
 import type { MealSlot, MenuDayPair } from "@/domain/menu/constants";
 import { MEAL_LABELS_RU } from "@/domain/menu/constants";
+import { isPlateRole, type PlateRole } from "@/domain/menu/meal-templates";
+import { resolvePositionPlateRole } from "@/domain/suggestions/plan-menu-names";
 import {
   openRouterChatCompletions,
   OpenRouterError,
@@ -9,7 +11,7 @@ import {
 export type MenuPlanDish = {
   meal: MealSlot;
   dayPair: MenuDayPair;
-  role: "main" | "companion";
+  plateRole: PlateRole;
   name: string;
   /** Stable id or plan key — used only for correlation, not culinary judgment. */
   recipeId: string;
@@ -18,7 +20,7 @@ export type MenuPlanDish = {
 export type MenuVarietyReplace = {
   meal: MealSlot;
   dayPair: MenuDayPair;
-  role: "main" | "companion";
+  plateRole: PlateRole;
   reason: string;
 };
 
@@ -29,17 +31,18 @@ export type AnalyzeMenuVarietyResult =
 
 const ANALYZE_SYSTEM = `You audit a Russian household batch-cook menu for culinary variety failures.
 The menu is already built as fixed day-pairs (days 1–2 and 3–4). Each dish spans its pair.
+Plate roles are FIXED (soup/protein/veg/carb/main) — audit culinary variety, not architecture.
 Respond with a single JSON object:
 {"ok":true,"replace":[]}
 OR
-{"ok":false,"replace":[{"meal":"lunch"|"dinner"|"breakfast"|...,"dayPair":[1,2]|[3,4],"role":"main"|"companion","reason":"short Russian why"}]}.
+{"ok":false,"replace":[{"meal":"lunch"|"dinner"|"breakfast"|...,"dayPair":[1,2]|[3,4],"plate_role":"protein"|"soup"|"veg"|"carb"|"main","reason":"short Russian why"}]}.
 
 Audit HARD rules (flag a position to replace when broken):
-1) Same-day clash: on the same calendar days (same dayPair), lunch and dinner mains must NOT be culinary near-duplicates (form+base). Word-order / topping swaps count as duplicates.
+1) Same-day clash: on the same calendar days (same dayPair), lunch and dinner proteins must NOT be culinary near-duplicates (form+base). Word-order / topping swaps count as duplicates.
    Too close (FAIL): «Куриные рулеты с сыром и шпинатом» ≈ «Куриные рулетики с шпинатом и сыром»; котлеты из курицы ≈ куриные котлеты.
-2) Form spam: the same culinary form (рулеты/рулетики, котлеты, запеканка, плов, …) must not dominate the menu — at most TWO mains of the same form across the whole plan. Flag extras beyond two.
+2) Form spam: the same culinary form (рулеты/рулетики, котлеты, запеканка, плов, …) must not dominate the menu — at most TWO proteins/mains of the same form across the whole plan. Flag extras beyond two.
 3) Same protein+form twice on one dayPair across lunch+dinner is always a FAIL for dinner (prefer replacing dinner when lunch/dinner collide).
-4) Companions: never a second meat/fish main disguised as a side next to a meat/fish main; never a near-duplicate of its own main.
+4) Carb/veg sides: never a second meat/fish dish disguised as a side next to a meat/fish protein; never a near-duplicate of its own protein.
 5) Breakfast may reuse morning forms (омлет/сырники) across pairs — do NOT flag that. Do NOT flag Model C reuse of the exact same recipe across the two days of its pair.
 
 When ok=false, list ONLY positions that must be reinvented (max 4). Prefer dinner over lunch when both of a same-day clash would work. Be strict on rolls/cutlets/casserole form spam.`;
@@ -61,7 +64,7 @@ export async function analyzeMenuVariety(
       meal: d.meal,
       mealLabelRu: MEAL_LABELS_RU[d.meal],
       dayPair: [...d.dayPair],
-      role: d.role,
+      plate_role: d.plateRole,
       name: d.name,
     })),
     instruction:
@@ -103,7 +106,6 @@ export function parseAnalyzeMenuVarietyJson(
   }
   const root = parsed as { ok?: unknown; replace?: unknown };
   if (!Array.isArray(root.replace)) {
-    // ok:true with omitted replace → accept
     if (root.ok === true) return { ok: true, replace: [] };
     return { ok: false, reason: "parse" };
   }
@@ -127,12 +129,27 @@ function parseReplaceItem(item: unknown): MenuVarietyReplace | null {
   if (!isMealSlotLoose(meal) || !pair) return null;
   const reason =
     typeof row.reason === "string" ? row.reason.trim().slice(0, 200) : "";
+  const plateRole = parseReplacePlateRole(
+    meal,
+    row.plate_role ?? row.plateRole ?? row.role,
+  );
+  if (!plateRole || plateRole === "snack") return null;
   return {
     meal,
     dayPair: pair,
-    role: row.role === "companion" ? "companion" : "main",
+    plateRole,
     reason: reason || "variety",
   };
+}
+
+function parseReplacePlateRole(
+  meal: MealSlot,
+  rawRole: unknown,
+): PlateRole | null {
+  if (typeof rawRole !== "string") return null;
+  const resolved = resolvePositionPlateRole(meal, rawRole);
+  if (resolved) return resolved;
+  return isPlateRole(rawRole) ? rawRole : null;
 }
 
 function parseDayPair(raw: unknown): MenuDayPair | null {

@@ -49,6 +49,233 @@ function coerceNumber(raw: unknown): number | null {
   return null;
 }
 
+type RecipeServing = { recipeId: string; servings: number };
+
+type IngAgg = {
+  ingredient_name: string;
+  line_kind: "ingredient" | "pantry";
+  quantity_amount: number | null;
+  quantity_unit: IngredientUnit | null;
+};
+
+function collectRecipeServings(
+  slots: ReadonlyArray<{
+    id: string;
+    recipe_id: string | null;
+    companion_recipe_id: string | null;
+    servings: number;
+  }>,
+  dishRows: ReadonlyArray<{
+    menu_slot_id: string;
+    recipe_id: string | null;
+  }>,
+  servingsBySlot: ReadonlyMap<string, number>,
+): RecipeServing[] {
+  const out: RecipeServing[] = [];
+
+  for (const d of dishRows) {
+    if (typeof d.recipe_id !== "string") continue;
+    out.push({
+      recipeId: d.recipe_id,
+      servings: servingsBySlot.get(d.menu_slot_id) ?? 2,
+    });
+  }
+
+  const slotsWithDishRecipe = new Set(
+    dishRows
+      .filter((d) => typeof d.recipe_id === "string")
+      .map((d) => d.menu_slot_id),
+  );
+
+  for (const s of slots) {
+    // Prefer dishes for slots that have them; else legacy columns.
+    if (slotsWithDishRecipe.has(s.id)) continue;
+    const servings = servingsBySlot.get(s.id) ?? 2;
+    for (const id of [s.recipe_id, s.companion_recipe_id]) {
+      if (typeof id === "string") out.push({ recipeId: id, servings });
+    }
+  }
+
+  return out;
+}
+
+function addIngredientToAgg(
+  byKey: Map<string, IngAgg>,
+  row: {
+    name: unknown;
+    kind: unknown;
+    unit: unknown;
+    amount_per_serving: unknown;
+  },
+  servings: number,
+): void {
+  const name = typeof row.name === "string" ? row.name.trim() : "";
+  if (!name) return;
+  const kind: "ingredient" | "pantry" =
+    row.kind === "pantry" ? "pantry" : "ingredient";
+  const unit = isIngredientUnit(row.unit) ? row.unit : null;
+  const perServing = coerceNumber(row.amount_per_serving);
+  const scaled =
+    unit &&
+      perServing != null &&
+      Number.isFinite(perServing) &&
+      perServing > 0
+      ? perServing * servings
+      : null;
+  const key =
+    scaled != null && unit
+      ? `${kind}|${name.toLocaleLowerCase("ru")}|${unit}`
+      : `${kind}|${name.toLocaleLowerCase("ru")}|`;
+  const existing = byKey.get(key);
+  if (!existing) {
+    byKey.set(key, {
+      ingredient_name: name,
+      line_kind: kind,
+      quantity_amount: scaled,
+      quantity_unit: scaled != null ? unit : null,
+    });
+    return;
+  }
+  if (
+    existing.quantity_amount != null &&
+    scaled != null &&
+    existing.quantity_unit === unit
+  ) {
+    existing.quantity_amount += scaled;
+  }
+}
+
+function appendSnackDrafts(
+  drafts: LineDraft[],
+  sortStart: number,
+  dishRows: ReadonlyArray<{ snack_label: string | null }>,
+  snackTable: ReadonlyArray<{ label: unknown }>,
+): number {
+  let sort = sortStart;
+  const seen = new Set<string>();
+  const names = [
+    ...dishRows
+      .map((d) =>
+        typeof d.snack_label === "string" ? d.snack_label.trim() : "",
+      )
+      .filter(Boolean),
+    ...snackTable.map((row) =>
+      typeof row.label === "string" ? row.label.trim() : "",
+    ),
+  ];
+  for (const name of names) {
+    if (!name) continue;
+    const key = name.toLocaleLowerCase("ru");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    drafts.push({
+      ingredient_name: name,
+      line_kind: "snack",
+      quantity_amount: null,
+      quantity_unit: null,
+      sort_order: sort++,
+    });
+  }
+  return sort;
+}
+
+type DishRow = {
+  menu_slot_id: string;
+  recipe_id: string | null;
+  snack_label: string | null;
+};
+
+async function loadShoppingSources(
+  supabase: SupabaseClient,
+  menuId: string,
+): Promise<
+  | {
+    ok: true;
+    dishRows: DishRow[];
+    snacksTable: Array<{ label: unknown }>;
+    recipeServings: RecipeServing[];
+  }
+  | { ok: false; error: string }
+> {
+  const [slotsRes, snacksRes] = await Promise.all([
+    supabase
+      .from("menu_slots")
+      .select("id, recipe_id, companion_recipe_id, servings")
+      .eq("menu_id", menuId),
+    supabase.from("menu_snacks").select("id, label").eq("menu_id", menuId),
+  ]);
+
+  if (slotsRes.error || snacksRes.error) {
+    return { ok: false, error: "Не удалось собрать список покупок." };
+  }
+
+  const slots = (slotsRes.data ?? []) as Array<{
+    id: string;
+    recipe_id: string | null;
+    companion_recipe_id: string | null;
+    servings: number;
+  }>;
+  const slotIds = slots.map((s) => s.id);
+  const servingsBySlot = new Map(
+    slots.map((s) => [
+      s.id,
+      typeof s.servings === "number" && s.servings >= 1 ? s.servings : 2,
+    ]),
+  );
+
+  const dishesRes =
+    slotIds.length > 0
+      ? await supabase
+        .from("menu_slot_dishes")
+        .select("menu_slot_id, recipe_id, snack_label")
+        .in("menu_slot_id", slotIds)
+      : { data: [] as DishRow[], error: null };
+
+  if (dishesRes.error) {
+    return { ok: false, error: "Не удалось собрать список покупок." };
+  }
+
+  const dishRows = (dishesRes.data ?? []) as DishRow[];
+  return {
+    ok: true,
+    dishRows,
+    snacksTable: snacksRes.data ?? [],
+    recipeServings: collectRecipeServings(slots, dishRows, servingsBySlot),
+  };
+}
+
+async function fillIngredientAgg(
+  supabase: SupabaseClient,
+  recipeIds: string[],
+  recipeServings: RecipeServing[],
+  byKey: Map<string, IngAgg>,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { data: ingredients, error: ingError } = await supabase
+    .from("critical_ingredients")
+    .select("recipe_id, name, kind, amount_per_serving, unit, sort_order")
+    .in("recipe_id", recipeIds)
+    .order("sort_order", { ascending: true });
+
+  if (ingError) {
+    return { ok: false, error: "Не удалось собрать список покупок." };
+  }
+
+  const ingsByRecipe = new Map<string, NonNullable<typeof ingredients>>();
+  (ingredients ?? []).forEach((row) => {
+    const rid = row.recipe_id as string;
+    const list = ingsByRecipe.get(rid) ?? [];
+    list.push(row);
+    ingsByRecipe.set(rid, list);
+  });
+
+  for (const { recipeId, servings } of recipeServings) {
+    for (const row of ingsByRecipe.get(recipeId) ?? []) {
+      addIngredientToAgg(byKey, row, servings);
+    }
+  }
+  return { ok: true };
+}
+
 /**
  * Materialize (or regenerate) Shopping list from recipe ingredients + snacks.
  * Quantities = amount_per_serving × slot servings, aggregated by name+unit.
@@ -75,117 +302,21 @@ export async function buildShoppingList(
     return { ok: false, error: "Меню не найдено." };
   }
 
-  const [slotsRes, snacksRes] = await Promise.all([
-    supabase
-      .from("menu_slots")
-      .select("recipe_id, companion_recipe_id, servings")
-      .eq("menu_id", menuId)
-      .not("recipe_id", "is", null),
-    supabase.from("menu_snacks").select("id, label").eq("menu_id", menuId),
-  ]);
+  const sources = await loadShoppingSources(supabase, menuId);
+  if (!sources.ok) return sources;
 
-  if (slotsRes.error || snacksRes.error) {
-    return { ok: false, error: "Не удалось собрать список покупок." };
-  }
-
-  type SlotRow = {
-    recipe_id: string;
-    companion_recipe_id: string | null;
-    servings: number;
-  };
-
-  const slots = (slotsRes.data ?? []).filter(
-    (s): s is SlotRow => typeof s.recipe_id === "string",
-  );
-
-  const recipeIds = [
-    ...new Set(
-      slots.flatMap((s) =>
-        [s.recipe_id, s.companion_recipe_id].filter(
-          (id): id is string => typeof id === "string",
-        ),
-      ),
-    ),
-  ];
-
-  type Agg = {
-    ingredient_name: string;
-    line_kind: "ingredient" | "pantry";
-    quantity_amount: number | null;
-    quantity_unit: IngredientUnit | null;
-  };
-
-  const byKey = new Map<string, Agg>();
+  const { dishRows, snacksTable, recipeServings } = sources;
+  const recipeIds = [...new Set(recipeServings.map((r) => r.recipeId))];
+  const byKey = new Map<string, IngAgg>();
 
   if (recipeIds.length > 0) {
-    const { data: ingredients, error: ingError } = await supabase
-      .from("critical_ingredients")
-      .select("recipe_id, name, kind, amount_per_serving, unit, sort_order")
-      .in("recipe_id", recipeIds)
-      .order("sort_order", { ascending: true });
-
-    if (ingError) {
-      return { ok: false, error: "Не удалось собрать список покупок." };
-    }
-
-    const ingsByRecipe = new Map<string, typeof ingredients>();
-    (ingredients ?? []).forEach((row) => {
-      const rid = row.recipe_id as string;
-      const list = ingsByRecipe.get(rid) ?? [];
-      list.push(row);
-      ingsByRecipe.set(rid, list);
-    });
-
-    slots.forEach((slot) => {
-      const servings =
-        typeof slot.servings === "number" && slot.servings >= 1
-          ? slot.servings
-          : 2;
-      const slotRecipeIds = [slot.recipe_id, slot.companion_recipe_id].filter(
-        (id): id is string => typeof id === "string",
-      );
-      slotRecipeIds.forEach((recipeId) => {
-        const ings = ingsByRecipe.get(recipeId) ?? [];
-        ings.forEach((row) => {
-          const name = typeof row.name === "string" ? row.name.trim() : "";
-          if (!name) return;
-          const kind: "ingredient" | "pantry" =
-            row.kind === "pantry" ? "pantry" : "ingredient";
-          const unit = isIngredientUnit(row.unit) ? row.unit : null;
-          const perServing = coerceNumber(row.amount_per_serving);
-          const scaled =
-            unit &&
-              perServing != null &&
-              Number.isFinite(perServing) &&
-              perServing > 0
-              ? perServing * servings
-              : null;
-
-          // Aggregate by name+unit when both have quantities; else by name only.
-          const key =
-            scaled != null && unit
-              ? `${kind}|${name.toLocaleLowerCase("ru")}|${unit}`
-              : `${kind}|${name.toLocaleLowerCase("ru")}|`;
-
-          const existing = byKey.get(key);
-          if (!existing) {
-            byKey.set(key, {
-              ingredient_name: name,
-              line_kind: kind,
-              quantity_amount: scaled,
-              quantity_unit: scaled != null ? unit : null,
-            });
-          } else if (
-            existing.quantity_amount != null &&
-            scaled != null &&
-            existing.quantity_unit === unit
-          ) {
-            existing.quantity_amount += scaled;
-          }
-          // If one side lacks quantity, keep the named line without inventing qty.
-        });
-      });
-    });
+    const filled = await fillIngredientAgg(
+      supabase,
+      recipeIds,
+      recipeServings,
+      byKey,
+    );
+    if (!filled.ok) return filled;
   }
 
   const drafts: LineDraft[] = [];
@@ -200,23 +331,7 @@ export async function buildShoppingList(
     });
   });
 
-  // Snacks always get their own section lines. If a snack label collides with
-  // an ingredient name, keep both — shopping sections distinguish them.
-  const seenSnackLabels = new Set<string>();
-  (snacksRes.data ?? []).forEach((row) => {
-    const name = typeof row.label === "string" ? row.label.trim() : "";
-    if (!name) return;
-    const key = name.toLocaleLowerCase("ru");
-    if (seenSnackLabels.has(key)) return;
-    seenSnackLabels.add(key);
-    drafts.push({
-      ingredient_name: name,
-      line_kind: "snack",
-      quantity_amount: null,
-      quantity_unit: null,
-      sort_order: sort++,
-    });
-  });
+  appendSnackDrafts(drafts, sort, dishRows, snacksTable);
 
   const { data: existing } = await supabase
     .from("shopping_lists")

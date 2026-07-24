@@ -50,7 +50,11 @@ export function isValidPeopleCount(value: number): boolean {
   );
 }
 
-/** Ordered meal slots (eat view). Snacks are separate (`menu_snacks`). */
+/**
+ * Ordered meal slots (eat view).
+ * `snack` = Перекус (no-cook); `afternoon_snack` = Полдник (cookable).
+ * Create-menu picker uses COOKABLE_MEAL_SLOTS; snack comes from includeSnacks.
+ */
 export const MEAL_SLOTS = [
   "breakfast",
   "second_breakfast",
@@ -58,9 +62,15 @@ export const MEAL_SLOTS = [
   "afternoon_snack",
   "dinner",
   "late_dinner",
+  "snack",
 ] as const;
 
 export type MealSlot = (typeof MEAL_SLOTS)[number];
+
+/** Meals shown in meal-types-picker (excludes Перекус — use includeSnacks). */
+export const COOKABLE_MEAL_SLOTS = MEAL_SLOTS.filter(
+  (m): m is Exclude<MealSlot, "snack"> => m !== "snack",
+);
 
 export const MEAL_LABELS_RU: Record<MealSlot, string> = {
   breakfast: "Завтрак",
@@ -69,10 +79,14 @@ export const MEAL_LABELS_RU: Record<MealSlot, string> = {
   afternoon_snack: "Полдник",
   dinner: "Ужин",
   late_dinner: "Поздний ужин",
+  snack: "Перекус",
 };
 
-/** Defaults for the create-menu meal picker (snacks is not a meal slot). */
-export const DEFAULT_MEAL_SELECTION: Record<MealSlot, boolean> = {
+/** Defaults for the create-menu meal picker (Перекус via includeSnacks). */
+export const DEFAULT_MEAL_SELECTION: Record<
+  Exclude<MealSlot, "snack">,
+  boolean
+> = {
   breakfast: true,
   second_breakfast: false,
   lunch: true,
@@ -106,15 +120,24 @@ export function mealAllowsCompanion(meal: MealSlot): boolean {
   return (COMPANION_MEALS as readonly string[]).includes(meal);
 }
 
-/** Parse selected meals from form (order preserved as MEAL_SLOTS). */
+/** Parse selected cookable meals from form (never includes snack). */
 export function parseSelectedMeals(raw: FormDataEntryValue | null): MealSlot[] {
   if (typeof raw !== "string" || !raw.trim()) return [];
   const seen = new Set<MealSlot>();
   for (const part of raw.split(",")) {
     const key = part.trim();
-    if (isMealSlot(key)) seen.add(key);
+    if (isMealSlot(key) && key !== "snack") seen.add(key);
   }
-  return MEAL_SLOTS.filter((m) => seen.has(m));
+  return COOKABLE_MEAL_SLOTS.filter((m) => seen.has(m));
+}
+
+/** Meals to pass to create_menu_skeleton (adds snack when includeSnacks). */
+export function mealsForSkeleton(
+  meals: readonly MealSlot[],
+  includeSnacks: boolean,
+): MealSlot[] {
+  const base = COOKABLE_MEAL_SLOTS.filter((m) => meals.includes(m));
+  return includeSnacks ? [...base, "snack"] : [...base];
 }
 
 export function expectedSlotCount(

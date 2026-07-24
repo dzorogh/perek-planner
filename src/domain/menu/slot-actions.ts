@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 
 import { withMenuMutationLock } from "@/domain/menu/menu-mutation-lock";
 import { markSlotEditPassed } from "@/domain/menu/uj1-gate";
+import { isPlateRole } from "@/domain/menu/meal-templates";
 import {
   clearCompanionForSlot,
   modifyRecipeAcrossMenu,
@@ -37,7 +38,10 @@ async function requireUser() {
 }
 
 function parseTarget(raw: FormDataEntryValue | null): SlotDishTarget {
-  return raw === "companion" ? "companion" : "main";
+  if (typeof raw === "string" && isPlateRole(raw)) return raw;
+  if (raw === "companion") return "carb";
+  if (raw === "main") return "main";
+  return "main";
 }
 
 /**
@@ -68,7 +72,7 @@ export async function resuggestSlotAction(
   return { ok: true };
 }
 
-/** Invent a companion (гарнир) for a main that has none — day-pair. */
+/** @deprecated Prefer empty-role «Предложить» with target=carb. Kept for legacy forms. */
 export async function suggestCompanionAction(
   _prev: SlotActionState,
   formData: FormData,

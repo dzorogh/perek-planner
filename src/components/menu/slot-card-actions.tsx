@@ -19,17 +19,19 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { MIN_FEEDBACK_COMMENT_LENGTH } from "@/domain/history/constants";
+import type { PlateRole } from "@/domain/menu/meal-templates";
+import { plateRoleLabelRu } from "@/domain/menu/plate-role-labels";
 import {
   clearCompanionAction,
   modifyRecipeAcrossMenuAction,
   refuseSlotAction,
   resuggestRecipeAcrossMenuAction,
   resuggestSlotAction,
-  suggestCompanionAction,
   type SlotActionState,
 } from "@/domain/menu/slot-actions";
 
-export type SlotDishTarget = "main" | "companion";
+/** Overflow target = Plate role on the line. */
+export type SlotDishTarget = PlateRole;
 
 type SlotCardActionsProps = {
   menuId: string;
@@ -38,10 +40,8 @@ type SlotCardActionsProps = {
   /** When set, across-menu replace/modify/refuse animates every card with this dish. */
   recipeId?: string | null;
   target?: SlotDishTarget;
-  /** Show «Убрать» for companion dishes. */
+  /** Show «Убрать» for clearable secondary roles (MVP: carb). */
   canClear?: boolean;
-  /** Show «Добавить гарнир» when main has no companion. */
-  canAddCompanion?: boolean;
 };
 
 function ActionError({ state }: { state: SlotActionState }) {
@@ -55,10 +55,8 @@ function ActionError({ state }: { state: SlotActionState }) {
 
 function generatingOverlayLabel(flags: {
   suggestPending: boolean;
-  addCompanionPending: boolean;
   modifyPending: boolean;
 }): string {
-  if (flags.addCompanionPending) return "Добавляем…";
   if (flags.suggestPending) return "Подбираем…";
   if (flags.modifyPending) return "Изменяем…";
   return "Заменяем…";
@@ -68,14 +66,11 @@ type SlotActionMenuProps = {
   busy: boolean;
   hasRecipe: boolean;
   canClear: boolean;
-  canAddCompanion: boolean;
   suggestPending: boolean;
-  addCompanionPending: boolean;
   resuggestPending: boolean;
   modifyPending: boolean;
   clearPending: boolean;
   onSuggest: () => void;
-  onAddCompanion: () => void;
   onResuggest: () => void;
   onModify: () => void;
   onClear: () => void;
@@ -84,21 +79,15 @@ type SlotActionMenuProps = {
 
 function FilledDishMenuItems({
   busy,
-  canAddCompanion,
-  addCompanionPending,
   resuggestPending,
   modifyPending,
-  onAddCompanion,
   onResuggest,
   onModify,
   onRefuse,
 }: {
   busy: boolean;
-  canAddCompanion: boolean;
-  addCompanionPending: boolean;
   resuggestPending: boolean;
   modifyPending: boolean;
-  onAddCompanion: () => void;
   onResuggest: () => void;
   onModify: () => void;
   onRefuse: () => void;
@@ -119,15 +108,6 @@ function FilledDishMenuItems({
       >
         {modifyPending ? "Изменяем…" : "Изменить"}
       </DropdownMenuItem>
-      {canAddCompanion ? (
-        <DropdownMenuItem
-          disabled={busy}
-          className="focus:bg-background focus:text-primary"
-          onSelect={onAddCompanion}
-        >
-          {addCompanionPending ? "Добавляем…" : "Добавить гарнир"}
-        </DropdownMenuItem>
-      ) : null}
       <DropdownMenuItem
         disabled={busy}
         className="text-warning-fg focus:bg-background focus:text-warning-fg"
@@ -143,14 +123,11 @@ function SlotActionMenu({
   busy,
   hasRecipe,
   canClear,
-  canAddCompanion,
   suggestPending,
-  addCompanionPending,
   resuggestPending,
   modifyPending,
   clearPending,
   onSuggest,
-  onAddCompanion,
   onResuggest,
   onModify,
   onClear,
@@ -164,11 +141,8 @@ function SlotActionMenu({
       {hasRecipe ? (
         <FilledDishMenuItems
           busy={busy}
-          canAddCompanion={canAddCompanion}
-          addCompanionPending={addCompanionPending}
           resuggestPending={resuggestPending}
           modifyPending={modifyPending}
-          onAddCompanion={onAddCompanion}
           onResuggest={onResuggest}
           onModify={onModify}
           onRefuse={onRefuse}
@@ -202,7 +176,6 @@ export function SlotCardActions({
   recipeId = null,
   target = "main",
   canClear = false,
-  canAddCompanion = false,
 }: SlotCardActionsProps) {
   const { recipeBusyLabel, setRecipeBusy } = useMenuSlotBusy();
   const [refuseOpen, setRefuseOpen] = useState(false);
@@ -211,8 +184,6 @@ export function SlotCardActions({
     SlotActionState,
     FormData
   >(resuggestSlotAction, null);
-  const [addCompanionState, addCompanionFormAction, addCompanionPending] =
-    useActionState<SlotActionState, FormData>(suggestCompanionAction, null);
   const [resuggestState, resuggestFormAction, resuggestPending] =
     useActionState<SlotActionState, FormData>(
       resuggestRecipeAcrossMenuAction,
@@ -244,7 +215,6 @@ export function SlotCardActions({
 
   const localBusy =
     suggestPending ||
-    addCompanionPending ||
     resuggestPending ||
     modifyPending ||
     refusePending ||
@@ -252,7 +222,6 @@ export function SlotCardActions({
   const busy = localBusy || Boolean(sharedBusyLabel);
   const localGenerating =
     suggestPending ||
-    addCompanionPending ||
     resuggestPending ||
     modifyPending ||
     refusePending;
@@ -260,7 +229,6 @@ export function SlotCardActions({
   const overlayLabel = localGenerating
     ? generatingOverlayLabel({
       suggestPending,
-      addCompanionPending,
       modifyPending,
     })
     : (sharedBusyLabel ?? "Заменяем…");
@@ -295,11 +263,7 @@ export function SlotCardActions({
               size="icon"
               className="h-7 w-7 shrink-0 text-muted-foreground hover:text-primary"
               disabled={busy}
-              aria-label={
-                target === "companion"
-                  ? "Действия с компаньоном"
-                  : "Действия со слотом"
-              }
+              aria-label={`Действия: ${plateRoleLabelRu(target)}`}
               aria-busy={busy}
             >
               <MoreHorizontal className="h-4 w-4" />
@@ -309,14 +273,11 @@ export function SlotCardActions({
             busy={busy}
             hasRecipe={hasRecipe}
             canClear={canClear}
-            canAddCompanion={canAddCompanion}
             suggestPending={suggestPending}
-            addCompanionPending={addCompanionPending}
             resuggestPending={resuggestPending}
             modifyPending={modifyPending}
             clearPending={clearPending}
             onSuggest={() => runAction(suggestFormAction)}
-            onAddCompanion={() => runAction(addCompanionFormAction)}
             onResuggest={() => runAction(resuggestFormAction)}
             onModify={() => setModifyOpen(true)}
             onClear={() => runAction(clearFormAction)}
@@ -328,7 +289,6 @@ export function SlotCardActions({
       {!generating ? (
         <div className="relative z-[6] mt-1 space-y-0.5 pr-10">
           <ActionError state={suggestState} />
-          <ActionError state={addCompanionState} />
           <ActionError state={resuggestState} />
           <ActionError state={modifyState} />
           <ActionError state={refuseState} />

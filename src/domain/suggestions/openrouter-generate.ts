@@ -2,13 +2,19 @@ import {
   mealAllowsCompanion,
   type MealSlot,
 } from "@/domain/menu/constants";
+import {
+  isPlateRole,
+  isTemplateMeal,
+  rolesForMeal,
+  type PlateRole,
+} from "@/domain/menu/meal-templates";
 import type { SuggestionCandidate } from "@/domain/suggestions/candidates";
 import {
   normalizePlateAssignments,
-  parsePlateKind,
   pickCompanionCandidate,
   type PlateAssignment,
 } from "@/domain/suggestions/plate-complete";
+import { legacyFksFromDishes } from "@/domain/suggestions/role-slots";
 import {
   tasteNotesForPrompt,
   type TasteNote,
@@ -27,61 +33,33 @@ export type SlotPrompt = {
 
 export type ProposedAssignment = {
   slotId: string;
-  recipeId: string;
-  /** Optional side / protein; only for lunch, dinner, late_dinner. */
+  dishes: Array<{ plateRole: PlateRole; recipeId: string }>;
+  /** @deprecated shim — if present without dishes, convert via protein/main + carb */
+  recipeId?: string;
   companionRecipeId?: string | null;
-  /** AI judgment for lunch/dinner plates; omitted on breakfast. */
   plateKind?: "complete" | "needs_companion" | null;
 };
 
 const SYSTEM_PROMPT = `You are a home-cooking menu planner for a Russian household.
 Bias: simple home batch food. Batch cooking reuses dishes across days *within this menu*.
+Plate roles are FIXED by the app for each slot — assign persisted recipe ids into those roles.
 Hard rules when dayCount >= 2 and candidates allow:
 - At least 50% of cookable slots must reuse a recipe that appears on 2+ days (staggered 2-day batches are ideal).
-- No two calendar days may have the identical full set of recipes (compare main recipes; companions may also batch).
-- Within one calendar day, never reuse the same recipe across meals — not as main, not as companion, and not swapped (lunch potatoes+chicken / dinner chicken+potatoes is forbidden). Batching across different days is fine.
-- Prefer patterns like breakfast days 1–2 same / lunch days 2–3 same / dinner days 1–2 same.
+- No two calendar days may have the identical full set of recipes (compare primary protein/main recipes).
+- Within one calendar day, never reuse the same recipe across meals.
 - Prefer candidates with freshlyInvented=true or recentlyUsed=false.
 - You alone judge culinary near-duplicates (no keyword filter in code). Be strict.
-  Reusing the *exact same* recipe id across days for batching is good and preferred.
-  Assigning a *different* recipe that is a near-variant of another dish already chosen in this menu (or listed in currentMenuDishes) is FORBIDDEN.
-  Too close: оладьи≈панкейки; творожная запеканка с ягодами≈творожные запеканки с изюмом; сырники с изюмом≈сырники с ягодами; овсяная каша с яблоком≈овсянка с грушей.
-  Distinct enough: запеканка vs сырники; оладьи vs яичница; каша vs омлет.
-  A topping/mix-in swap on the same form+base is NOT variety — pick a different culinary form instead.
-- When currentMenuDishes is non-empty (slot replace): do not assign a near-variant of those names; prefer freshlyInvented candidates that feel clearly different.
-- Avoid rebuilding previousMenusDishes — consecutive menus must not feel identical.
-- Breakfast / second_breakfast / afternoon_snack: choose cooked morning dishes ONLY (каша, яичница, омлет, сырники, оладьи, творожная запеканка). Never assign roast/fried chicken, soups, plov, cutlets, steaks, pasta mains, or other lunch/dinner plates to breakfast. Never assign snacks / перекусы / no-cook ready-to-eat plates to cookable slots. Never assign sauces, dressings, or bare garnishes as breakfast mains. Never set companionRecipeId or plateKind for these meals.
-
-For lunch, dinner, late_dinner YOU alone judge the plate. EVERY assignment MUST include plateKind.
-Code does not classify dishes by keywords — your plateKind is authoritative.
-
-- HARD RULE: every lunch/dinner plate MUST include a real protein (мясо/птица/рыба/яйца/бобовые/грибы as add-on). Never serve two carb/veg dishes together (e.g. морковные котлеты + картофель, капустные котлеты + гречка).
-
-- plateKind="complete": the main is already a full meal by itself. Omit companionRecipeId entirely.
-  Use complete when the dish already combines protein with its carb/veg (or is a stuffed/dumpling/pasta one-pot).
-  Textbook examples: плов (rice is inside — NEVER add картофель/рис/гречка), лазанья, голубцы, пельмени, манты, паста with protein, рагу/жаркое that already has meat+veg/grain, hearty soup as the whole dinner.
-  Wrong: плов + картофельные дольки. Wrong: лазанья + рис. Wrong: пельмени + гречка.
-
-- plateKind="needs_companion": the main alone is NOT a full meal — you MUST also set companionRecipeId.
-  Examples: котлеты, зразы, отбивные, куриное/рыбное филе or грудка (even with marinade/spices), жареная курица without a side, овощное соте, vegetable cutlets, «голый» стейк.
-  Companion = simple гарнир (крупа/картофель/овощи) if the main already has protein; OR simple protein add-on (курица/рыба/яйца/грибы) if the main is veg/carb-only.
-  HARD: never pair two meat/fish dishes on one plate (курица + рыба, котлеты + куриная грудка). When the main is already meat/fish, companion must be гарнир/соус/овощи — not a second meat or fish dish.
-  Never a second complex main. Never a second non-protein side when the main lacks protein.
-  Prefer pairing a sauce/side with a main that needs it; do not reuse a breakfast main as a lunch/dinner companion.
-
-- NEVER mark a self-contained one-pot as needs_companion. NEVER leave a needs_companion slot without companionRecipeId.
-- NEVER assign a companion-only plate as recipeId.
-- companionRecipeId must differ from recipeId and must come from the candidate list.
-
-You MUST only use recipe ids from the provided candidate list.
-Respect operatorTasteNotes always:
-- constraint is PRIMARY (the operator's rule). Generalize it: «не люблю каши» / «Не предлагай каши» forbids ALL porridges/каши, not one title.
-- exampleDish is secondary context only (a dish that triggered the note). Never limit a ban to that exact name.
-- kind=ban is hard never for the constraint meaning; kind=wish is soft prefer.
+- When currentMenuDishes is non-empty (slot replace): do not assign a near-variant of those names.
+- Breakfast / second_breakfast / afternoon_snack: cooked morning dishes ONLY with plate_role=main. Never assign lunch/dinner plates or snacks. Never set companion.
+- Lunch: roles soup+protein+veg+carb when openRoles lists them. Dinner/late_dinner: protein+veg+carb — NO soup.
+- Prefer dishes[] in the response. You may use legacy recipeId + companionRecipeId (carb) for protein+carb only.
+- NEVER invent plateKind / needs_companion architecture. NEVER invent recipe ids.
+- One-pots already cover multiple roles via covers_roles in the library — do not assign a second recipe for covered roles.
+Respect operatorTasteNotes: constraint PRIMARY; exampleDish secondary; ban=hard; wish=soft.
 Respond with a single JSON object:
-{"assignments":[{"slotId":"...","recipeId":"...","plateKind":"complete"|"needs_companion","companionRecipeId":"...?"},...]}.
-You may leave some slots unassigned by omitting them if candidates are scarce.
-Never invent recipe ids.`;
+{"assignments":[{"slotId":"...","dishes":[{"plateRole":"protein","recipeId":"..."},{"plateRole":"carb","recipeId":"..."}]},...]}.
+Legacy also accepted: {"slotId","recipeId","companionRecipeId"?}.
+You may leave some slots unassigned by omitting them if candidates are scarce.`;
 
 /**
  * Ask OpenRouter to assign candidates to slots.
@@ -103,18 +81,23 @@ export async function proposeAssignmentsViaOpenRouter(
     recentlyUsed: c.recentlyUsed,
     freshlyInvented: freshlyInventedIds.has(c.recipeId),
     rating: c.rating,
+    plateRole: c.plateRole,
   }));
 
   const slotPayload = slots.map((s) => ({
     slotId: s.slotId,
     dayIndex: s.dayIndex,
     meal: s.meal,
+    openRoles:
+      isTemplateMeal(s.meal) && s.meal !== "snack"
+        ? [...rolesForMeal(s.meal)]
+        : (["main"] as PlateRole[]),
     allowsCompanion: mealAllowsCompanion(s.meal),
   }));
 
   const userContent = JSON.stringify({
     instruction:
-      "Fill meal slots. Prefer freshlyInvented=true, then recentlyUsed=false. Honor operatorTasteNotes: constraint is PRIMARY (generalize — «не люблю каши» forbids all каши); exampleDish is secondary only. Batch across days (>=50% multi-day reuse of the *exact same* recipe id) without cloning full day signatures. HARD variety: never assign a different recipe that is a culinary near-variant of currentMenuDishes or of another distinct recipe already used in this plan (topping swaps forbidden: творожная запеканка с ягодами ≈ с изюмом; оладьи≈панкейки). When currentMenuDishes is set (slot replace), pick a clearly different form. Never reuse the same recipe twice within one calendar day (main or companion; no lunch/dinner swaps of the same pair). Breakfast-family: cooked dishes only, no plateKind/companion. For lunch/dinner/late_dinner: YOU judge plateKind — code trusts it. ALWAYS set plateKind. ALWAYS include protein on the plate (in main or companion). HARD: never pair two meat/fish dishes on one plate (курица+рыба, котлеты+грудка) — meat/fish main gets гарнир/соус only. plateKind=complete → omit companion (плов/лазанья/голубцы/пельмени and other self-contained one-pots — NEVER add a гарнир). plateKind=needs_companion → MUST set companionRecipeId (котлеты/филе/стейк need a side; veg/carb-only mains need a protein companion, never another side). Wrong example to avoid: плов + картофельные дольки.",
+      "Fill meal slots by assigning recipe ids into code-owned plate roles. Prefer freshlyInvented=true. Prefer dishes[]. Honor operatorTasteNotes. Batch across days without cloning full day signatures. Breakfast-family: plate_role=main only. Lunch/dinner: assign into open Harvard roles — never invent plateKind.",
     slots: slotPayload,
     candidates: candidatePayload,
     previousMenusDishes: previousMenusDishes.slice(0, 60),
@@ -138,10 +121,10 @@ export async function proposeAssignmentsViaOpenRouter(
     new Set(slots.map((s) => s.slotId)),
     mealBySlot,
   );
-  return normalizePlateAssignments(slots, parsed, candidates);
+  return normalizePlateAssignments(slots, parsed);
 }
 
-/** Pure parser — rejects unknown recipe/slot ids; strips invalid companions. */
+/** Pure parser — rejects unknown recipe/slot ids; prefers dishes[]. */
 export function parseAssignmentsJson(
   content: string,
   allowedRecipeIds: Set<string>,
@@ -187,13 +170,27 @@ function parseAssignmentItem(
   if (!item || typeof item !== "object") return null;
   const row = item as Record<string, unknown>;
   const slotId = row.slotId;
-  const recipeId = row.recipeId;
-  if (typeof slotId !== "string" || typeof recipeId !== "string") return null;
-  if (!allowedSlotIds.has(slotId) || !allowedRecipeIds.has(recipeId) || seenSlots.has(slotId)) {
-    return null;
-  }
-  seenSlots.add(slotId);
+  if (typeof slotId !== "string") return null;
+  if (!allowedSlotIds.has(slotId) || seenSlots.has(slotId)) return null;
+
   const meal = mealBySlot.get(slotId);
+  const dishes = parseDishesField(row.dishes, allowedRecipeIds);
+  if (dishes.length > 0) {
+    seenSlots.add(slotId);
+    const fks = legacyFksFromDishes(dishes);
+    return {
+      slotId,
+      dishes,
+      recipeId: fks.recipeId ?? dishes[0]!.recipeId,
+      companionRecipeId: fks.companionRecipeId,
+    };
+  }
+
+  const recipeId = row.recipeId;
+  if (typeof recipeId !== "string") return null;
+  if (!allowedRecipeIds.has(recipeId)) return null;
+  seenSlots.add(slotId);
+
   const allowsCompanion = Boolean(meal && mealAllowsCompanion(meal));
   const rawCompanion = row.companionRecipeId;
   const companionRecipeId = allowsCompanion &&
@@ -202,12 +199,48 @@ function parseAssignmentItem(
     allowedRecipeIds.has(rawCompanion)
     ? rawCompanion
     : null;
+
+  const legacyDishes: Array<{ plateRole: PlateRole; recipeId: string }> =
+    meal && mealAllowsCompanion(meal)
+      ? [
+        { plateRole: "protein", recipeId },
+        ...(companionRecipeId
+          ? [{ plateRole: "carb" as const, recipeId: companionRecipeId }]
+          : []),
+      ]
+      : [{ plateRole: "main", recipeId }];
+
   return {
     slotId,
+    dishes: legacyDishes,
     recipeId,
     companionRecipeId,
-    plateKind: allowsCompanion ? parsePlateKind(row.plateKind) : null,
   };
+}
+
+function parseDishesField(
+  raw: unknown,
+  allowedRecipeIds: ReadonlySet<string>,
+): Array<{ plateRole: PlateRole; recipeId: string }> {
+  if (!Array.isArray(raw)) return [];
+  const out: Array<{ plateRole: PlateRole; recipeId: string }> = [];
+  const seenRoles = new Set<PlateRole>();
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const recipeId = row.recipeId ?? row.recipe_id;
+    let plateRoleRaw = row.plateRole ?? row.plate_role;
+    if (plateRoleRaw === "companion") plateRoleRaw = "carb";
+    if (typeof recipeId !== "string" || typeof plateRoleRaw !== "string") {
+      continue;
+    }
+    if (!allowedRecipeIds.has(recipeId)) continue;
+    if (!isPlateRole(plateRoleRaw) || plateRoleRaw === "snack") continue;
+    if (seenRoles.has(plateRoleRaw)) continue;
+    seenRoles.add(plateRoleRaw);
+    out.push({ plateRole: plateRoleRaw, recipeId });
+  }
+  return out;
 }
 
 function extractJsonObject(text: string): string {
@@ -223,39 +256,51 @@ function extractJsonObject(text: string): string {
 
 /**
  * Deterministic batch fill when LLM returns nothing usable but candidates exist.
- * Pairs lunch/dinner with invent companions (plate_role) when available.
  */
 export function deterministicAssignments(
   slots: SlotPrompt[],
   candidates: SuggestionCandidate[],
 ): ProposedAssignment[] {
-  const mainPool = candidates.filter((c) => c.plateRole !== "companion");
+  const mainPool = candidates.filter(
+    (c) =>
+      c.plateRole !== "carb" &&
+      c.plateRole !== "companion" &&
+      c.plateRole !== "veg" &&
+      c.plateRole !== "soup",
+  );
   const assignPool = mainPool.length > 0 ? mainPool : candidates;
   const usedCompanions = new Set<string>();
 
   const base = assignWithBatchVariety(slots, assignPool).map((p) => {
     const meal =
       slots.find((s) => s.slotId === p.slotId)?.meal ?? "breakfast";
+    const primaryRole: PlateRole = mealAllowsCompanion(meal) ? "protein" : "main";
     if (!mealAllowsCompanion(meal)) {
       return {
-        ...p,
+        slotId: p.slotId,
+        dishes: [{ plateRole: primaryRole, recipeId: p.recipeId! }],
+        recipeId: p.recipeId,
         companionRecipeId: null as string | null,
-        plateKind: null,
       };
     }
     const companionId = pickCompanionCandidate(
       candidates,
-      p.recipeId,
+      p.recipeId!,
       usedCompanions,
     );
     if (companionId) usedCompanions.add(companionId);
+    const dishes: Array<{ plateRole: PlateRole; recipeId: string }> = [
+      { plateRole: "protein", recipeId: p.recipeId! },
+    ];
+    if (companionId) {
+      dishes.push({ plateRole: "carb", recipeId: companionId });
+    }
     return {
-      ...p,
+      slotId: p.slotId,
+      dishes,
+      recipeId: p.recipeId,
       companionRecipeId: companionId,
-      plateKind: companionId
-        ? ("needs_companion" as const)
-        : ("complete" as const),
     };
   });
-  return normalizePlateAssignments(slots, base, candidates);
+  return normalizePlateAssignments(slots, base);
 }
