@@ -7,6 +7,10 @@ import {
   type MealSlot,
   type MenuDayPair,
 } from "@/domain/menu/constants";
+import {
+  recipeFitsAvailableEquipment,
+  type EquipmentId,
+} from "@/domain/menu/equipment";
 import { normalizeRecipeBodyText } from "@/domain/recipes/format-body";
 import {
   normalizeDishName,
@@ -67,6 +71,8 @@ export type InventPositionContext = {
   /** Full menu length — fridge_keep must cover it. */
   menuDayCount?: number;
   peoplePerMeal?: number;
+  /** Hard equipment ceiling for this menu. */
+  availableEquipment: readonly EquipmentId[];
   chat?: ChatCompletionsFn;
   userId: string;
 };
@@ -74,8 +80,9 @@ export type InventPositionContext = {
 const POSITION_MAIN_SYSTEM = `You invent ONE new Russian home-cooking recipe for a household meal planner.
 This dish will be cooked once and eaten on TWO consecutive menu days (batch cook).
 Respond with a single JSON object:
-{"recipe":{"name":"...","body_text":"...","fridge_keep_days":N,"plate_role":"main","plate_kind":"complete"|"needs_companion","price_rub_per_serving":N,"nutrition_per_serving":{"kcal":N,"protein_g":N,"fat_g":N,"carbs_g":N},"critical_ingredients":[{"name":"...","kind":"critical"|"pantry","amount":N,"unit":"g"|"ml"|"pcs"|"tsp"|"tbsp"},...]}}.
+{"recipe":{"name":"...","body_text":"...","fridge_keep_days":N,"plate_role":"main","plate_kind":"complete"|"needs_companion","required_equipment":["stove"|"oven"|"air_fryer"|"grill"|"multicooker"|"pressure_cooker"|"microwave",...],"price_rub_per_serving":N,"nutrition_per_serving":{"kcal":N,"protein_g":N,"fat_g":N,"carbs_g":N},"critical_ingredients":[{"name":"...","kind":"critical"|"pantry","amount":N,"unit":"g"|"ml"|"pcs"|"tsp"|"tbsp"},...]}}.
 Rules:
+- required_equipment: non-empty; MUST be ⊆ availableEquipment from the request. HARD: never invent a dish needing equipment outside availableEquipment.
 - Invent exactly ONE plate_role=main recipe for the requested meal only.
 - HARD: never invent a near-duplicate of currentMenuDishes / avoidNames / previousMenusDishes (culinary form+base; topping swaps and word-order swaps are duplicates).
   Too close (FORBIDDEN): куриные рулеты с сыром и шпинатом ≈ куриные рулетики с шпинатом и сыром; котлеты из курицы ≈ куриные котлеты.
@@ -97,8 +104,9 @@ Rules:
 const POSITION_COMPANION_SYSTEM = `You invent ONE simple Russian companion dish (гарнир, simple protein add-on, or sauce) for a household meal planner.
 It will be cooked once and eaten on TWO consecutive menu days with a given main.
 Respond with a single JSON object:
-{"recipe":{"name":"...","body_text":"...","fridge_keep_days":N,"plate_role":"companion","price_rub_per_serving":N,"nutrition_per_serving":{"kcal":N,"protein_g":N,"fat_g":N,"carbs_g":N},"critical_ingredients":[{"name":"...","kind":"critical"|"pantry","amount":N,"unit":"g"|"ml"|"pcs"|"tsp"|"tbsp"},...]}}.
+{"recipe":{"name":"...","body_text":"...","fridge_keep_days":N,"plate_role":"companion","required_equipment":["stove"|"oven"|"air_fryer"|"grill"|"multicooker"|"pressure_cooker"|"microwave",...],"price_rub_per_serving":N,"nutrition_per_serving":{"kcal":N,"protein_g":N,"fat_g":N,"carbs_g":N},"critical_ingredients":[{"name":"...","kind":"critical"|"pantry","amount":N,"unit":"g"|"ml"|"pcs"|"tsp"|"tbsp"},...]}}.
 Rules:
+- required_equipment: non-empty; MUST be ⊆ availableEquipment. HARD: never invent a dish needing equipment outside availableEquipment.
 - Invent exactly ONE plate_role=companion. NEVER a second complex main or one-pot (плов, лазанья).
 - Name the dish itself («Картофельное пюре», «Грибной соус») — NEVER «к пасте» / «к мясу» / «под курицу».
 - When the main already has meat/fish, invent a carb/veg/sauce side — NOT a second meat/fish dish.
@@ -133,6 +141,14 @@ export async function inventForPosition(
   }
 
   if (!passesPositionMealFit(draft, context)) {
+    return { ok: false, reason: "parse" };
+  }
+  if (
+    !recipeFitsAvailableEquipment(
+      draft.requiredEquipment,
+      context.availableEquipment,
+    )
+  ) {
     return { ok: false, reason: "parse" };
   }
 
@@ -170,6 +186,7 @@ async function proposePositionRecipe(
     mainDishName: context.mainDishName ?? null,
     menuDayCount,
     peoplePerMeal: context.peoplePerMeal ?? 2,
+    availableEquipment: [...context.availableEquipment],
     previousMenusDishes: uniqueExactNames(context.previousMenusDishes ?? []).slice(
       0,
       60,

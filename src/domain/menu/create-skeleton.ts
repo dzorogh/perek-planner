@@ -6,6 +6,11 @@ import {
   isValidPeopleCount,
   type MealSlot,
 } from "@/domain/menu/constants";
+import {
+  DEFAULT_AVAILABLE_EQUIPMENT,
+  normalizeEquipmentList,
+  type EquipmentId,
+} from "@/domain/menu/equipment";
 
 export type CreateSkeletonOk = { ok: true; menuId: string };
 export type CreateSkeletonErr = { ok: false; error: string };
@@ -15,6 +20,8 @@ export type CreateSkeletonOptions = {
   peopleCount?: number;
   /** Selected cookable meal slots; empty allowed for snacks-only menus. */
   meals?: readonly MealSlot[];
+  /** Kitchen equipment snapshot for this menu. */
+  equipment?: readonly EquipmentId[];
 };
 
 /**
@@ -33,6 +40,10 @@ export async function createMenuSkeletonForUser(
   }
   const peopleCount = options.peopleCount ?? DEFAULT_SERVINGS_PER_MEAL;
   const meals = options.meals ?? (["breakfast", "lunch", "dinner"] as const);
+  const equipment =
+    normalizeEquipmentList(options.equipment) ?? [
+      ...DEFAULT_AVAILABLE_EQUIPMENT,
+    ];
 
   if (!isValidDayCount(dayCount)) {
     return { ok: false, error: "Выберите длину меню: 2, 4 или 6 дней." };
@@ -45,6 +56,7 @@ export async function createMenuSkeletonForUser(
     p_day_count: dayCount,
     p_servings: peopleCount,
     p_meals: [...meals],
+    p_equipment: equipment,
   });
 
   if (error || !menuId || typeof menuId !== "string") {

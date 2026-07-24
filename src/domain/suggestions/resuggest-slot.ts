@@ -6,6 +6,11 @@ import {
   type MealSlot,
   type MenuDayPair,
 } from "@/domain/menu/constants";
+import {
+  DEFAULT_AVAILABLE_EQUIPMENT,
+  normalizeEquipmentList,
+  type EquipmentId,
+} from "@/domain/menu/equipment";
 import { assignProposalsToSlots } from "@/domain/suggestions/assign";
 import { buildCandidates } from "@/domain/suggestions/candidates";
 import {
@@ -152,10 +157,14 @@ async function loadMenuPlanDishes(
 async function loadMenuMeta(
   supabase: SupabaseClient,
   menuId: string,
-): Promise<{ peoplePerMeal?: number; dayCount: number } | null> {
+): Promise<{
+  peoplePerMeal?: number;
+  dayCount: number;
+  availableEquipment: EquipmentId[];
+} | null> {
   const { data } = await supabase
     .from("menus")
-    .select("default_servings_per_meal, day_count")
+    .select("default_servings_per_meal, day_count, available_equipment")
     .eq("id", menuId)
     .maybeSingle();
   const dayCount = data?.day_count;
@@ -165,6 +174,10 @@ async function loadMenuMeta(
     dayCount: Math.trunc(dayCount),
     peoplePerMeal:
       typeof n === "number" && n >= 1 ? Math.trunc(n) : undefined,
+    availableEquipment:
+      normalizeEquipmentList(data?.available_equipment as string[]) ?? [
+        ...DEFAULT_AVAILABLE_EQUIPMENT,
+      ],
   };
 }
 
@@ -313,7 +326,11 @@ async function inventPositionViaNamePlan(
     avoidNames: string[];
     previousMenusDishes: string[];
   },
-  options: ResuggestOptions & { peoplePerMeal?: number; menuDayCount: number },
+  options: ResuggestOptions & {
+    peoplePerMeal?: number;
+    menuDayCount: number;
+    availableEquipment: readonly EquipmentId[];
+  },
 ): Promise<
   | { ok: true; dishes: ExpandedDish[]; inventedIds: string[] }
   | { ok: false; error: string }
@@ -380,6 +397,7 @@ async function inventPositionViaNamePlan(
     peoplePerMeal: options.peoplePerMeal,
     tasteNotes,
     chat: options.chat,
+    availableEquipment: options.availableEquipment,
   });
   if (!expanded.ok) return planFail(expanded.reason);
 
@@ -410,7 +428,11 @@ async function inventPositionViaModifyPlan(
     userWish: string;
     keepExistingCompanion?: boolean;
   },
-  options: ResuggestOptions & { peoplePerMeal?: number; menuDayCount: number },
+  options: ResuggestOptions & {
+    peoplePerMeal?: number;
+    menuDayCount: number;
+    availableEquipment: readonly EquipmentId[];
+  },
 ): Promise<
   | { ok: true; dishes: ExpandedDish[]; inventedIds: string[] }
   | { ok: false; error: string }
@@ -445,6 +467,7 @@ async function inventPositionViaModifyPlan(
     peoplePerMeal: options.peoplePerMeal,
     tasteNotes,
     chat: options.chat,
+    availableEquipment: options.availableEquipment,
     modification: {
       wish: ctx.userWish,
       sourceRecipe: ctx.sourceDish.bodyText
@@ -603,6 +626,7 @@ async function resuggestMainForPair(
         ...options,
         peoplePerMeal: menuMeta.peoplePerMeal,
         menuDayCount: menuMeta.dayCount,
+        availableEquipment: menuMeta.availableEquipment,
       },
     );
     if (!invented.ok) return invented;
@@ -730,6 +754,7 @@ async function resuggestCompanionForPair(
         ...options,
         peoplePerMeal: menuMeta.peoplePerMeal,
         menuDayCount: menuMeta.dayCount,
+        availableEquipment: menuMeta.availableEquipment,
       },
     );
     if (!invented.ok) return invented;
@@ -1303,6 +1328,7 @@ async function modifyMainGroup(
         ...options,
         peoplePerMeal: menuMeta.peoplePerMeal,
         menuDayCount: menuMeta.dayCount,
+        availableEquipment: menuMeta.availableEquipment,
       },
     );
     if (!invented.ok) return invented;
@@ -1418,6 +1444,7 @@ async function modifyCompanionGroup(
         ...options,
         peoplePerMeal: menuMeta.peoplePerMeal,
         menuDayCount: menuMeta.dayCount,
+        availableEquipment: menuMeta.availableEquipment,
       },
     );
     if (!invented.ok) return invented;

@@ -7,6 +7,11 @@ import {
   MEAL_SLOTS,
 } from "@/domain/menu/constants";
 import {
+  DEFAULT_AVAILABLE_EQUIPMENT,
+  normalizeEquipmentList,
+  type EquipmentId,
+} from "@/domain/menu/equipment";
+import {
   mapIngredientRows,
   RECIPE_WITH_INGREDIENTS_SELECT,
   type RecipeIngredientView,
@@ -44,6 +49,7 @@ export type MenuSnackView = {
 export type MenuSkeletonView = {
   id: string;
   dayCount: number;
+  availableEquipment: EquipmentId[];
   slots: MenuSlotView[];
   snacks: MenuSnackView[];
 };
@@ -73,7 +79,7 @@ export async function loadMenuSkeleton(
 ): Promise<{ menu: MenuSkeletonView | null; error: string | null }> {
   const { data: menu, error: menuError } = await supabase
     .from("menus")
-    .select("id, day_count")
+    .select("id, day_count, available_equipment")
     .eq("id", menuId)
     .maybeSingle();
 
@@ -84,6 +90,11 @@ export async function loadMenuSkeleton(
   if (!menu) {
     return { menu: null, error: "Меню не найдено." };
   }
+
+  const availableEquipment =
+    normalizeEquipmentList(menu.available_equipment as string[]) ?? [
+      ...DEFAULT_AVAILABLE_EQUIPMENT,
+    ];
 
   const [slotsRes, snacksRes] = await Promise.all([
     supabase
@@ -141,6 +152,7 @@ export async function loadMenuSkeleton(
     menu: {
       id: menu.id,
       dayCount: menu.day_count,
+      availableEquipment,
       slots: mapped,
       snacks,
     },

@@ -8,6 +8,8 @@ import {
   isValidPeopleCount,
   parseSelectedMeals,
 } from "@/domain/menu/constants";
+import { parseEquipmentCsv } from "@/domain/menu/equipment";
+import { upsertAvailableEquipment } from "@/domain/settings/available-equipment";
 import { generateBuyableMenuForUser } from "@/domain/suggestions/generate-menu";
 import { createClient } from "@/lib/supabase/server";
 
@@ -35,6 +37,7 @@ export async function createMenuSkeletonAction(
     typeof rawPeople === "string" ? Number(rawPeople) : Number.NaN;
   const meals = parseSelectedMeals(formData.get("meals"));
   const includeSnacks = formData.get("includeSnacks") === "1";
+  const equipment = parseEquipmentCsv(formData.get("equipment"));
   const idempotencyKey = String(formData.get("idempotencyKey") ?? "").trim();
 
   if (!isValidDayCount(dayCount)) {
@@ -48,6 +51,9 @@ export async function createMenuSkeletonAction(
       ok: false,
       error: "Выберите хотя бы один приём пищи или снеки.",
     };
+  }
+  if (!equipment) {
+    return { ok: false, error: "Выберите хотя бы один вид техники." };
   }
 
   const supabase = await createClient();
@@ -70,11 +76,14 @@ export async function createMenuSkeletonAction(
     }
   }
 
+  // Best-effort profile default; menu snapshot is written in skeleton create.
+  await upsertAvailableEquipment(supabase, user.id, equipment);
+
   const result = await generateBuyableMenuForUser(
     supabase,
     user.id,
     dayCount,
-    { peopleCount, meals, includeSnacks },
+    { peopleCount, meals, includeSnacks, equipment },
   );
   if (!result.ok) {
     return { ok: false, error: result.error };

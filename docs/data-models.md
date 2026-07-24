@@ -7,7 +7,7 @@
 
 | Table | Purpose | Tenancy |
 |-------|---------|---------|
-| `user_settings` | Per-user settings shell | `user_id = auth.uid()` |
+| `user_settings` | Per-user settings shell (`available_equipment` default for create-menu) | `user_id = auth.uid()` |
 | `recipes` | Shared recipe library (seed + AI invent) | Authenticated SELECT/INSERT/UPDATE |
 | `critical_ingredients` | Ingredient lines (`critical`/`pantry`) + amounts/units | Authenticated; drives shopping |
 | `menus` | User menu plans (`day_count`, `people_count`, `slot_edit_passed_at`) | Owner RLS |
@@ -25,13 +25,14 @@
 - **UJ-1:** `menus.slot_edit_passed_at` — shopping list build requires non-null
 - **Meals:** up to 6 slot types (`breakfast`, `second_breakfast`, `lunch`, `afternoon_snack`, `dinner`, `late_dinner`)
 - **Companions:** `menu_slots.companion_recipe_id` for lunch / dinner / late_dinner
+- **Equipment:** `user_settings.available_equipment` (profile default), `menus.available_equipment` (per-menu hard filter), `recipes.required_equipment` (non-empty; eligibility = required ⊆ menu available). Closed vocab: stove, oven, air_fryer, grill, multicooker, pressure_cooker, microwave.
 - **Prices:** `price_cents_per_serving` in **kopecks**; AI invent converts rubles → kopecks
 - **Nutrition:** per-serving KBJU fields on recipes and snacks when present
 
 ## RPC
 
-`create_menu_skeleton(p_day_count, p_servings default 2, p_meals text[] default ['breakfast','lunch','dinner'])`  
-Creates menu + empty slots (+ snack placeholders when applicable).
+`create_menu_skeleton(p_day_count, p_servings default 2, p_meals text[] default ['breakfast','lunch','dinner'], p_equipment text[] default ['stove','oven'])`  
+Creates menu + empty slots; snapshots `available_equipment`. 3-arg overload delegates with default stove+oven.
 
 ## Dropped (do not reintroduce)
 

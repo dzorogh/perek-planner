@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ContinueToShoppingButton } from "@/components/menu/continue-to-shopping-button";
 import { DayCardGrid } from "@/components/menu/day-card-grid";
 import { MenuDishList } from "@/components/menu/menu-dish-list";
+import { MenuEquipmentEditor } from "@/components/menu/menu-equipment-editor";
 import { MenuTotalsBar } from "@/components/recipes/recipe-value-line";
 import { summarizeMenuDishes } from "@/domain/menu/dish-summary";
 import { loadMenuSkeleton } from "@/domain/menu/load-menu";
@@ -75,6 +76,11 @@ export default async function PlanMenuPage({ searchParams }: PlanMenuPageProps) 
           </p>
         ) : null}
       </div>
+
+      <MenuEquipmentEditor
+        menuId={menu.id}
+        initialEquipment={menu.availableEquipment}
+      />
 
       <DayCardGrid
         menuId={menu.id}

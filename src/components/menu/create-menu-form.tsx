@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useState } from "react";
 
 import { DayLengthPicker } from "@/components/menu/day-length-picker";
+import { EquipmentPicker } from "@/components/menu/equipment-picker";
 import {
   DEFAULT_MEAL_TYPES_SELECTION,
   MealTypesPicker,
@@ -19,6 +20,15 @@ import {
   DEFAULT_DAY_COUNT,
   DEFAULT_SERVINGS_PER_MEAL,
 } from "@/domain/menu/constants";
+import {
+  DEFAULT_AVAILABLE_EQUIPMENT,
+  DEFAULT_EQUIPMENT_SELECTION,
+  equipmentToCsv,
+  listFromSelection,
+  selectionFromList,
+  type EquipmentSelection,
+} from "@/domain/menu/equipment";
+import { getAvailableEquipmentAction } from "@/domain/settings/available-equipment-actions";
 
 type CreateMenuFormProps = {
   onPendingChange?: (pending: boolean) => void;
@@ -29,6 +39,9 @@ export function CreateMenuForm({ onPendingChange }: CreateMenuFormProps = {}) {
   const [peopleCount, setPeopleCount] = useState(DEFAULT_SERVINGS_PER_MEAL);
   const [mealTypes, setMealTypes] = useState<MealTypesSelection>(
     DEFAULT_MEAL_TYPES_SELECTION,
+  );
+  const [equipment, setEquipment] = useState<EquipmentSelection>(
+    DEFAULT_EQUIPMENT_SELECTION,
   );
   // Stable per form instance; lazy init keeps render pure (no Date.now / Math.random).
   const [idempotencyKey] = useState(() => crypto.randomUUID());
@@ -41,13 +54,27 @@ export function CreateMenuForm({ onPendingChange }: CreateMenuFormProps = {}) {
     onPendingChange?.(isPending);
   }, [isPending, onPendingChange]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void getAvailableEquipmentAction().then((ids) => {
+      if (!cancelled) setEquipment(selectionFromList(ids));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const mealsCsv = selectedMealSlots(mealTypes).join(",");
+  const equipmentCsv = equipmentToCsv(
+    listFromSelection(equipment) ?? [...DEFAULT_AVAILABLE_EQUIPMENT],
+  );
 
   return (
     <form action={formAction} className="w-full">
       <input type="hidden" name="dayCount" value={dayCount} />
       <input type="hidden" name="peopleCount" value={peopleCount} />
       <input type="hidden" name="meals" value={mealsCsv} />
+      <input type="hidden" name="equipment" value={equipmentCsv} />
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       <input
         type="hidden"
@@ -94,6 +121,20 @@ export function CreateMenuForm({ onPendingChange }: CreateMenuFormProps = {}) {
         />
         <p className="mb-5 mt-1.5 text-xs text-slot-label">
           Снимите лишнее — сгенерируем только выбранное
+        </p>
+      </div>
+
+      <div className="mt-5 text-left">
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.04em] text-slot-label">
+          Какая техника есть
+        </p>
+        <EquipmentPicker
+          value={equipment}
+          onChange={setEquipment}
+          disabled={isPending}
+        />
+        <p className="mb-5 mt-1.5 text-xs text-slot-label">
+          Сгенерируем блюда только под выбранную технику
         </p>
       </div>
 

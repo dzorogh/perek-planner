@@ -8,6 +8,11 @@ import {
   mealAllowsCompanion,
   type MealSlot,
 } from "@/domain/menu/constants";
+import {
+  DEFAULT_AVAILABLE_EQUIPMENT,
+  normalizeEquipmentList,
+  type EquipmentId,
+} from "@/domain/menu/equipment";
 import { createMenuSkeletonForUser } from "@/domain/menu/create-skeleton";
 import { assignProposalsToSlots } from "@/domain/suggestions/assign";
 import { buildCandidates } from "@/domain/suggestions/candidates";
@@ -57,6 +62,8 @@ export type GenerateMenuOptions = {
   meals?: readonly MealSlot[];
   /** Whether to generate no-cook snacks. */
   includeSnacks?: boolean;
+  /** Kitchen equipment allowed for this menu (hard filter). */
+  equipment?: readonly EquipmentId[];
 };
 
 /**
@@ -87,9 +94,15 @@ export async function generateBuyableMenuForUser(
     return { ok: false, error: SUGGESTION_FAIL_RU.no_key };
   }
 
+  const equipment =
+    normalizeEquipmentList(options.equipment) ?? [
+      ...DEFAULT_AVAILABLE_EQUIPMENT,
+    ];
+
   const created = await createMenuSkeletonForUser(supabase, userId, dayCount, {
     peopleCount: options.peopleCount,
     meals,
+    equipment,
   });
   if (!created.ok) {
     return created;
@@ -192,11 +205,17 @@ async function fillCookableSlots(
   const slotByKey = await loadSlotKeyMap(supabase, menuId, dayCount, slotCount);
 
   // 1) Names only — cheap plan for the whole menu.
+  const equipment =
+    normalizeEquipmentList(options.equipment) ?? [
+      ...DEFAULT_AVAILABLE_EQUIPMENT,
+    ];
+
   const planned = await proposeMenuNamePlan(options.meals, {
     dayCount,
     previousMenusDishes,
     avoidNames: previousMenusDishes,
     peoplePerMeal: options.peopleCount,
+    availableEquipment: equipment,
     tasteNotes,
     chat: options.chat,
   });
@@ -235,6 +254,7 @@ async function fillCookableSlots(
     peoplePerMeal: options.peopleCount,
     tasteNotes,
     chat: options.chat,
+    availableEquipment: equipment,
   });
   if (!expanded.ok) {
     throw new SuggestionError(

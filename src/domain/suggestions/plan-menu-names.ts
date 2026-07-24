@@ -59,6 +59,7 @@ Rules:
 - At most TWO mains of the same culinary form across the whole menu (рулеты, котлеты, запеканка, …).
 - Companion names: simple sides/sauces/protein add-ons; NEVER «к пасте»/«к мясу»; never a second meat/fish main beside a meat/fish main.
 - Names in Russian, sentence case. No recipe steps. Honor operatorTasteNotes (constraint PRIMARY).
+- When availableEquipment is set: only name dishes cookable with that closed set (stove/oven/air_fryer/grill/multicooker/pressure_cooker/microwave). You need NOT use every appliance.
 - Never invent snacks / перекусы here.`;
 
 /** Single-slot replace — must NOT reuse full-menu invent system (models echo keepDishes). */
@@ -107,6 +108,7 @@ export async function proposeMenuNamePlan(
     previousMenusDishes?: string[];
     avoidNames?: string[];
     peoplePerMeal?: number;
+    availableEquipment?: readonly string[];
     tasteNotes: TasteNote[];
     chat?: ChatCompletionsFn;
   },
@@ -126,6 +128,7 @@ export async function proposeMenuNamePlan(
     ),
     avoidNames: uniqueExactNames(context.avoidNames ?? []).slice(0, 50),
     peoplePerMeal: context.peoplePerMeal ?? 2,
+    availableEquipment: context.availableEquipment,
     instruction:
       "Invent dish NAMES for every listed position. Strong variety: no near-duplicates; lunch≠dinner form on the same dayPair; at most two of any culinary form. Set plate_kind for lunch/dinner mains and add companions only when needs_companion.",
     operatorTasteNotes: tasteNotesForPrompt(context.tasteNotes),

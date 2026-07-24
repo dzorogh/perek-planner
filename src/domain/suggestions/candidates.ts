@@ -2,6 +2,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { passesFridgeKeep } from "@/domain/matching/eligibility";
 import {
+  DEFAULT_AVAILABLE_EQUIPMENT,
+  normalizeEquipmentList,
+  recipeFitsAvailableEquipment,
+} from "@/domain/menu/equipment";
+import {
   isLongIdle,
   loadLastAssignedAt,
   loadRecentMenuRecipeIds,
@@ -34,13 +39,18 @@ export async function buildCandidates(
 > {
   const { data: menu, error: menuError } = await supabase
     .from("menus")
-    .select("day_count")
+    .select("day_count, available_equipment")
     .eq("id", menuId)
     .maybeSingle();
 
   if (menuError || !menu) {
     return { ok: false, reason: "query" };
   }
+
+  const available =
+    normalizeEquipmentList(menu.available_equipment as string[]) ?? [
+      ...DEFAULT_AVAILABLE_EQUIPMENT,
+    ];
 
   const recipes = await fetchAllRecipes(supabase);
   if (!recipes) {
@@ -64,6 +74,11 @@ export async function buildCandidates(
       continue;
     }
     if (!passesFridgeKeep(recipe.fridge_keep_days, menu.day_count)) {
+      continue;
+    }
+    if (
+      !recipeFitsAvailableEquipment(recipe.required_equipment, available)
+    ) {
       continue;
     }
 
@@ -95,6 +110,7 @@ async function fetchAllRecipes(
       name: string;
       fridge_keep_days: number;
       plate_role: string | null;
+      required_equipment: string[] | null;
     }[]
   | null
 > {
@@ -104,12 +120,13 @@ async function fetchAllRecipes(
     name: string;
     fridge_keep_days: number;
     plate_role: string | null;
+    required_equipment: string[] | null;
   }[] = [];
   for (let from = 0; ; from += pageSize) {
     const to = from + pageSize - 1;
     const { data, error } = await supabase
       .from("recipes")
-      .select("id, name, fridge_keep_days, plate_role")
+      .select("id, name, fridge_keep_days, plate_role, required_equipment")
       .order("name", { ascending: true })
       .range(from, to);
     if (error || !data) return null;

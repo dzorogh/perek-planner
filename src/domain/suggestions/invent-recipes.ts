@@ -1,6 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { MealSlot } from "@/domain/menu/constants";
+import {
+  DEFAULT_AVAILABLE_EQUIPMENT,
+  normalizeEquipmentList,
+  recipeFitsAvailableEquipment,
+  type EquipmentId,
+} from "@/domain/menu/equipment";
 import { passesFridgeKeep } from "@/domain/matching/eligibility";
 import { normalizeRecipeBodyText } from "@/domain/recipes/format-body";
 import {
@@ -65,6 +71,8 @@ export type InventRecipeDraft = {
   ingredients: InventIngredientDraft[];
   /** Persisted on recipes.plate_role for create/resuggest pairing. */
   plateRole: InventPlateRole;
+  /** Equipment required to cook; must be ⊆ menu.available_equipment. */
+  requiredEquipment: EquipmentId[];
   /** Estimated cost per 1 adult serving in kopecks; omit when uncertain. */
   priceCentsPerServing: number | null;
   caloriesKcalPerServing: number | null;
@@ -97,8 +105,10 @@ Cover the meal mix requested: breakfast-appropriate cooked dishes AND lunch/dinn
 Also invent companion dishes for lunch/dinner plates that need a side or protein.
 Use common grocery ingredients available in Russian supermarkets.
 Respond with a single JSON object:
-{"recipes":[{"name":"...","body_text":"...","fridge_keep_days":N,"plate_role":"main"|"companion","suitable_meals":["breakfast"|"lunch"|"dinner",...],"price_rub_per_serving":N,"nutrition_per_serving":{"kcal":N,"protein_g":N,"fat_g":N,"carbs_g":N},"critical_ingredients":[{"name":"...","kind":"critical"|"pantry","amount":N,"unit":"g"|"ml"|"pcs"|"tsp"|"tbsp"},...]}]}.
+{"recipes":[{"name":"...","body_text":"...","fridge_keep_days":N,"plate_role":"main"|"companion","suitable_meals":["breakfast"|"lunch"|"dinner",...],"required_equipment":["stove"|"oven"|"air_fryer"|"grill"|"multicooker"|"pressure_cooker"|"microwave",...],"price_rub_per_serving":N,"nutrition_per_serving":{"kcal":N,"protein_g":N,"fat_g":N,"carbs_g":N},"critical_ingredients":[{"name":"...","kind":"critical"|"pantry","amount":N,"unit":"g"|"ml"|"pcs"|"tsp"|"tbsp"},...]}]}.
 Rules:
+- required_equipment: non-empty array of equipment ids REQUIRED to cook the dish (subset of availableEquipment from the request). Use only: stove, oven, air_fryer, grill, multicooker, pressure_cooker, microwave. Example: pan fry → ["stove"]; bake → ["oven"]; air-fry → ["air_fryer"]. HARD: never invent a dish that needs equipment outside availableEquipment.
+- Prefer dishes that use the available set realistically; you need NOT use every available appliance in the batch.
 - HARD variety: never invent a near-duplicate of previousMenusDishes, avoidNames, or currentMenuDishes. You judge similarity by culinary form + base, not by exact string match.
   Too close (FORBIDDEN): оладьи≈панкейки; творожная запеканка с ягодами≈творожные запеканки с изюмом; сырники с изюмом≈сырники с ягодами; овсяная каша с яблоком≈овсянка с грушей; куриные котлеты≈котлеты из курицы.
   Distinct enough (OK): творожная запеканка vs сырники; оладьи vs яичница; картофельная запеканка vs творожная запеканка; каша vs омлет.
@@ -172,13 +182,18 @@ export async function inventAndPersistRecipes(
 
   const { data: menu, error: menuError } = await supabase
     .from("menus")
-    .select("day_count, user_id, default_servings_per_meal")
+    .select("day_count, user_id, default_servings_per_meal, available_equipment")
     .eq("id", menuId)
     .maybeSingle();
 
   if (menuError || !menu) {
     return { ok: false, reason: "query" };
   }
+
+  const availableEquipment =
+    normalizeEquipmentList(menu.available_equipment as string[]) ?? [
+      ...DEFAULT_AVAILABLE_EQUIPMENT,
+    ];
 
   const userId = options.userId ?? menu.user_id;
   const tasteNotes = await loadInventTasteNotes(supabase, userId);
@@ -197,6 +212,7 @@ export async function inventAndPersistRecipes(
     currentMenuDishes: options.currentMenuDishes ?? [],
     menuDayCount: menu.day_count,
     peoplePerMeal,
+    availableEquipment,
   };
 
   let drafts: InventRecipeDraft[];
@@ -214,6 +230,8 @@ export async function inventAndPersistRecipes(
     }
     throw err;
   }
+
+  drafts = filterDraftsByAvailableEquipment(drafts, availableEquipment);
 
   const meals = options.meals ?? [];
   drafts = finalizeInventDraftsForPersist(
@@ -398,6 +416,7 @@ async function proposeInventDraftsWithMealMix(
     currentMenuDishes?: string[];
     menuDayCount?: number;
     peoplePerMeal?: number;
+    availableEquipment?: readonly EquipmentId[];
   },
   exactAvoidNames: string[] = [],
 ): Promise<InventRecipeDraft[]> {
@@ -453,6 +472,7 @@ export async function proposeInventedRecipes(
     currentMenuDishes?: string[];
     menuDayCount?: number;
     peoplePerMeal?: number;
+    availableEquipment?: readonly EquipmentId[];
   } = {},
 ): Promise<InventRecipeDraft[]> {
   const menuDayCount =
@@ -463,6 +483,10 @@ export async function proposeInventedRecipes(
     context.peoplePerMeal != null && context.peoplePerMeal >= 1
       ? Math.trunc(context.peoplePerMeal)
       : null;
+  const availableEquipment =
+    normalizeEquipmentList(context.availableEquipment) ?? [
+      ...DEFAULT_AVAILABLE_EQUIPMENT,
+    ];
 
   const userContent = JSON.stringify({
     inventCount: count + 1,
@@ -471,6 +495,7 @@ export async function proposeInventedRecipes(
     contextMeal: context.contextMeal ?? null,
     menuDayCount,
     peoplePerMeal,
+    availableEquipment,
     previousMenusDishes: uniqueExactNames(context.previousMenusDishes ?? []).slice(
       0,
       60,
@@ -481,7 +506,7 @@ export async function proposeInventedRecipes(
     ),
     avoidNames: uniqueExactNames(context.avoidNames ?? []).slice(0, 50),
     instruction:
-      "Invent inventCount NEW cooked recipes via AI (extras so we can keep targetKeep). Mix plate_role=main and plate_role=companion (companions ≈30–40% when lunch/dinner are in meals). HARD: you own near-duplicate judgment — never invent the same culinary form+base as anything in previousMenusDishes, currentMenuDishes, or avoidNames (topping swaps count as duplicates: творожная запеканка с ягодами ≈ с изюмом; оладьи≈панкейки). If currentMenuDishes is set, invent a clearly different form for contextMeal. Keep the batch internally diverse. Cover cooked breakfast and lunch/dinner as needed by meals — when breakfast is requested, invent real morning food (яичница/сырники/оладьи/омлет/запеканка; каша only if operatorTasteNotes allow). Never roast chicken/soup/plov/cutlets for breakfast. Breakfast mains = morning food only; sauces/sides are companion. When lunch/dinner are in meals: include at least ONE meat/fish main (фрикадельки, запечённая курица/рыба, плов, картофельная запеканка с фаршем, etc.) — egg/dairy/mushroom-only mains do NOT count. NEVER mark morning forms (сырники, творожные запеканки, каши) as suitable for lunch/dinner. Name companions without «к пасте»/«к мясу». Never invent перекусы/no-cook snacks — those are separate. If contextMeal is set, bias toward that meal. Honor operatorTasteNotes: constraint PRIMARY (generalize — «не люблю каши» forbids all каши); exampleDish secondary. Keep body_text short (3–5 steps main, 2–4 companion). HARD: every buyable food in name or body_text (including serving like сметана/зелень) MUST be in critical_ingredients — shopping list ignores the text. When menuDayCount/peoplePerMeal are set, keep ingredient amounts per 1 adult serving; fridge_keep_days >= menuDayCount.",
+      "Invent inventCount NEW cooked recipes via AI (extras so we can keep targetKeep). Mix plate_role=main and plate_role=companion (companions ≈30–40% when lunch/dinner are in meals). HARD: you own near-duplicate judgment — never invent the same culinary form+base as anything in previousMenusDishes, currentMenuDishes, or avoidNames (topping swaps count as duplicates: творожная запеканка с ягодами ≈ с изюмом; оладьи≈панкейки). If currentMenuDishes is set, invent a clearly different form for contextMeal. Keep the batch internally diverse. Cover cooked breakfast and lunch/dinner as needed by meals — when breakfast is requested, invent real morning food (яичница/сырники/оладьи/омлет/запеканка; каша only if operatorTasteNotes allow). Never roast chicken/soup/plov/cutlets for breakfast. Breakfast mains = morning food only; sauces/sides are companion. When lunch/dinner are in meals: include at least ONE meat/fish main (фрикадельки, запечённая курица/рыба, плов, картофельная запеканка с фаршем, etc.) — egg/dairy/mushroom-only mains do NOT count. NEVER mark morning forms (сырники, творожные запеканки, каши) as suitable for lunch/dinner. Name companions without «к пасте»/«к мясу». Never invent перекусы/no-cook snacks — those are separate. If contextMeal is set, bias toward that meal. Honor operatorTasteNotes: constraint PRIMARY (generalize — «не люблю каши» forbids all каши); exampleDish secondary. Keep body_text short (3–5 steps main, 2–4 companion). HARD: every buyable food in name or body_text (including serving like сметана/зелень) MUST be in critical_ingredients — shopping list ignores the text. When menuDayCount/peoplePerMeal are set, keep ingredient amounts per 1 adult serving; fridge_keep_days >= menuDayCount. HARD: required_equipment must be non-empty and ⊆ availableEquipment.",
     operatorTasteNotes: tasteNotesForPrompt(tasteNotes),
   });
 
@@ -570,6 +595,13 @@ export function parseInventRecipesJson(content: string): InventRecipeDraft[] {
       return;
     }
 
+    const requiredEquipment = normalizeEquipmentList(
+      (row.required_equipment ?? row.requiredEquipment) as
+        | string[]
+        | undefined,
+    );
+    if (!requiredEquipment) return;
+
     const roleRaw = row.plate_role ?? row.plateRole;
     const plateRole: InventPlateRole =
       roleRaw === "companion" ? "companion" : "main";
@@ -612,6 +644,7 @@ export function parseInventRecipesJson(content: string): InventRecipeDraft[] {
       fridgeKeepDays: Math.trunc(fridgeKeepDays),
       ingredients,
       plateRole,
+      requiredEquipment,
       priceCentsPerServing,
       caloriesKcalPerServing,
       proteinGPerServing,
@@ -621,6 +654,16 @@ export function parseInventRecipesJson(content: string): InventRecipeDraft[] {
   });
 
   return out;
+}
+
+/** Keep invent drafts cookable with the menu's available equipment. */
+export function filterDraftsByAvailableEquipment(
+  drafts: InventRecipeDraft[],
+  available: readonly EquipmentId[],
+): InventRecipeDraft[] {
+  return drafts.filter((d) =>
+    recipeFitsAvailableEquipment(d.requiredEquipment, available),
+  );
 }
 
 function parseOptionalNonNegInt(raw: unknown): number | null {
@@ -693,6 +736,7 @@ export async function persistInventedRecipe(
       body_text: draft.bodyText,
       fridge_keep_days: draft.fridgeKeepDays,
       plate_role: draft.plateRole,
+      required_equipment: draft.requiredEquipment,
       price_cents_per_serving: draft.priceCentsPerServing,
       calories_kcal_per_serving: draft.caloriesKcalPerServing,
       protein_g_per_serving: draft.proteinGPerServing,

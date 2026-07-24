@@ -1,6 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { DEFAULT_DAY_COUNT, MEAL_LABELS_RU } from "@/domain/menu/constants";
+import {
+  DEFAULT_AVAILABLE_EQUIPMENT,
+  normalizeEquipmentList,
+  recipeFitsAvailableEquipment,
+  type EquipmentId,
+} from "@/domain/menu/equipment";
 import { normalizeRecipeBodyText } from "@/domain/recipes/format-body";
 import {
   parseInventRecipesJson,
@@ -34,11 +40,12 @@ export type ExpandMenuRecipesResult =
 const EXPAND_SYSTEM = `You write full Russian home-cooking recipes for LOCKED dish names on a household meal planner.
 Names are final — do NOT rename, swap, or invent different dishes.
 Respond with a single JSON object:
-{"recipes":[{"key":"meal:1-2:main","name":"...","body_text":"...","fridge_keep_days":N,"plate_role":"main"|"companion","price_rub_per_serving":N,"nutrition_per_serving":{"kcal":N,"protein_g":N,"fat_g":N,"carbs_g":N},"critical_ingredients":[{"name":"...","kind":"critical"|"pantry","amount":N,"unit":"g"|"ml"|"pcs"|"tsp"|"tbsp"},...]}]}.
+{"recipes":[{"key":"meal:1-2:main","name":"...","body_text":"...","fridge_keep_days":N,"plate_role":"main"|"companion","required_equipment":["stove"|"oven"|"air_fryer"|"grill"|"multicooker"|"pressure_cooker"|"microwave",...],"price_rub_per_serving":N,"nutrition_per_serving":{"kcal":N,"protein_g":N,"fat_g":N,"carbs_g":N},"critical_ingredients":[{"name":"...","kind":"critical"|"pantry","amount":N,"unit":"g"|"ml"|"pcs"|"tsp"|"tbsp"},...]}]}.
 
 Rules:
 - One recipe object per input dish. key MUST match the input key exactly. name MUST match the locked name (same dish).
 - plate_role from input. fridge_keep_days integer 1..7, MUST be >= menuDayCount from the request.
+- required_equipment: non-empty; only stove|oven|air_fryer|grill|multicooker|pressure_cooker|microwave; MUST be ⊆ availableEquipment. HARD: never require equipment outside availableEquipment.
 - body_text: SHORT Russian steps, each on its own line numbered "1. ", "2. ", … Main 3–5 steps, companion 2–4. Cooking/heating required.
 - HARD shopping-list completeness: every buyable food in name or body_text MUST be in critical_ingredients with amount+unit per 1 adult serving.
 - At least one kind=critical. Prefer 3–8 ingredients (companions 2–5).
@@ -64,11 +71,16 @@ export async function expandMenuRecipes(
     tasteNotes: TasteNote[];
     chat?: ChatCompletionsFn;
     modification?: ExpandModificationContext;
+    availableEquipment?: readonly EquipmentId[];
   },
 ): Promise<ExpandMenuRecipesResult> {
   if (plan.length === 0) return { ok: true, dishes: [] };
 
   const menuDayCount = context.menuDayCount;
+  const availableEquipment =
+    normalizeEquipmentList(context.availableEquipment) ?? [
+      ...DEFAULT_AVAILABLE_EQUIPMENT,
+    ];
   const chat = context.chat ?? openRouterChatCompletions;
   const locked = plan.map((d) => ({
     key: planKey(d),
@@ -86,9 +98,10 @@ export async function expandMenuRecipes(
     dishes: locked,
     menuDayCount,
     peoplePerMeal: context.peoplePerMeal ?? 2,
+    availableEquipment,
     instruction: wish
-      ? `Write a full recipe for EVERY locked dish. Keep names exactly. key must match. fridge_keep_days>=${menuDayCount}. Apply modificationWish to ingredients/technique (PRIMARY). Prefer adapting sourceRecipe when provided.`
-      : `Write a full recipe for EVERY locked dish. Keep names exactly. key must match. fridge_keep_days>=${menuDayCount}.`,
+    ? `Write a full recipe for EVERY locked dish. Keep names exactly. key must match. fridge_keep_days>=${menuDayCount}. required_equipment ⊆ availableEquipment. Apply modificationWish to ingredients/technique (PRIMARY). Prefer adapting sourceRecipe when provided.`
+      : `Write a full recipe for EVERY locked dish. Keep names exactly. key must match. fridge_keep_days>=${menuDayCount}. required_equipment ⊆ availableEquipment.`,
     modificationWish: wish || undefined,
     sourceRecipe: sourceRecipe
       ? {
@@ -123,19 +136,16 @@ export async function expandMenuRecipes(
   const inventedIds: string[] = [];
 
   for (const dish of plan) {
-    const key = planKey(dish);
-    const draft = draftsByKey.get(key);
+    const draft = prepareExpandDraft(
+      draftsByKey.get(planKey(dish)),
+      dish,
+      menuDayCount,
+      availableEquipment,
+    );
     if (!draft) {
       await cleanup(supabase, inventedIds);
       return { ok: false, reason: "parse" };
     }
-    // Force locked name + role.
-    draft.name = dish.name.slice(0, 120);
-    draft.plateRole = dish.role;
-    if (draft.fridgeKeepDays < menuDayCount) {
-      draft.fridgeKeepDays = menuDayCount;
-    }
-    draft.bodyText = normalizeRecipeBodyText(draft.bodyText);
 
     const persisted = await persistInventedRecipe(supabase, draft);
     if (!persisted.ok) {
@@ -147,6 +157,27 @@ export async function expandMenuRecipes(
   }
 
   return { ok: true, dishes: expanded };
+}
+
+function prepareExpandDraft(
+  draft: InventRecipeDraft | undefined,
+  dish: PlannedDish,
+  menuDayCount: number,
+  availableEquipment: readonly EquipmentId[],
+): InventRecipeDraft | null {
+  if (!draft) return null;
+  draft.name = dish.name.slice(0, 120);
+  draft.plateRole = dish.role;
+  if (draft.fridgeKeepDays < menuDayCount) {
+    draft.fridgeKeepDays = menuDayCount;
+  }
+  draft.bodyText = normalizeRecipeBodyText(draft.bodyText);
+  if (
+    !recipeFitsAvailableEquipment(draft.requiredEquipment, availableEquipment)
+  ) {
+    return null;
+  }
+  return draft;
 }
 
 /** Pure parser: map plan keys → drafts (name must match locked dish). */
