@@ -83,3 +83,7 @@ All previously open items were closed in the deferred-work sweep. Strikethrough 
 - source_spec: `_bmad-output/implementation-artifacts/spec-modify-dish-with-wishes.md`
   summary: No automated check that the AI recipe body actually satisfies the user wish.
   evidence: Wish is prompt-only; same trust model as other OpenRouter invent paths.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-ai-debug-logs-db.md`
+  summary: RLS smoke for ai_debug_logs only covers anon SELECT deny, not anon INSERT or cross-user isolation.
+  evidence: Review noted verify-rls-ai-debug-logs.mjs selects only; authenticated A↛B needs a second operator like other RLS suites.

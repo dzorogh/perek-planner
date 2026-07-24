@@ -105,13 +105,14 @@ export async function openRouterChatCompletions(
       signal: AbortSignal.timeout(OPENROUTER_TIMEOUT_MS),
     });
   } catch (err) {
-    const message =
-      err instanceof Error && err.name === "TimeoutError"
-        ? "OpenRouter request timed out"
-        : err instanceof Error && err.name === "AbortError"
-          ? "OpenRouter request aborted"
-          : "Failed to reach OpenRouter";
-    recordAiDebugEntry({
+    let message = "Failed to reach OpenRouter";
+    if (err instanceof Error && err.name === "TimeoutError") {
+      message = "OpenRouter request timed out";
+    } else if (err instanceof Error && err.name === "AbortError") {
+      message = "OpenRouter request aborted";
+    }
+    // Fire-and-forget: never block OpenRouter error path on DB latency.
+    void recordAiDebugEntry({
       model,
       durationMs: Date.now() - started,
       ok: false,
@@ -124,7 +125,7 @@ export async function openRouterChatCompletions(
 
   if (!response.ok) {
     const message = `OpenRouter HTTP ${response.status}`;
-    recordAiDebugEntry({
+    void recordAiDebugEntry({
       model,
       durationMs: Date.now() - started,
       ok: false,
@@ -145,7 +146,7 @@ export async function openRouterChatCompletions(
   try {
     json = (await response.json()) as typeof json;
   } catch {
-    recordAiDebugEntry({
+    void recordAiDebugEntry({
       model,
       durationMs: Date.now() - started,
       ok: false,
@@ -158,7 +159,7 @@ export async function openRouterChatCompletions(
 
   const content = extractAssistantText(json.choices?.[0]?.message?.content);
   if (!content) {
-    recordAiDebugEntry({
+    void recordAiDebugEntry({
       model,
       durationMs: Date.now() - started,
       ok: false,
@@ -169,7 +170,7 @@ export async function openRouterChatCompletions(
     throw new OpenRouterError("OpenRouter returned empty content");
   }
 
-  recordAiDebugEntry({
+  void recordAiDebugEntry({
     model,
     durationMs: Date.now() - started,
     ok: true,

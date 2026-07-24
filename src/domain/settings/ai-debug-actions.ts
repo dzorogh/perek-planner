@@ -24,16 +24,19 @@ async function requireUser(): Promise<
   return { ok: true };
 }
 
-/** Latest OpenRouter request/response pairs from this server process. */
+/** Latest OpenRouter request/response pairs for the current user (DB). */
 export async function loadAiDebugLogAction(): Promise<AiDebugLogState> {
   const auth = await requireUser();
   if (!auth.ok) return auth;
-  return { ok: true, entries: listAiDebugEntries() };
+  const listed = await listAiDebugEntries();
+  if (!listed.ok) return listed;
+  return { ok: true, entries: listed.entries };
 }
 
 export async function clearAiDebugLogAction(): Promise<AiDebugLogState> {
   const auth = await requireUser();
   if (!auth.ok) return auth;
-  clearAiDebugEntries();
+  const cleared = await clearAiDebugEntries();
+  if (!cleared.ok) return cleared;
   return { ok: true, entries: [] };
 }

@@ -53,8 +53,8 @@ export function AiDebugPanel() {
             Лог нейросети
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Последние запросы и ответы OpenRouter в этом процессе сервера —
-            для отладки запретов и промптов.
+            Последние запросы и ответы OpenRouter для вашего аккаунта — для
+            отладки запретов и промптов.
           </p>
         </div>
         <div className="flex gap-2">
@@ -88,7 +88,7 @@ export function AiDebugPanel() {
       {entries.length === 0 ? (
         <p className="mt-5 text-sm text-muted-foreground">
           Пока пусто — сгенерируйте меню или замените слот, затем нажмите
-          «Обновить».
+          «Обновить». Логи сохраняются в базе и не пропадают после перезапуска.
         </p>
       ) : (
         <ul className="mt-5 space-y-3">
