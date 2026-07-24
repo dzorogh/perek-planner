@@ -59,7 +59,8 @@ Rules:
 - At most TWO mains of the same culinary form across the whole menu (рулеты, котлеты, запеканка, …).
 - Companion names: simple sides/sauces/protein add-ons; NEVER «к пасте»/«к мясу»; never a second meat/fish main beside a meat/fish main.
 - Names in Russian, sentence case. No recipe steps. Honor operatorTasteNotes (constraint PRIMARY).
-- When availableEquipment is set: only name dishes cookable with that closed set (stove/oven/air_fryer/grill/multicooker/pressure_cooker/microwave). You need NOT use every appliance.
+- When availableEquipment is set: ONLY name dishes cookable with that closed set (stove/oven/air_fryer/grill/multicooker/pressure_cooker/microwave). You need NOT use every appliance.
+  HARD: never put unavailable appliances in the name (no «на гриле»/гриль unless grill is listed; no аэрогриль unless air_fryer; no мультиварка/скороварка/микроволновка unless listed).
 - Never invent snacks / перекусы here.`;
 
 /** Single-slot replace — must NOT reuse full-menu invent system (models echo keepDishes). */
@@ -521,6 +522,7 @@ export async function repairMenuNamePlan(
   context: {
     dayCount: number;
     tasteNotes: TasteNote[];
+    availableEquipment?: readonly string[];
     chat?: ChatCompletionsFn;
   },
 ): Promise<PlanMenuNamesResult> {
@@ -550,8 +552,9 @@ export async function repairMenuNamePlan(
       plate_kind: d.plateKind,
     })),
     replace,
+    availableEquipment: context.availableEquipment,
     instruction:
-      "Return a FULL dishes array for the whole menu: keepDishes unchanged + NEW names for every replace target. When replacing a main with plate_kind change, add/remove companion accordingly. HARD: new names must not near-duplicate keepDishes.",
+      "Return a FULL dishes array for the whole menu: keepDishes unchanged + NEW names for every replace target. When replacing a main with plate_kind change, add/remove companion accordingly. HARD: new names must not near-duplicate keepDishes. When availableEquipment is set, new names must be cookable with only that set (no «на гриле» unless grill is listed).",
     operatorTasteNotes: tasteNotesForPrompt(context.tasteNotes),
   });
 

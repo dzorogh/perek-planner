@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { DEFAULT_DAY_COUNT, MEAL_LABELS_RU } from "@/domain/menu/constants";
 import {
   DEFAULT_AVAILABLE_EQUIPMENT,
+  clampRequiredEquipmentToAvailable,
   normalizeEquipmentList,
   recipeFitsAvailableEquipment,
   type EquipmentId,
@@ -82,6 +83,40 @@ export async function expandMenuRecipes(
       ...DEFAULT_AVAILABLE_EQUIPMENT,
     ];
   const chat = context.chat ?? openRouterChatCompletions;
+
+  const fetched = await fetchExpandDrafts(plan, {
+    chat,
+    menuDayCount,
+    peoplePerMeal: context.peoplePerMeal ?? 2,
+    availableEquipment,
+    tasteNotes: context.tasteNotes,
+    modification: context.modification,
+  });
+  if (!fetched.ok) return fetched;
+
+  return persistExpandedPlan(
+    supabase,
+    plan,
+    fetched.draftsByKey,
+    menuDayCount,
+    availableEquipment,
+  );
+}
+
+async function fetchExpandDrafts(
+  plan: PlannedDish[],
+  args: {
+    chat: ChatCompletionsFn;
+    menuDayCount: number;
+    peoplePerMeal: number;
+    availableEquipment: readonly EquipmentId[];
+    tasteNotes: TasteNote[];
+    modification?: ExpandModificationContext;
+  },
+): Promise<
+  | { ok: true; draftsByKey: Map<string, InventRecipeDraft> }
+  | { ok: false; reason: "openrouter" | "parse" }
+> {
   const locked = plan.map((d) => ({
     key: planKey(d),
     meal: d.meal,
@@ -91,17 +126,13 @@ export async function expandMenuRecipes(
     name: d.name,
     plate_role: d.role,
   }));
-
-  const wish = context.modification?.wish.trim();
-  const sourceRecipe = context.modification?.sourceRecipe;
-  const userContent = JSON.stringify({
+  const wish = args.modification?.wish.trim();
+  const sourceRecipe = args.modification?.sourceRecipe;
+  const baseUser = {
     dishes: locked,
-    menuDayCount,
-    peoplePerMeal: context.peoplePerMeal ?? 2,
-    availableEquipment,
-    instruction: wish
-    ? `Write a full recipe for EVERY locked dish. Keep names exactly. key must match. fridge_keep_days>=${menuDayCount}. required_equipment ⊆ availableEquipment. Apply modificationWish to ingredients/technique (PRIMARY). Prefer adapting sourceRecipe when provided.`
-      : `Write a full recipe for EVERY locked dish. Keep names exactly. key must match. fridge_keep_days>=${menuDayCount}. required_equipment ⊆ availableEquipment.`,
+    menuDayCount: args.menuDayCount,
+    peoplePerMeal: args.peoplePerMeal,
+    availableEquipment: args.availableEquipment,
     modificationWish: wish || undefined,
     sourceRecipe: sourceRecipe
       ? {
@@ -109,18 +140,58 @@ export async function expandMenuRecipes(
         body_text: sourceRecipe.bodyText.slice(0, 1200),
       }
       : undefined,
-    operatorTasteNotes: tasteNotesForPrompt(context.tasteNotes),
-  });
+    operatorTasteNotes: tasteNotesForPrompt(args.tasteNotes),
+  };
+  const baseInstruction = wish
+    ? `Write a full recipe for EVERY locked dish. Keep names exactly. key must match. fridge_keep_days>=${args.menuDayCount}. required_equipment ⊆ availableEquipment. Apply modificationWish to ingredients/technique (PRIMARY). Prefer adapting sourceRecipe when provided.`
+    : `Write a full recipe for EVERY locked dish. Keep names exactly. key must match. fridge_keep_days>=${args.menuDayCount}. required_equipment ⊆ availableEquipment.`;
 
+  let draftsByKey: Map<string, InventRecipeDraft> | null = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = await requestExpandDrafts(
+      args.chat,
+      baseUser,
+      attempt === 0
+        ? baseInstruction
+        : `${baseInstruction} Previous answer used required_equipment outside availableEquipment — rewrite methods so EVERY recipe uses ONLY availableEquipment (e.g. grill→pan/oven).`,
+      attempt === 0 ? 0.5 : 0.35,
+      plan,
+    );
+    if (!result.ok) {
+      if (result.reason === "openrouter") return result;
+      continue;
+    }
+    draftsByKey = result.draftsByKey;
+    if (expandDraftsFitEquipment(plan, draftsByKey, args.availableEquipment)) {
+      break;
+    }
+  }
+  if (!draftsByKey) return { ok: false, reason: "parse" };
+  return { ok: true, draftsByKey };
+}
+
+async function requestExpandDrafts(
+  chat: ChatCompletionsFn,
+  baseUser: Record<string, unknown>,
+  instruction: string,
+  temperature: number,
+  plan: PlannedDish[],
+): Promise<
+  | { ok: true; draftsByKey: Map<string, InventRecipeDraft> }
+  | { ok: false; reason: "openrouter" | "parse" }
+> {
   let content: string;
   try {
     content = await chat({
       messages: [
         { role: "system", content: EXPAND_SYSTEM },
-        { role: "user", content: userContent },
+        {
+          role: "user",
+          content: JSON.stringify({ ...baseUser, instruction }),
+        },
       ],
       responseFormatJson: true,
-      temperature: 0.5,
+      temperature,
     });
   } catch (err) {
     if (err instanceof OpenRouterError) {
@@ -128,10 +199,32 @@ export async function expandMenuRecipes(
     }
     throw err;
   }
-
   const draftsByKey = parseExpandRecipesJson(content, plan);
   if (!draftsByKey) return { ok: false, reason: "parse" };
+  return { ok: true, draftsByKey };
+}
 
+function expandDraftsFitEquipment(
+  plan: PlannedDish[],
+  draftsByKey: Map<string, InventRecipeDraft>,
+  availableEquipment: readonly EquipmentId[],
+): boolean {
+  return plan.every((dish) => {
+    const draft = draftsByKey.get(planKey(dish));
+    return (
+      draft &&
+      recipeFitsAvailableEquipment(draft.requiredEquipment, availableEquipment)
+    );
+  });
+}
+
+async function persistExpandedPlan(
+  supabase: SupabaseClient,
+  plan: PlannedDish[],
+  draftsByKey: Map<string, InventRecipeDraft>,
+  menuDayCount: number,
+  availableEquipment: readonly EquipmentId[],
+): Promise<ExpandMenuRecipesResult> {
   const expanded: ExpandedDish[] = [];
   const inventedIds: string[] = [];
 
@@ -159,7 +252,8 @@ export async function expandMenuRecipes(
   return { ok: true, dishes: expanded };
 }
 
-function prepareExpandDraft(
+/** Exported for logic verify. */
+export function prepareExpandDraft(
   draft: InventRecipeDraft | undefined,
   dish: PlannedDish,
   menuDayCount: number,
@@ -172,6 +266,10 @@ function prepareExpandDraft(
     draft.fridgeKeepDays = menuDayCount;
   }
   draft.bodyText = normalizeRecipeBodyText(draft.bodyText);
+  draft.requiredEquipment = clampRequiredEquipmentToAvailable(
+    draft.requiredEquipment,
+    availableEquipment,
+  );
   if (
     !recipeFitsAvailableEquipment(draft.requiredEquipment, availableEquipment)
   ) {

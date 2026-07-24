@@ -94,7 +94,7 @@ export function MealTypesPicker({
               "inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               chip.checked
-                ? "border-primary/25 bg-secondary font-medium text-primary shadow-sm"
+                ? "border-primary/25 bg-secondary text-primary shadow-sm"
                 : "border-transparent bg-background text-muted-foreground hover:text-foreground",
               (disabled || lockedOn) && "cursor-not-allowed opacity-60",
             )}

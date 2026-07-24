@@ -38,7 +38,7 @@ export function PeopleCountPicker({
               "flex-1 rounded-sm px-1 py-2 text-center text-sm transition-colors",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               selected
-                ? "bg-surface font-semibold text-primary shadow-sm"
+                ? "bg-surface text-primary shadow-sm"
                 : "text-muted-foreground hover:text-foreground",
               disabled && "cursor-not-allowed opacity-60",
             )}

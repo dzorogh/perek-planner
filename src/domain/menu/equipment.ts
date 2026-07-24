@@ -72,6 +72,75 @@ export function recipeFitsAvailableEquipment(
   return req.every((id) => avail.includes(id));
 }
 
+/**
+ * Equipment a dish NAME clearly implies (Russian cues).
+ * Used to catch plan names like «стейки на гриле» when grill is unavailable.
+ */
+export function equipmentImpliedByDishName(name: string): EquipmentId[] {
+  const n = name.trim().toLowerCase();
+  if (!n) return [];
+  const out: EquipmentId[] = [];
+  const add = (id: EquipmentId) => {
+    if (!out.includes(id)) out.push(id);
+  };
+  if (/(аэрогрил|air[\s-]?fry)/i.test(n)) add("air_fryer");
+  else if (/\bгрил[ьяею]|на гриле|гриль\b/i.test(n)) add("grill");
+  if (/мультиварк/i.test(n)) add("multicooker");
+  if (/скороварк|под давлением/i.test(n)) add("pressure_cooker");
+  if (/микроволн|\bсвч\b/i.test(n)) add("microwave");
+  return out;
+}
+
+/** Implied ids from the name that are missing from available. */
+export function dishNameEquipmentConflicts(
+  name: string,
+  available: readonly string[] | null | undefined,
+): EquipmentId[] {
+  const avail = normalizeEquipmentList(available);
+  if (!avail) return equipmentImpliedByDishName(name);
+  return equipmentImpliedByDishName(name).filter((id) => !avail.includes(id));
+}
+
+/**
+ * Keep required ⊆ available. If nothing remains, remap common appliances
+ * (grill→oven/stove, …) or fall back to stove / first available.
+ */
+export function clampRequiredEquipmentToAvailable(
+  required: readonly string[] | null | undefined,
+  available: readonly EquipmentId[],
+): EquipmentId[] {
+  const avail =
+    normalizeEquipmentList(available) ?? [...DEFAULT_AVAILABLE_EQUIPMENT];
+  const req = normalizeEquipmentList(required);
+  if (req) {
+    const kept = req.filter((id) => avail.includes(id));
+    if (kept.length > 0) return kept;
+  }
+  const prefer = (ids: readonly EquipmentId[]): EquipmentId[] | null => {
+    for (const id of ids) {
+      if (avail.includes(id)) return [id];
+    }
+    return null;
+  };
+  if (req?.includes("grill")) {
+    const mapped = prefer(["oven", "stove", "air_fryer"]);
+    if (mapped) return mapped;
+  }
+  if (req?.includes("air_fryer")) {
+    const mapped = prefer(["oven", "stove"]);
+    if (mapped) return mapped;
+  }
+  if (req?.includes("multicooker") || req?.includes("pressure_cooker")) {
+    const mapped = prefer(["stove", "oven"]);
+    if (mapped) return mapped;
+  }
+  if (req?.includes("microwave")) {
+    const mapped = prefer(["stove", "oven"]);
+    if (mapped) return mapped;
+  }
+  return prefer(["stove", "oven"]) ?? [avail[0]!];
+}
+
 export type EquipmentSelection = Record<EquipmentId, boolean>;
 
 export function selectionFromList(

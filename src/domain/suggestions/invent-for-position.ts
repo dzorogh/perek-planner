@@ -8,6 +8,7 @@ import {
   type MenuDayPair,
 } from "@/domain/menu/constants";
 import {
+  clampRequiredEquipmentToAvailable,
   recipeFitsAvailableEquipment,
   type EquipmentId,
 } from "@/domain/menu/equipment";
@@ -142,6 +143,12 @@ export async function inventForPosition(
 
   if (!passesPositionMealFit(draft, context)) {
     return { ok: false, reason: "parse" };
+  }
+  if (context.availableEquipment?.length) {
+    draft.requiredEquipment = clampRequiredEquipmentToAvailable(
+      draft.requiredEquipment,
+      context.availableEquipment,
+    );
   }
   if (
     !recipeFitsAvailableEquipment(

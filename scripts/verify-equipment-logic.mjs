@@ -51,6 +51,63 @@ function recipeFitsAvailableEquipment(required, available) {
   return req.every((id) => avail.includes(id));
 }
 
+function equipmentImpliedByDishName(name) {
+  const n = String(name || "")
+    .trim()
+    .toLowerCase();
+  if (!n) return [];
+  const out = [];
+  const add = (id) => {
+    if (!out.includes(id)) out.push(id);
+  };
+  if (/(аэрогрил|air[\s-]?fry)/i.test(n)) add("air_fryer");
+  else if (/\bгрил[ьяею]|на гриле|гриль\b/i.test(n)) add("grill");
+  if (/мультиварк/i.test(n)) add("multicooker");
+  if (/скороварк|под давлением/i.test(n)) add("pressure_cooker");
+  if (/микроволн|\bсвч\b/i.test(n)) add("microwave");
+  return out;
+}
+
+function dishNameEquipmentConflicts(name, available) {
+  const avail = normalizeEquipmentList(available);
+  if (!avail) return equipmentImpliedByDishName(name);
+  return equipmentImpliedByDishName(name).filter((id) => !avail.includes(id));
+}
+
+function clampRequiredEquipmentToAvailable(required, available) {
+  const avail = normalizeEquipmentList(available) ?? [
+    ...DEFAULT_AVAILABLE_EQUIPMENT,
+  ];
+  const req = normalizeEquipmentList(required);
+  if (req) {
+    const kept = req.filter((id) => avail.includes(id));
+    if (kept.length > 0) return kept;
+  }
+  const prefer = (ids) => {
+    for (const id of ids) {
+      if (avail.includes(id)) return [id];
+    }
+    return null;
+  };
+  if (req?.includes("grill")) {
+    const mapped = prefer(["oven", "stove", "air_fryer"]);
+    if (mapped) return mapped;
+  }
+  if (req?.includes("air_fryer")) {
+    const mapped = prefer(["oven", "stove"]);
+    if (mapped) return mapped;
+  }
+  if (req?.includes("multicooker") || req?.includes("pressure_cooker")) {
+    const mapped = prefer(["stove", "oven"]);
+    if (mapped) return mapped;
+  }
+  if (req?.includes("microwave")) {
+    const mapped = prefer(["stove", "oven"]);
+    if (mapped) return mapped;
+  }
+  return prefer(["stove", "oven"]) ?? [avail[0]];
+}
+
 let failed = 0;
 function check(name, cond) {
   if (cond) console.log(`PASS: ${name}`);
@@ -94,6 +151,36 @@ check(
 check(
   "fit fail unknown required",
   !recipeFitsAvailableEquipment(["toaster"], ["stove", "toaster"]),
+);
+check(
+  "name implies grill",
+  equipmentImpliedByDishName("Говяжьи стейки на гриле").join(",") === "grill",
+);
+check(
+  "name implies air_fryer not grill",
+  equipmentImpliedByDishName("Курица в аэрогриле").join(",") === "air_fryer",
+);
+check(
+  "name conflict when grill missing",
+  dishNameEquipmentConflicts("Стейки на гриле", ["stove", "oven"]).join(
+    ",",
+  ) === "grill",
+);
+check(
+  "name ok when grill available",
+  dishNameEquipmentConflicts("Стейки на гриле", ["stove", "grill"]).length ===
+    0,
+);
+check(
+  "clamp grill→oven",
+  clampRequiredEquipmentToAvailable(["grill"], ["stove", "oven"]).join(",") ===
+    "oven",
+);
+check(
+  "clamp keeps subset",
+  clampRequiredEquipmentToAvailable(["stove", "grill"], ["stove", "oven"]).join(
+    ",",
+  ) === "stove",
 );
 
 if (failed > 0) {

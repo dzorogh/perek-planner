@@ -24,7 +24,7 @@ export function PrimaryNav({ activeHref }: PrimaryNavProps) {
             className={cn(
               "text-[13px] transition-colors",
               isActive
-                ? "font-semibold text-primary"
+                ? "text-primary"
                 : "text-muted-foreground hover:text-foreground",
             )}
             aria-current={isActive ? "page" : undefined}

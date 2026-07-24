@@ -10,6 +10,7 @@ import {
 } from "@/domain/menu/constants";
 import {
   DEFAULT_AVAILABLE_EQUIPMENT,
+  dishNameEquipmentConflicts,
   normalizeEquipmentList,
   type EquipmentId,
 } from "@/domain/menu/equipment";
@@ -225,6 +226,30 @@ async function fillCookableSlots(
 
   let plan = planned.plan;
 
+  // 1b) Names that imply unavailable appliances (e.g. «на гриле» without grill).
+  const equipmentReplace = plan
+    .filter((d) => dishNameEquipmentConflicts(d.name, equipment).length > 0)
+    .map((d) => {
+      const missing = dishNameEquipmentConflicts(d.name, equipment);
+      return {
+        meal: d.meal,
+        dayPair: d.dayPair,
+        role: d.role,
+        reason: `Name implies ${missing.join(",")} but availableEquipment is only [${equipment.join(",")}]. Invent a clearly different name cookable with that set (no unavailable appliance words).`,
+      };
+    });
+  if (equipmentReplace.length > 0) {
+    const repaired = await repairMenuNamePlan(plan, equipmentReplace, {
+      dayCount,
+      tasteNotes,
+      availableEquipment: equipment,
+      chat: options.chat,
+    });
+    if (repaired.ok) {
+      plan = repaired.plan;
+    }
+  }
+
   // 2) Variety audit on names (before writing recipes).
   const audit = await analyzeMenuVariety(
     plan.map((d) => ({
@@ -241,6 +266,7 @@ async function fillCookableSlots(
     const repaired = await repairMenuNamePlan(plan, audit.replace, {
       dayCount,
       tasteNotes,
+      availableEquipment: equipment,
       chat: options.chat,
     });
     if (repaired.ok) {

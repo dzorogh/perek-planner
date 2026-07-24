@@ -69,7 +69,7 @@ export function PillNav({ activeHref = "/plan/menu" }: PillNavProps) {
               aria-describedby="plan-wizard-list-blocked"
               className={cn(
                 "cursor-not-allowed rounded-full px-3.5 py-1.5 text-[13px] text-muted-foreground/50",
-                isActive && "bg-surface font-semibold text-primary shadow-sm",
+                isActive && "bg-surface text-primary shadow-sm",
               )}
               title={UJ1_TITLE}
               onKeyDown={(event) => {
@@ -90,7 +90,7 @@ export function PillNav({ activeHref = "/plan/menu" }: PillNavProps) {
             className={cn(
               "rounded-full px-3.5 py-1.5 text-[13px] transition-colors",
               isActive
-                ? "bg-surface font-semibold text-primary shadow-sm"
+                ? "bg-surface text-primary shadow-sm"
                 : "text-muted-foreground hover:text-foreground",
             )}
             aria-current={isActive ? "page" : undefined}
