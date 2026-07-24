@@ -1,6 +1,6 @@
 # Menu Available Equipment Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** Implement via BMAD (`bmad-dev-story` or `bmad-quick-dev`) task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Do not use Superpowers.
 
 **Goal:** Let operators pick kitchen equipment when creating a menu; persist profile default + menu snapshot; hard-filter cookable recipes so AI invent/assign/resuggest only uses recipes whose `required_equipment` ⊆ selected set.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** Next.js 16 App Router, Supabase Postgres/RLS, server actions, OpenRouter invent prompts, Node verify scripts (`npm run verify:logic`).
 
-**Spec:** `docs/superpowers/specs/2026-07-25-menu-available-equipment-design.md`
+**Spec:** `_bmad-output/implementation-artifacts/spec-menu-available-equipment.md`
 
 ---
 

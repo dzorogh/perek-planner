@@ -37,9 +37,6 @@ export function CreateMenuDialog({
           <DialogTitle className="page-title text-center">
             Новое меню
           </DialogTitle>
-          <p className="mt-1.5 text-center text-sm text-muted-foreground">
-            Одна готовка · список ингредиентов для покупки.
-          </p>
         </DialogHeader>
         <CreateMenuForm onPendingChange={setPending} />
       </DialogContent>

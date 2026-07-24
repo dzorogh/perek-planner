@@ -1,0 +1,17 @@
+---
+description: Use BMAD only; never Superpowers workflows
+alwaysApply: true
+---
+
+# BMAD only — no Superpowers
+
+This project uses **BMAD** for planning, specs, stories, and implementation workflows.
+
+## Rules
+
+- Use only BMAD skills/agents under `.agents/skills/bmad-*` and config under `_bmad/`.
+- Put planning and implementation artifacts under `_bmad-output/` (per `_bmad/bmm/config.yaml`).
+- Do **not** invoke Superpowers skills, workflows, or conventions.
+- Do **not** create `docs/superpowers/` or any Superpowers-style plans/specs outside BMAD paths.
+
+If a task sounds like a Superpowers flow (brainstorm → design → plan → TDD), map it to the matching BMAD skill instead (e.g. `bmad-prd`, `bmad-spec`, `bmad-create-story`, `bmad-dev-story`, `bmad-quick-dev`).
