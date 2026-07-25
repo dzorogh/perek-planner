@@ -25,6 +25,7 @@ import {
 } from "@/domain/suggestions/errors";
 import { loadRecentMenuDishNames } from "@/domain/suggestions/history";
 import { analyzeMenuVariety } from "@/domain/suggestions/analyze-menu-variety";
+import { cookingMethodSpamReplaceTargets } from "@/domain/suggestions/cooking-method-variety";
 import { expandMenuRecipes } from "@/domain/suggestions/expand-menu-recipes";
 import {
   planKey,
@@ -43,7 +44,8 @@ import {
   looksLikeNoCookSnack,
 } from "@/domain/suggestions/meal-fit";
 import {
-  expandDishAssignments,
+  expandDishAssignmentsForMeal,
+  isCookableTemplateMeal,
   legacyFksFromDishes,
   mealDayPairKey,
   type SlotDishAssignment,
@@ -189,6 +191,82 @@ async function fillMenuSlots(
   }
 }
 
+async function refineMenuNamePlan(
+  initial: PlannedDish[],
+  ctx: {
+    dayCount: number;
+    tasteNotes: Awaited<ReturnType<typeof loadTasteNotes>>;
+    equipment: EquipmentId[];
+    chat?: ChatCompletionsFn;
+  },
+): Promise<PlannedDish[]> {
+  let plan = initial;
+  if (!ctx.tasteNotes) return plan;
+
+  const tryRepair = async (
+    targets: Parameters<typeof repairMenuNamePlan>[1],
+  ) => {
+    if (targets.length === 0) return;
+    const repaired = await repairMenuNamePlan(plan, targets, {
+      dayCount: ctx.dayCount,
+      tasteNotes: ctx.tasteNotes!,
+      availableEquipment: ctx.equipment,
+      chat: ctx.chat,
+    });
+    if (repaired.ok) plan = repaired.plan;
+  };
+
+  // Equipment + cooking-method spam: one repair call (same plan snapshot).
+  const equipmentTargets = plan
+    .filter((d) => dishNameEquipmentConflicts(d.name, ctx.equipment).length > 0)
+    .map((d) => {
+      const missing = dishNameEquipmentConflicts(d.name, ctx.equipment);
+      return {
+        meal: d.meal,
+        dayPair: d.dayPair,
+        plateRole: d.plateRole,
+        reason: `Name implies ${missing.join(",")} but availableEquipment is only [${ctx.equipment.join(",")}]. Invent a clearly different name cookable with that set (no unavailable appliance words).`,
+      };
+    });
+  await tryRepair(
+    dedupeReplaceTargets([
+      ...equipmentTargets,
+      ...cookingMethodSpamReplaceTargets(plan, 2),
+    ]),
+  );
+
+  const audit = await analyzeMenuVariety(
+    plan.map((d) => ({
+      meal: d.meal,
+      dayPair: d.dayPair,
+      plateRole: d.plateRole,
+      name: d.name,
+      recipeId: planKey(d),
+    })),
+    { chat: ctx.chat },
+  );
+  if (audit.ok && audit.replace.length > 0) {
+    await tryRepair(audit.replace);
+  }
+  return plan;
+}
+
+/** Keep first reason when the same meal×dayPair×plateRole appears twice. */
+function dedupeReplaceTargets(
+  targets: Parameters<typeof repairMenuNamePlan>[1],
+): Parameters<typeof repairMenuNamePlan>[1] {
+  const seen = new Set<string>();
+  const out: Parameters<typeof repairMenuNamePlan>[1] = [];
+  for (const t of targets) {
+    const plateRole = t.plateRole ?? "main";
+    const key = `${t.meal}:${t.dayPair[0]}-${t.dayPair[1]}:${plateRole}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+  }
+  return out;
+}
+
 async function fillCookableSlots(
   supabase: SupabaseClient,
   userId: string,
@@ -198,26 +276,25 @@ async function fillCookableSlots(
   options: GenerateMenuOptions & { meals: readonly MealSlot[] },
 ): Promise<void> {
   const now = options.now ?? new Date();
-  const previousMenusDishes = await loadRecentMenuDishNames(supabase, userId, {
-    excludeMenuId: menuId,
-  });
-  if (!previousMenusDishes) {
-    throw new SuggestionError("query", SUGGESTION_FAIL_RU.query);
-  }
-
-  const tasteNotes = await loadTasteNotes(supabase, userId);
-  if (!tasteNotes) {
-    throw new SuggestionError("query", SUGGESTIONS_RU.tasteNotesFail);
-  }
-
-  const slotByKey = await loadSlotKeyMap(supabase, menuId, dayCount, slotCount);
-
-  // 1) Names only — cheap plan for the whole menu.
   const equipment =
     normalizeEquipmentList(options.equipment) ?? [
       ...DEFAULT_AVAILABLE_EQUIPMENT,
     ];
 
+  // Independent DB reads — overlap latency before the first LLM call.
+  const [previousMenusDishes, tasteNotes, slotByKey] = await Promise.all([
+    loadRecentMenuDishNames(supabase, userId, { excludeMenuId: menuId }),
+    loadTasteNotes(supabase, userId),
+    loadSlotKeyMap(supabase, menuId, dayCount, slotCount),
+  ]);
+  if (!previousMenusDishes) {
+    throw new SuggestionError("query", SUGGESTION_FAIL_RU.query);
+  }
+  if (!tasteNotes) {
+    throw new SuggestionError("query", SUGGESTIONS_RU.tasteNotesFail);
+  }
+
+  // 1) Names only — cheap plan for the whole menu.
   const planned = await proposeMenuNamePlan(options.meals, {
     dayCount,
     previousMenusDishes,
@@ -231,57 +308,14 @@ async function fillCookableSlots(
     throw new SuggestionError(planned.reason, SUGGESTION_FAIL_RU[planned.reason]);
   }
 
-  let plan = planned.plan;
+  const plan = await refineMenuNamePlan(planned.plan, {
+    dayCount,
+    tasteNotes,
+    equipment,
+    chat: options.chat,
+  });
 
-  // 1b) Names that imply unavailable appliances (e.g. «на гриле» without grill).
-  const equipmentReplace = plan
-    .filter((d) => dishNameEquipmentConflicts(d.name, equipment).length > 0)
-    .map((d) => {
-      const missing = dishNameEquipmentConflicts(d.name, equipment);
-      return {
-        meal: d.meal,
-        dayPair: d.dayPair,
-        plateRole: d.plateRole,
-        reason: `Name implies ${missing.join(",")} but availableEquipment is only [${equipment.join(",")}]. Invent a clearly different name cookable with that set (no unavailable appliance words).`,
-      };
-    });
-  if (equipmentReplace.length > 0) {
-    const repaired = await repairMenuNamePlan(plan, equipmentReplace, {
-      dayCount,
-      tasteNotes,
-      availableEquipment: equipment,
-      chat: options.chat,
-    });
-    if (repaired.ok) {
-      plan = repaired.plan;
-    }
-  }
-
-  // 2) Variety audit on names (before writing recipes).
-  const audit = await analyzeMenuVariety(
-    plan.map((d) => ({
-      meal: d.meal,
-      dayPair: d.dayPair,
-      plateRole: d.plateRole,
-      name: d.name,
-      recipeId: planKey(d),
-    })),
-    { chat: options.chat },
-  );
-
-  if (audit.ok && audit.replace.length > 0) {
-    const repaired = await repairMenuNamePlan(plan, audit.replace, {
-      dayCount,
-      tasteNotes,
-      availableEquipment: equipment,
-      chat: options.chat,
-    });
-    if (repaired.ok) {
-      plan = repaired.plan;
-    }
-  }
-
-  // 3) Expand locked names → full recipes (one batched AI call) + persist.
+  // Expand locked names → full recipes (one batched AI call) + persist.
   const expanded = await expandMenuRecipes(supabase, plan, {
     menuDayCount: dayCount,
     peoplePerMeal: options.peopleCount,
@@ -358,6 +392,8 @@ function groupExpandedByMealDayPair(
 function flattenExpandedGroupToDishes(
   group: Array<PlannedDish & { recipeId: string }>,
 ): SlotDishAssignment[] {
+  const meal = group[0]?.meal;
+  if (!meal || !isCookableTemplateMeal(meal)) return [];
   // Prefer cover-declaring dishes so one-pots claim roles before sides.
   const ordered = [...group].sort(
     (a, b) => (b.coversRoles?.length ?? 0) - (a.coversRoles?.length ?? 0),
@@ -365,7 +401,8 @@ function flattenExpandedGroupToDishes(
   const dishRows: SlotDishAssignment[] = [];
   const seenRoles = new Set<PlateRole>();
   for (const d of ordered) {
-    for (const row of expandDishAssignments(
+    for (const row of expandDishAssignmentsForMeal(
+      meal,
       d.plateRole,
       d.recipeId,
       d.coversRoles,
@@ -384,10 +421,13 @@ async function loadSlotKeyMap(
   dayCount: number,
   slotCount: number,
 ): Promise<Map<string, SlotPrompt>> {
+  // Skeleton may also create meal=snack rows for the Перекус lane; cookable fill
+  // only uses non-snack slots (snacks are written via menu_snacks).
   const { data: slotRows, error: slotsError } = await supabase
     .from("menu_slots")
     .select("id, day_index, meal")
     .eq("menu_id", menuId)
+    .neq("meal", "snack")
     .order("day_index", { ascending: true });
 
   if (slotsError || !slotRows?.length || slotRows.length !== slotCount) {
@@ -436,8 +476,14 @@ async function assignPositionProposals(
   proposals: ProposedAssignment[],
   inventedIds: string[],
 ): Promise<void> {
-  const built = await buildCandidates(supabase, userId, menuId, now);
+  const [built, suppress] = await Promise.all([
+    buildCandidates(supabase, userId, menuId, now),
+    loadSuppressSets(supabase, userId),
+  ]);
   if (!built.ok) {
+    throw new SuggestionError("query", SUGGESTION_FAIL_RU.query);
+  }
+  if (!suppress) {
     throw new SuggestionError("query", SUGGESTION_FAIL_RU.query);
   }
   const nameById = new Map(
@@ -448,11 +494,6 @@ async function assignPositionProposals(
   const sanitized = dropHeavyHeavyCompanions(proposals, nameById);
   if (sanitized.length === 0) {
     throw new SuggestionError("parse", SUGGESTION_FAIL_RU.parse);
-  }
-
-  const suppress = await loadSuppressSets(supabase, userId);
-  if (!suppress) {
-    throw new SuggestionError("query", SUGGESTION_FAIL_RU.query);
   }
 
   const inventedSet = new Set(inventedIds);

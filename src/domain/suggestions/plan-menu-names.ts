@@ -8,6 +8,7 @@ import {
 import {
   isPlateRole,
   isTemplateMeal,
+  rolesForMeal,
   type PlateRole,
 } from "@/domain/menu/meal-templates";
 import {
@@ -15,11 +16,7 @@ import {
   uniqueExactNames,
 } from "@/domain/suggestions/dish-similarity";
 import {
-  isBreakfastMeal,
   isLunchDinnerMeal,
-  looksLikeBreakfastDish,
-  looksLikeLunchDinnerOnlyMain,
-  looksLikeNoCookSnack,
   stripHardcodedPairing,
 } from "@/domain/suggestions/meal-fit";
 import {
@@ -54,11 +51,11 @@ const PLAN_SYSTEM = `You design a Russian household batch-cook MENU as dish NAME
 Structure: menu days are hard pairs from the request (e.g. [1,2], [3,4], [5,6]). Each dish is cooked once and eaten on both days of its pair.
 Plate roles are FIXED by the app — invent a Russian dish name for each listed position. You do NOT invent meal architecture.
 
-Respond with a single JSON object:
+Respond with a single JSON object (minified — no pretty-print, no markdown fences):
 {"dishes":[{"meal":"breakfast"|"lunch"|"dinner"|...,"dayPair":[1,2]|[3,4]|[5,6],"plate_role":"main"|"soup"|"protein"|"veg"|"carb","name":"...","covers_roles":["protein","carb"]?}]}.
 
 Rules:
-- Include a dish for every requested position (meal×dayPair×plate_role), OR cover a role via covers_roles on another dish for the same meal×dayPair.
+- Include a dish for EVERY requested position (meal×dayPair×plate_role), OR cover a role via covers_roles on another dish for the same meal×dayPair. Never stop mid-array — the dishes list must be complete and valid JSON.
 - NEVER use plate_kind, companion, needs_companion, or role=companion. Roles are plate_role only.
 - Lunch positions: soup + protein + veg + carb. Dinner / late_dinner: protein + veg + carb (NO soup). Breakfast / second_breakfast / afternoon_snack: only main. NEVER invent snack / перекус here.
 - One-pots may set covers_roles (e.g. плов as protein with covers_roles:["protein","carb"]) — then do NOT invent a separate dish for covered roles. Lunch still needs soup+veg if those are uncovered.
@@ -67,6 +64,8 @@ Rules:
 - HARD variety: every protein/main must be a clearly different culinary form+base from the others. Word-order/topping swaps are duplicates (FORBIDDEN).
 - Same dayPair lunch vs dinner MUST use different forms.
 - At most TWO proteins/mains of the same culinary form across the whole menu.
+- HARD cooking-method variety: do NOT spam one method across the menu. Especially avoid repeating «запечённ… / запечённые… / в духовке» on many lines (protein+veg+carb). Mix methods: тушение, жарка/сковорода, варка/отваривание, сырой салат, плов/однокастрюльные, на пару. At most TWO dishes whose name signals the same method (e.g. запекание) in the whole menu.
+- Within one meal×dayPair, protein/veg/carb should usually use DIFFERENT methods (not three «запечённ…» on the same dinner).
 - Names in Russian, sentence case. No recipe steps. Honor operatorTasteNotes (constraint PRIMARY).
 - When availableEquipment is set: ONLY name dishes cookable with that closed set. HARD: never put unavailable appliances in the name.
 - Never invent snacks / перекусы here.`;
@@ -122,7 +121,7 @@ export async function proposeMenuNamePlan(
   const positions = describePositions(meals, dayPairs);
   const chat = context.chat ?? openRouterChatCompletions;
 
-  const userContent = JSON.stringify({
+  const baseUser = {
     meals: [...meals],
     dayCount: context.dayCount,
     dayPairs: dayPairs.map((p) => [...p]),
@@ -134,31 +133,41 @@ export async function proposeMenuNamePlan(
     avoidNames: uniqueExactNames(context.avoidNames ?? []).slice(0, 50),
     peoplePerMeal: context.peoplePerMeal ?? 2,
     availableEquipment: context.availableEquipment,
-    instruction:
-      "Invent dish NAMES for every listed plate_role position. Roles are FIXED by the app. Optional covers_roles for one-pots only. Strong variety: no near-duplicates; lunch≠dinner form on the same dayPair.",
     operatorTasteNotes: tasteNotesForPrompt(context.tasteNotes),
-  });
+  };
+  const baseInstruction =
+    "Invent dish NAMES for every listed plate_role position. Roles are FIXED by the app. Optional covers_roles for one-pots only. Strong variety: no near-duplicates; lunch≠dinner form on the same dayPair. Mix cooking methods — do not fill the menu with «запечённ…» names. Return complete minified JSON covering ALL positions.";
 
-  let content: string;
-  try {
-    content = await chat({
-      messages: [
-        { role: "system", content: PLAN_SYSTEM },
-        { role: "user", content: userContent },
-      ],
-      responseFormatJson: true,
-      temperature: 0.7,
-    });
-  } catch (err) {
-    if (err instanceof OpenRouterError) {
-      return { ok: false, reason: "openrouter" };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const instruction =
+      attempt === 0
+        ? baseInstruction
+        : `${baseInstruction} Previous answer was truncated or incomplete — emit ONE complete minified JSON object with a dish for every position.`;
+    let content: string;
+    try {
+      content = await chat({
+        messages: [
+          { role: "system", content: PLAN_SYSTEM },
+          {
+            role: "user",
+            content: JSON.stringify({ ...baseUser, instruction }),
+          },
+        ],
+        responseFormatJson: true,
+        temperature: attempt === 0 ? 0.7 : 0.45,
+      });
+    } catch (err) {
+      if (err instanceof OpenRouterError) {
+        return { ok: false, reason: "openrouter" };
+      }
+      throw err;
     }
-    throw err;
+
+    const plan = parseMenuNamePlanJson(content, meals, dayPairs);
+    if (plan) return { ok: true, plan };
   }
 
-  const plan = parseMenuNamePlanJson(content, meals, dayPairs);
-  if (!plan) return { ok: false, reason: "parse" };
-  return { ok: true, plan };
+  return { ok: false, reason: "parse" };
 }
 
 type PositionReplaceTarget = {
@@ -762,11 +771,11 @@ function parsePositionDishRow(
     position.dayPair;
   const rawName = typeof row.name === "string" ? row.name.trim() : "";
   const name = rawName ? stripHardcodedPairing(rawName).slice(0, 120) : "";
-  if (!name || looksLikeNoCookSnack(name)) return null;
+  if (!name) return null;
 
   const plateRole =
     parsePlateRoleField(row, meal) ?? position.plateRole;
-  if (!mealFitOk(meal, plateRole, name)) return null;
+  if (!plateRoleAllowedForMeal(meal, plateRole)) return null;
 
   return {
     meal,
@@ -813,12 +822,11 @@ function parsePlannedDishRow(
   if (!dayPair) return null;
   const rawName = typeof row.name === "string" ? row.name.trim() : "";
   const name = rawName ? stripHardcodedPairing(rawName).slice(0, 120) : "";
-  if (!name || looksLikeNoCookSnack(name)) return null;
+  if (!name) return null;
   const mealSlot = meal as MealSlot;
 
   const plateRole = parsePlateRoleField(row, mealSlot);
-  if (!plateRole) return null;
-  if (!mealFitOk(mealSlot, plateRole, name)) return null;
+  if (!plateRoleAllowedForMeal(mealSlot, plateRole)) return null;
 
   return {
     meal: mealSlot,
@@ -846,16 +854,20 @@ function parsePlateRoleField(
   return resolvePositionPlateRole(meal, raw);
 }
 
-function mealFitOk(meal: MealSlot, plateRole: PlateRole, name: string): boolean {
-  if (plateRole === "snack") return false;
-  if (isBreakfastMeal(meal) || meal === "afternoon_snack") {
-    if (plateRole !== "main") return false;
-    return !looksLikeLunchDinnerOnlyMain(name);
+/**
+ * Structural role check only — no name heuristics.
+ * Name-shape filters belong in assign ranking / prompts, not plan parse
+ * (false rejects turn a complete AI plan into «некорректный план»).
+ */
+function plateRoleAllowedForMeal(
+  meal: MealSlot,
+  plateRole: PlateRole | null,
+): plateRole is PlateRole {
+  if (!plateRole || plateRole === "snack") return false;
+  if (!isTemplateMeal(meal) || meal === "snack") {
+    return plateRole === "main";
   }
-  if (isLunchDinnerMeal(meal) && (plateRole === "protein" || plateRole === "main")) {
-    return !looksLikeBreakfastDish(name);
-  }
-  return true;
+  return rolesForMeal(meal).includes(plateRole);
 }
 
 function describePositions(

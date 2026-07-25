@@ -26,6 +26,8 @@ export function looksLikeNoCookSnack(name: string): boolean {
   if (!n) return false;
   if (n.includes("перекус")) return true;
   if (/(^|\s)(снек|snack)([ыа]|ов)?(\s|$)/.test(n)) return true;
+  // Plated salads belong on veg/main lines, not menu_snacks — even with fruit.
+  if (/(^|\s)салат/.test(n)) return false;
   // Ready-to-eat / no-cook pantry snacks (not cooked breakfast).
   if (containsSnackWord(n)) {
     // Cooked dishes with these words as toppings stay cookable

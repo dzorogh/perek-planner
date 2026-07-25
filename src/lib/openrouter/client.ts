@@ -11,16 +11,22 @@ export const OPENROUTER_CHAT_URL =
   "https://openrouter.ai/api/v1/chat/completions";
 
 /**
- * Default for menu invent/snacks — fast JSON + Nitro throughput routing.
+ * Default for menu invent/snacks — Gemini 2.5 Flash Lite via OpenRouter.
  * Override with OPENROUTER_MODEL.
  */
-export const DEFAULT_OPENROUTER_MODEL = "openai/gpt-4o-mini:nitro";
+export const DEFAULT_OPENROUTER_MODEL = "google/gemini-2.5-flash-lite";
 
 /**
  * Hard cap so generate action cannot hang indefinitely.
- * Chunked invent on gpt-4o-mini:nitro is usually well under this; keep as safety net.
+ * Keep as safety net for multi-step invent/expand.
  */
 export const OPENROUTER_TIMEOUT_MS = 90_000;
+
+/**
+ * Default completion budget. Gemini Flash Lite often pretty-prints JSON and
+ * truncates mid-object when the provider default max_tokens is too low.
+ */
+export const DEFAULT_OPENROUTER_MAX_TOKENS = 8192;
 
 export type OpenRouterChatMessage = {
   role: "system" | "user" | "assistant";
@@ -32,6 +38,8 @@ export type OpenRouterChatRequest = {
   messages: OpenRouterChatMessage[];
   temperature?: number;
   responseFormatJson?: boolean;
+  /** Completion token budget (OpenRouter `max_tokens`). */
+  maxTokens?: number;
 };
 
 export class OpenRouterError extends Error {
@@ -76,6 +84,7 @@ export async function openRouterChatCompletions(
     model,
     messages: request.messages,
     temperature: request.temperature ?? 0.4,
+    max_tokens: request.maxTokens ?? DEFAULT_OPENROUTER_MAX_TOKENS,
   };
   if (request.responseFormatJson) {
     body.response_format = { type: "json_object" };
@@ -138,6 +147,8 @@ export async function openRouterChatCompletions(
 
   let json: {
     choices?: Array<{
+      finish_reason?: string | null;
+      native_finish_reason?: string | null;
       message?: {
         content?: string | null | Array<{ type?: string; text?: string }>;
       };
@@ -157,7 +168,8 @@ export async function openRouterChatCompletions(
     throw new OpenRouterError("OpenRouter returned invalid JSON");
   }
 
-  const content = extractAssistantText(json.choices?.[0]?.message?.content);
+  const choice = json.choices?.[0];
+  const content = extractAssistantText(choice?.message?.content);
   if (!content) {
     void recordAiDebugEntry({
       model,
@@ -170,10 +182,16 @@ export async function openRouterChatCompletions(
     throw new OpenRouterError("OpenRouter returned empty content");
   }
 
+  const finishReason = choice?.finish_reason ?? choice?.native_finish_reason;
+  const truncated =
+    finishReason === "length" || finishReason === "MAX_TOKENS";
   void recordAiDebugEntry({
     model,
     durationMs: Date.now() - started,
-    ok: true,
+    ok: !truncated,
+    error: truncated
+      ? `Output truncated (finish_reason=${finishReason})`
+      : undefined,
     requestMessages: debugMessages,
     response: content,
   });

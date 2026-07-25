@@ -370,7 +370,10 @@ function legacyFksFromDishes(dishes) {
   const by = new Map(dishes.map((d) => [d.plateRole, d.recipeId]));
   const recipeId =
     by.get("protein") ?? by.get("main") ?? dishes[0]?.recipeId ?? null;
-  const companionRecipeId = by.get("carb") ?? null;
+  const carbId = by.get("carb") ?? null;
+  // One-pot covers: DB check menu_slots_companion_ne_main forbids companion=main.
+  const companionRecipeId =
+    carbId && recipeId && carbId !== recipeId ? carbId : null;
   return { recipeId, companionRecipeId };
 }
 
@@ -595,7 +598,8 @@ check(
   built.length === 2 &&
     built.every((p) => p.dishes.length === 4) &&
     built.every((p) => p.recipeId === "plov") &&
-    built.every((p) => p.companionRecipeId === "plov") &&
+    // One-pot: carb role uses plov in dishes, but legacy companion FK stays null.
+    built.every((p) => p.companionRecipeId == null) &&
     built.every(
       (p) =>
         p.dishes.some((d) => d.plateRole === "soup" && d.recipeId === "borscht") &&
@@ -965,6 +969,7 @@ function looksLikeNoCookSnack(name) {
   if (!n) return false;
   if (n.includes("перекус")) return true;
   if (/(^|\s)(снек|snack)([ыа]|ов)?(\s|$)/.test(n)) return true;
+  if (/(^|\s)салат/.test(n)) return false;
   return hasNoCookSnackKeyword(n) && !looksLikeCookedDish(n);
 }
 
@@ -1556,6 +1561,10 @@ check(
 check(
   "looksLikeNoCookSnack: ready-to-eat yogurt",
   looksLikeNoCookSnack("Йогурт натуральный"),
+);
+check(
+  "looksLikeNoCookSnack: veg salad with fruit stays cookable",
+  !looksLikeNoCookSnack("Салат из моркови и яблок"),
 );
 
 check(

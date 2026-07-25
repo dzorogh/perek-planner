@@ -128,7 +128,10 @@ export function legacyFksFromDishes(dishes: ReadonlyArray<SlotDishAssignment>): 
   const by = new Map(dishes.map((d) => [d.plateRole, d.recipeId]));
   const recipeId =
     by.get("protein") ?? by.get("main") ?? dishes[0]?.recipeId ?? null;
-  const companionRecipeId = by.get("carb") ?? null;
+  const carbId = by.get("carb") ?? null;
+  // One-pot covers protein+carb with the same recipe — DB forbids companion=main.
+  const companionRecipeId =
+    carbId && recipeId && carbId !== recipeId ? carbId : null;
   return { recipeId, companionRecipeId };
 }
 
@@ -140,6 +143,24 @@ export function expandDishAssignments(
 ): SlotDishAssignment[] {
   const roles = new Set<PlateRole>([plateRole, ...(coversRoles ?? [])]);
   return [...roles].map((r) => ({ plateRole: r, recipeId }));
+}
+
+/**
+ * Expand covers into dish rows, keeping only roles that exist on the meal template.
+ * Drops hallucinated breakfast covers like protein/veg/carb on plate_role=main.
+ */
+export function expandDishAssignmentsForMeal(
+  meal: TemplateMeal,
+  plateRole: PlateRole,
+  recipeId: string,
+  coversRoles: readonly PlateRole[] | null | undefined,
+): SlotDishAssignment[] {
+  const template = new Set(rolesForMeal(meal));
+  if (!template.has(plateRole)) return [];
+  const covers = filterCoversToMeal(meal, coversRoles);
+  return expandDishAssignments(plateRole, recipeId, covers).filter((row) =>
+    template.has(row.plateRole),
+  );
 }
 
 export function isCookableTemplateMeal(meal: MealSlot): meal is TemplateMeal {

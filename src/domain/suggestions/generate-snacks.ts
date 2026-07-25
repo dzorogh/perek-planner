@@ -51,12 +51,14 @@ Respond with a single JSON object:
 Rules:
 - Exactly the requested count of distinct snacks.
 - name: Russian, 1–4 words, sentence case (first letter capital), ready-to-eat / no cooking only (dairy, fruit, nuts, crackers, vegetables, bars, etc.).
+- Everyday supermarket labels only — what a person would put on a shopping list (йогурт, творожок, яблоко, банан, горсть миндаля, хлебцы с сыром, морковь с хумусом, кефир). Prefer concrete food ± simple pairing («Крекеры с авокадо», «Творог с ягодами»).
+- HARD ban on fantasy / poetic / marketing / brand-like titles: never «солнечные…», «волшебные…», «райские…», «энергетические…», «бомба», invented product names, cute metaphors.
 - Invent varied everyday options — do not copy a fixed catalog; invent fresh labels each time.
 - Never repeat items from avoid. Never invent cooked dishes (no soups, no hot meals).
 - Honor likedSnacks (prefer that style) and operatorTasteNotes: constraint is PRIMARY (generalize the rule); exampleDish is secondary only; ban = hard never; wish = soft prefer.
 - Consecutive menus must feel different: avoid recentlyUsed snacks and near-duplicates of them.
 - price_rub_per_serving: integer RUBLES for 1 adult portion (supermarket). Typical: fruit 30–80, dairy 40–100, nuts/cheese 80–180. NEVER above 250. NEVER send kopecks.
-- nutrition_per_serving: kcal (integer) and protein_g / fat_g / carbs_g for 1 adult portion. Realistic snack estimates.
+- nutrition_per_serving: kcal (integer) and protein_g / fat_g / carbs_g for 1 adult snack portion (not a full meal / not a whole package). Typical snack ~100–350 kcal.
 - OMIT price_rub_per_serving and/or any nutrition field when uncertain — do NOT send zeros as fillers.`;
 
 type SnackPreferences = {
@@ -120,12 +122,12 @@ async function proposeSnacksViaOpenRouter(
           recentlyUsed: [...prefs.recent],
           operatorTasteNotes: tasteNotesForPrompt(tasteNotes),
           instruction:
-            "Invent that many distinct no-cook snacks (each snack is eaten on two consecutive menu days). Include price and nutrition when confident. Respect avoid and operatorTasteNotes (constraint PRIMARY, exampleDish secondary). Lean toward the style of likedSnacks when present, but invent new labels — do not only repeat liked ones. Do not reuse recentlyUsed. Capitalize the first letter of each name.",
+            "Invent that many distinct no-cook snacks (each snack is eaten on two consecutive menu days). Everyday grocery labels only — no fantasy/poetic/marketing names. Include price and nutrition when confident. Respect avoid and operatorTasteNotes (constraint PRIMARY, exampleDish secondary). Lean toward the style of likedSnacks when present, but invent new labels — do not only repeat liked ones. Do not reuse recentlyUsed. Capitalize the first letter of each name.",
         }),
       },
     ],
     responseFormatJson: true,
-    temperature: 0.9,
+    temperature: 0.4,
   });
 
   return parseSnacksJson(content, count, avoid);
@@ -269,12 +271,13 @@ export async function generateSnacksForMenu(
     };
   }
 
-  const prefs = await loadSnackPreferences(supabase, userId, menuId);
+  const [prefs, tasteNotes] = await Promise.all([
+    loadSnackPreferences(supabase, userId, menuId),
+    loadTasteNotes(supabase, userId),
+  ]);
   if (!prefs) {
     return { ok: false, error: "Не удалось загрузить предпочтения по перекусам." };
   }
-
-  const tasteNotes = await loadTasteNotes(supabase, userId);
   if (!tasteNotes) {
     return { ok: false, error: SUGGESTIONS_RU.tasteNotesFail };
   }

@@ -43,9 +43,10 @@ Audit HARD rules (flag a position to replace when broken):
 2) Form spam: the same culinary form (рулеты/рулетики, котлеты, запеканка, плов, …) must not dominate the menu — at most TWO proteins/mains of the same form across the whole plan. Flag extras beyond two.
 3) Same protein+form twice on one dayPair across lunch+dinner is always a FAIL for dinner (prefer replacing dinner when lunch/dinner collide).
 4) Carb/veg sides: never a second meat/fish dish disguised as a side next to a meat/fish protein; never a near-duplicate of its own protein.
-5) Breakfast may reuse morning forms (омлет/сырники) across pairs — do NOT flag that. Do NOT flag Model C reuse of the exact same recipe across the two days of its pair.
+5) Cooking-method spam: the same method word family (запечённ/в духовке, жаренн, тушённ, …) on MORE THAN TWO dishes anywhere in the plan is a FAIL — flag extras (prefer veg/carb). Three «запечённ…» names on one dinner (protein+veg+carb) is always a FAIL for veg and/or carb.
+6) Breakfast may reuse morning forms (омлет/сырники) across pairs — do NOT flag that. Do NOT flag Model C reuse of the exact same recipe across the two days of its pair.
 
-When ok=false, list ONLY positions that must be reinvented (max 4). Prefer dinner over lunch when both of a same-day clash would work. Be strict on rolls/cutlets/casserole form spam.`;
+When ok=false, list ONLY positions that must be reinvented (max 4). Prefer dinner over lunch when both of a same-day clash would work. Be strict on rolls/cutlets/casserole form spam and «запечённ…» method spam.`;
 
 /**
  * AI variety audit of the drafted cookable menu. Returns positions to reinvent.

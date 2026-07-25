@@ -22,14 +22,7 @@ import {
   persistInventedRecipe,
   type InventRecipeDraft,
 } from "@/domain/suggestions/invent-recipes";
-import {
-  isBreakfastMeal,
-  isLunchDinnerMeal,
-  looksLikeBreakfastDish,
-  looksLikeLunchDinnerOnlyMain,
-  looksLikeNoCookSnack,
-  stripHardcodedPairing,
-} from "@/domain/suggestions/meal-fit";
+import { stripHardcodedPairing } from "@/domain/suggestions/meal-fit";
 import { resolvePositionPlateRole } from "@/domain/suggestions/plan-menu-names";
 import { parseCoversRoles } from "@/domain/suggestions/role-slots";
 import {
@@ -292,19 +285,12 @@ function passesPositionMealFit(
   draft: InventRecipeDraft,
   context: InventPositionContext & { plateRole: PlateRole },
 ): boolean {
-  const name = draft.name;
-  if (!normalizeDishName(name) || looksLikeNoCookSnack(name)) return false;
-  if (draft.plateRole !== context.plateRole) return false;
-  if (isBreakfastMeal(context.meal) || context.meal === "afternoon_snack") {
-    return context.plateRole === "main" && !looksLikeLunchDinnerOnlyMain(name);
-  }
-  if (
-    isLunchDinnerMeal(context.meal) &&
-    (context.plateRole === "protein" || context.plateRole === "main")
-  ) {
-    return !looksLikeBreakfastDish(name);
-  }
-  return true;
+  // Structural only: name + locked plate_role. Name-shape heuristics are
+  // prompt/assign concerns — hard reject here causes empty invent loops.
+  return (
+    Boolean(normalizeDishName(draft.name)) &&
+    draft.plateRole === context.plateRole
+  );
 }
 
 function extractJsonObject(text: string): string {

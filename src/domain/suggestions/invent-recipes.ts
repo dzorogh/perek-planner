@@ -21,8 +21,6 @@ import {
   isBreakfastMeal,
   looksLikeBreakfastDish,
   looksLikeHeavyAnimalProteinDish,
-  looksLikeLunchDinnerOnlyMain,
-  looksLikeNoCookSnack,
   mealsIncludeLunchOrDinner,
   stripHardcodedPairing,
 } from "@/domain/suggestions/meal-fit";
@@ -240,7 +238,6 @@ export async function inventAndPersistRecipes(
     exactAvoidNames,
     count,
     meals,
-    options.contextMeal,
   );
   if (drafts.length === 0) {
     return { ok: false, reason: "parse" };
@@ -325,21 +322,11 @@ function finalizeInventDraftsForPersist(
   exactAvoidNames: string[],
   count: number,
   meals: readonly MealSlot[],
-  contextMeal: MealSlot | undefined,
 ): InventRecipeDraft[] {
-  const filtered = drafts.filter((d) => {
-    if (looksLikeNoCookSnack(d.name)) return false;
-    if (
-      contextMeal &&
-      isBreakfastMeal(contextMeal) &&
-      looksLikeLunchDinnerOnlyMain(d.name)
-    ) {
-      return false;
-    }
-    return true;
-  });
+  // Do not hard-drop drafts by name heuristics (snack/breakfast shape) —
+  // that rejects valid AI output. Prefer via selectInventDraftsForMeals.
   const kept = selectInventDraftsForMeals(
-    filtered,
+    drafts,
     exactAvoidNames,
     count,
     meals,
@@ -607,8 +594,8 @@ export function parseInventRecipesJson(content: string): InventRecipeDraft[] {
 
     const requiredEquipment = normalizeEquipmentList(
       (row.required_equipment ?? row.requiredEquipment) as
-        | string[]
-        | undefined,
+      | string[]
+      | undefined,
     );
     if (!requiredEquipment) return;
 

@@ -20,7 +20,11 @@ import {
 } from "@/domain/suggestions/dish-similarity";
 import type { PlannedDish } from "@/domain/suggestions/plan-menu-names";
 import { planKey } from "@/domain/suggestions/plan-menu-names";
-import { parseCoversRoles } from "@/domain/suggestions/role-slots";
+import {
+  parseCoversRoles,
+  parseCoversRolesForMeal,
+} from "@/domain/suggestions/role-slots";
+import { isTemplateMeal } from "@/domain/menu/meal-templates";
 import {
   tasteNotesForPrompt,
   type TasteNote,
@@ -42,12 +46,12 @@ export type ExpandMenuRecipesResult =
 const EXPAND_SYSTEM = `You write full Russian home-cooking recipes for LOCKED dish names on a household meal planner.
 Names are final — do NOT rename, swap, or invent different dishes.
 Plate roles are FIXED by the app — write content for the given plate_role.
-Respond with a single JSON object:
+Respond with a single JSON object (minified — no pretty-print, no markdown fences):
 {"recipes":[{"key":"meal:1-2:protein","name":"...","body_text":"...","fridge_keep_days":N,"plate_role":"main"|"soup"|"protein"|"veg"|"carb","covers_roles":["protein","carb"]?,"required_equipment":["stove"|"oven"|"air_fryer"|"grill"|"multicooker"|"pressure_cooker"|"microwave",...],"price_rub_per_serving":N,"nutrition_per_serving":{"kcal":N,"protein_g":N,"fat_g":N,"carbs_g":N},"critical_ingredients":[{"name":"...","kind":"critical"|"pantry","amount":N,"unit":"g"|"ml"|"pcs"|"tsp"|"tbsp"},...]}]}.
 
 Rules:
-- One recipe object per input dish. key MUST match the input key exactly. name MUST match the locked name (same dish).
-- plate_role from input (PlateRole). Optional covers_roles for one-pots — prefer the plan's covers_roles when provided.
+- One recipe object per input dish. key MUST match the input key exactly. name MUST match the locked name (same dish). Never stop mid-array — recipes must be complete valid JSON.
+- plate_role from input (PlateRole). Optional covers_roles for one-pots on lunch/dinner protein only — prefer the plan's covers_roles when provided. NEVER set covers_roles on breakfast/main. NEVER invent covers that duplicate a separate dish for the same role.
 - fridge_keep_days integer 1..7, MUST be >= menuDayCount from the request.
 - required_equipment: non-empty; only stove|oven|air_fryer|grill|multicooker|pressure_cooker|microwave; MUST be ⊆ availableEquipment.
 - body_text: SHORT Russian steps, each on its own line numbered "1. ", "2. ", … Protein/main 3–5 steps, soup/veg/carb 2–4. Cooking/heating required.
@@ -229,9 +233,7 @@ async function persistExpandedPlan(
   menuDayCount: number,
   availableEquipment: readonly EquipmentId[],
 ): Promise<ExpandMenuRecipesResult> {
-  const expanded: ExpandedDish[] = [];
-  const inventedIds: string[] = [];
-
+  const prepared: Array<{ dish: PlannedDish; draft: InventRecipeDraft }> = [];
   for (const dish of plan) {
     const draft = prepareExpandDraft(
       draftsByKey.get(planKey(dish)),
@@ -240,22 +242,28 @@ async function persistExpandedPlan(
       availableEquipment,
     );
     if (!draft) {
-      await cleanup(supabase, inventedIds);
       return { ok: false, reason: "parse" };
     }
-
-    const persisted = await persistInventedRecipe(supabase, draft);
-    if (!persisted.ok) {
-      await cleanup(supabase, inventedIds);
-      return { ok: false, reason: "persist" };
-    }
-    inventedIds.push(persisted.recipeId);
-    expanded.push({
-      ...dish,
-      coversRoles: draft.coversRoles ?? dish.coversRoles ?? null,
-      recipeId: persisted.recipeId,
-    });
+    prepared.push({ dish, draft });
   }
+
+  // Independent recipe inserts — overlap DB latency.
+  const results = await Promise.all(
+    prepared.map(({ draft }) => persistInventedRecipe(supabase, draft)),
+  );
+  const inventedIds = results
+    .filter((r): r is { ok: true; recipeId: string } => r.ok)
+    .map((r) => r.recipeId);
+  if (results.some((r) => !r.ok)) {
+    await cleanup(supabase, inventedIds);
+    return { ok: false, reason: "persist" };
+  }
+
+  const expanded: ExpandedDish[] = prepared.map(({ dish, draft }, i) => ({
+    ...dish,
+    coversRoles: draft.coversRoles ?? dish.coversRoles ?? null,
+    recipeId: (results[i] as { ok: true; recipeId: string }).recipeId,
+  }));
 
   return { ok: true, dishes: expanded };
 }
@@ -270,11 +278,13 @@ export function prepareExpandDraft(
   if (!draft) return null;
   draft.name = dish.name.slice(0, 120);
   draft.plateRole = dish.plateRole;
-  // Prefer plan covers when AI omits.
-  draft.coversRoles =
-    dish.coversRoles ??
-    draft.coversRoles ??
-    parseCoversRoles(null);
+  // Prefer plan covers when AI omits; drop roles outside this meal's template
+  // (Gemini often invents protein/veg/carb covers on breakfast main).
+  const rawCovers =
+    dish.coversRoles ?? draft.coversRoles ?? parseCoversRoles(null);
+  draft.coversRoles = isTemplateMeal(dish.meal)
+    ? parseCoversRolesForMeal(dish.meal, rawCovers)
+    : null;
   if (draft.fridgeKeepDays < menuDayCount) {
     draft.fridgeKeepDays = menuDayCount;
   }

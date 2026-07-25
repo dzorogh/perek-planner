@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { maxMenuDaysForRecipes, passesFridgeKeep } from "@/domain/matching/eligibility";
-import { isMealSlot } from "@/domain/menu/constants";
+import { isMealSlot, mealAllowsCompanion } from "@/domain/menu/constants";
 import type { PlateRole } from "@/domain/menu/meal-templates";
 import {
   isTemplateMeal,
@@ -218,18 +218,38 @@ async function updateSlot(
   recipeId: string | null,
   companionRecipeId: string | null,
 ): Promise<boolean> {
+  // Need meal before FK write — companion is lunch/dinner only; never equals main.
+  const { data: slotRow, error: slotError } = await supabase
+    .from("menu_slots")
+    .select("id, meal")
+    .eq("id", slotId)
+    .eq("menu_id", menuId)
+    .maybeSingle();
+  if (slotError || !slotRow) return false;
+
+  const meal = slotRow.meal;
+  let companion = companionRecipeId;
+  if (
+    companion &&
+    (companion === recipeId ||
+      typeof meal !== "string" ||
+      !isMealSlot(meal) ||
+      !mealAllowsCompanion(meal))
+  ) {
+    companion = null;
+  }
+
   const { data, error } = await supabase
     .from("menu_slots")
     .update({
       recipe_id: recipeId,
-      companion_recipe_id: companionRecipeId,
+      companion_recipe_id: companion,
     })
     .eq("id", slotId)
     .eq("menu_id", menuId)
     .select("id, meal");
   if (error || !data?.length) return false;
 
-  const meal = data[0]?.meal;
   if (typeof meal === "string" && isMealSlot(meal) && meal !== "snack") {
     const adapted = adaptDishesToMeal(meal, dishes);
     const dishesOk = await replaceSlotDishes(supabase, slotId, meal, adapted);
