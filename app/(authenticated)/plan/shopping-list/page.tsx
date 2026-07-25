@@ -85,26 +85,32 @@ export default async function PlanShoppingListPage({
     }
   >();
   for (const slot of slots) {
-    if (slot.recipeId && slot.recipeName && !recipeMap.has(slot.recipeId)) {
+    for (const dish of slot.dishes) {
+      if (
+        dish.recipeId &&
+        dish.recipeName &&
+        !recipeMap.has(dish.recipeId)
+      ) {
+        recipeMap.set(dish.recipeId, {
+          id: dish.recipeId,
+          name: dish.recipeName,
+          bodyText: dish.recipeBodyText ?? "",
+          ingredients: dish.recipeIngredients,
+          value: dish.recipeValue ?? { ...EMPTY_PER_SERVING },
+        });
+      }
+    }
+    if (
+      slot.recipeId &&
+      slot.recipeName &&
+      !recipeMap.has(slot.recipeId)
+    ) {
       recipeMap.set(slot.recipeId, {
         id: slot.recipeId,
         name: slot.recipeName,
         bodyText: slot.recipeBodyText ?? "",
         ingredients: slot.recipeIngredients,
         value: slot.recipeValue ?? { ...EMPTY_PER_SERVING },
-      });
-    }
-    if (
-      slot.companionRecipeId &&
-      slot.companionRecipeName &&
-      !recipeMap.has(slot.companionRecipeId)
-    ) {
-      recipeMap.set(slot.companionRecipeId, {
-        id: slot.companionRecipeId,
-        name: slot.companionRecipeName,
-        bodyText: slot.companionRecipeBodyText ?? "",
-        ingredients: slot.companionRecipeIngredients,
-        value: slot.companionRecipeValue ?? { ...EMPTY_PER_SERVING },
       });
     }
   }

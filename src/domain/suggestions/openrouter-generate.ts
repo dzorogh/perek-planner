@@ -1,7 +1,4 @@
-import {
-  mealAllowsCompanion,
-  type MealSlot,
-} from "@/domain/menu/constants";
+import { type MealSlot } from "@/domain/menu/constants";
 import {
   isPlateRole,
   isTemplateMeal,
@@ -14,7 +11,8 @@ import {
   pickCompanionCandidate,
   type PlateAssignment,
 } from "@/domain/suggestions/plate-complete";
-import { legacyFksFromDishes } from "@/domain/suggestions/role-slots";
+import { primaryRecipeIdFromDishes } from "@/domain/suggestions/role-slots";
+import { isLunchDinnerMeal } from "@/domain/suggestions/meal-fit";
 import {
   tasteNotesForPrompt,
   type TasteNote,
@@ -34,8 +32,9 @@ export type SlotPrompt = {
 export type ProposedAssignment = {
   slotId: string;
   dishes: Array<{ plateRole: PlateRole; recipeId: string }>;
-  /** @deprecated shim — if present without dishes, convert via protein/main + carb */
+  /** @deprecated shim — if present without dishes, convert via protein/main (+ optional carb from companionRecipeId) */
   recipeId?: string;
+  /** @deprecated parse-only — never written to menu_slots; mapped into dishes[].carb */
   companionRecipeId?: string | null;
   plateKind?: "complete" | "needs_companion" | null;
 };
@@ -92,7 +91,7 @@ export async function proposeAssignmentsViaOpenRouter(
       isTemplateMeal(s.meal) && s.meal !== "snack"
         ? [...rolesForMeal(s.meal)]
         : (["main"] as PlateRole[]),
-    allowsCompanion: mealAllowsCompanion(s.meal),
+    isLunchDinner: isLunchDinnerMeal(s.meal),
   }));
 
   const userContent = JSON.stringify({
@@ -177,12 +176,11 @@ function parseAssignmentItem(
   const dishes = parseDishesField(row.dishes, allowedRecipeIds);
   if (dishes.length > 0) {
     seenSlots.add(slotId);
-    const fks = legacyFksFromDishes(dishes);
+    const { recipeId } = primaryRecipeIdFromDishes(dishes);
     return {
       slotId,
       dishes,
-      recipeId: fks.recipeId ?? dishes[0]!.recipeId,
-      companionRecipeId: fks.companionRecipeId,
+      recipeId: recipeId ?? dishes[0]!.recipeId,
     };
   }
 
@@ -191,9 +189,9 @@ function parseAssignmentItem(
   if (!allowedRecipeIds.has(recipeId)) return null;
   seenSlots.add(slotId);
 
-  const allowsCompanion = Boolean(meal && mealAllowsCompanion(meal));
+  const allowsCarb = Boolean(meal && isLunchDinnerMeal(meal));
   const rawCompanion = row.companionRecipeId;
-  const companionRecipeId = allowsCompanion &&
+  const carbRecipeId = allowsCarb &&
     typeof rawCompanion === "string" &&
     rawCompanion !== recipeId &&
     allowedRecipeIds.has(rawCompanion)
@@ -201,11 +199,11 @@ function parseAssignmentItem(
     : null;
 
   const legacyDishes: Array<{ plateRole: PlateRole; recipeId: string }> =
-    meal && mealAllowsCompanion(meal)
+    meal && isLunchDinnerMeal(meal)
       ? [
         { plateRole: "protein", recipeId },
-        ...(companionRecipeId
-          ? [{ plateRole: "carb" as const, recipeId: companionRecipeId }]
+        ...(carbRecipeId
+          ? [{ plateRole: "carb" as const, recipeId: carbRecipeId }]
           : []),
       ]
       : [{ plateRole: "main", recipeId }];
@@ -214,7 +212,6 @@ function parseAssignmentItem(
     slotId,
     dishes: legacyDishes,
     recipeId,
-    companionRecipeId,
   };
 }
 
@@ -274,13 +271,12 @@ export function deterministicAssignments(
   const base = assignWithBatchVariety(slots, assignPool).map((p) => {
     const meal =
       slots.find((s) => s.slotId === p.slotId)?.meal ?? "breakfast";
-    const primaryRole: PlateRole = mealAllowsCompanion(meal) ? "protein" : "main";
-    if (!mealAllowsCompanion(meal)) {
+    const primaryRole: PlateRole = isLunchDinnerMeal(meal) ? "protein" : "main";
+    if (!isLunchDinnerMeal(meal)) {
       return {
         slotId: p.slotId,
         dishes: [{ plateRole: primaryRole, recipeId: p.recipeId! }],
         recipeId: p.recipeId,
-        companionRecipeId: null as string | null,
       };
     }
     const companionId = pickCompanionCandidate(
@@ -299,7 +295,6 @@ export function deterministicAssignments(
       slotId: p.slotId,
       dishes,
       recipeId: p.recipeId,
-      companionRecipeId: companionId,
     };
   });
   return normalizePlateAssignments(slots, base);

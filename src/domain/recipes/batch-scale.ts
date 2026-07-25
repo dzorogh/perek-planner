@@ -9,7 +9,6 @@ export type RecipeBatchScale = {
 
 type SlotLike = {
   recipeId: string | null;
-  companionRecipeId?: string | null;
   /** All dish recipe ids on the slot (soup/veg/carb/…). */
   dishRecipeIds?: readonly (string | null | undefined)[] | null;
   dishes?: ReadonlyArray<{ recipeId: string | null }> | null;
@@ -18,9 +17,7 @@ type SlotLike = {
 };
 
 function slotUsesRecipe(slot: SlotLike, recipeId: string): boolean {
-  if (slot.recipeId === recipeId || slot.companionRecipeId === recipeId) {
-    return true;
-  }
+  if (slot.recipeId === recipeId) return true;
   if (slot.dishRecipeIds?.includes(recipeId)) return true;
   if (slot.dishes?.some((d) => d.recipeId === recipeId)) return true;
   return false;
@@ -28,8 +25,8 @@ function slotUsesRecipe(slot: SlotLike, recipeId: string): boolean {
 
 /**
  * Batch scale for a recipe on a menu — matches shopping-list aggregation
- * (amount_per_serving × each slot's servings, summed). Counts main,
- * companion, and role-labeled dish placements.
+ * (amount_per_serving × each slot's servings, summed). Counts primary
+ * shim and role-labeled dish placements.
  */
 export function recipeBatchScale(
   slots: readonly SlotLike[],
@@ -45,8 +42,7 @@ export function recipeBatchScale(
       Number.isFinite(slot.servings) && slot.servings >= 1
         ? Math.trunc(slot.servings)
         : 2;
-    // If the same recipe is somehow both main and companion (blocked by DB),
-    // still count once per slot.
+    // Count once per slot even if the recipe covers multiple plate roles.
     totalServings += people;
     days.add(slot.dayIndex);
     peopleCounts.push(people);

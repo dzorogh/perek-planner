@@ -60,43 +60,27 @@ function shimDish(
   };
 }
 
-function legacyDishesFromFks(
+/** Optional shim: primary recipe_id → protein/main when dishes[] empty. */
+function primaryShimDishes(
   slot: MenuSlotView,
   template: readonly PlateRole[],
 ): MenuSlotDishView[] {
-  const dishes: MenuSlotDishView[] = [];
+  if (!slot.recipeId) return [];
   const primaryRole: PlateRole = template.includes("protein")
     ? "protein"
     : (template[0] ?? "main");
-  if (slot.recipeId) {
-    dishes.push(
-      shimDish(
-        slot,
-        primaryRole,
-        template.indexOf(primaryRole),
-        slot.recipeId,
-        slot.recipeName,
-        slot.recipeBodyText,
-        slot.recipeIngredients,
-        slot.recipeValue,
-      ),
-    );
-  }
-  if (slot.companionRecipeId && template.includes("carb")) {
-    dishes.push(
-      shimDish(
-        slot,
-        "carb",
-        template.indexOf("carb"),
-        slot.companionRecipeId,
-        slot.companionRecipeName,
-        slot.companionRecipeBodyText,
-        slot.companionRecipeIngredients,
-        slot.companionRecipeValue,
-      ),
-    );
-  }
-  return dishes;
+  return [
+    shimDish(
+      slot,
+      primaryRole,
+      template.indexOf(primaryRole),
+      slot.recipeId,
+      slot.recipeName,
+      slot.recipeBodyText,
+      slot.recipeIngredients,
+      slot.recipeValue,
+    ),
+  ];
 }
 
 function primaryDishByRole(
@@ -135,7 +119,7 @@ function roleLinesForSlot(slot: MenuSlotView): Array<{
     : ["main"];
 
   const sourceDishes =
-    slot.dishes.length > 0 ? slot.dishes : legacyDishesFromFks(slot, template);
+    slot.dishes.length > 0 ? slot.dishes : primaryShimDishes(slot, template);
   const primaryByRole = primaryDishByRole(sourceDishes);
   const rolesFilledByCover = rolesCoveredByOnePots(sourceDishes);
 

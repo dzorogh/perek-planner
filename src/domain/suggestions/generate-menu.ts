@@ -46,7 +46,7 @@ import {
 import {
   expandDishAssignmentsForMeal,
   isCookableTemplateMeal,
-  legacyFksFromDishes,
+  primaryRecipeIdFromDishes,
   mealDayPairKey,
   type SlotDishAssignment,
 } from "@/domain/suggestions/role-slots";
@@ -359,7 +359,7 @@ export function buildProposalsFromExpanded(
   for (const group of groups.values()) {
     const first = group[0]!;
     const dishRows = flattenExpandedGroupToDishes(group);
-    const fks = legacyFksFromDishes(dishRows);
+    const { recipeId } = primaryRecipeIdFromDishes(dishRows);
     for (const day of first.dayPair) {
       const slot = slotByKey.get(`${day}:${first.meal}`);
       if (!slot) {
@@ -368,8 +368,7 @@ export function buildProposalsFromExpanded(
       proposals.push({
         slotId: slot.slotId,
         dishes: dishRows,
-        recipeId: fks.recipeId ?? dishRows[0]?.recipeId,
-        companionRecipeId: fks.companionRecipeId,
+        recipeId: recipeId ?? dishRows[0]?.recipeId,
       });
     }
   }
@@ -456,12 +455,11 @@ function dropHeavyHeavyCompanions(
       looksLikeHeavyAnimalProteinDish(carbName)
     ) {
       const next = dishes.filter((d) => d.plateRole !== "carb");
-      const fks = legacyFksFromDishes(next);
+      const { recipeId } = primaryRecipeIdFromDishes(next);
       return {
         ...p,
         dishes: next,
-        recipeId: fks.recipeId ?? p.recipeId,
-        companionRecipeId: null,
+        recipeId: recipeId ?? p.recipeId,
       };
     }
     return p;

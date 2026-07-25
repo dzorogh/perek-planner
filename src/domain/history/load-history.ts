@@ -63,7 +63,7 @@ type HistRecipeJoin = HistRecipe | HistRecipe[] | null | undefined;
 
 type ScaleSlot = {
   recipeId: string | null;
-  companionRecipeId?: string | null;
+  dishes?: ReadonlyArray<{ recipeId: string | null }>;
   dayIndex: number;
   servings: number;
 };
@@ -72,8 +72,7 @@ type SlotScaleMeta = {
   menuId: string;
   dayIndex: number;
   servings: number;
-  mainId: string | null;
-  companionId: string | null;
+  primaryId: string | null;
 };
 
 function mergeDishRecipesIntoHistory(
@@ -86,8 +85,10 @@ function mergeDishRecipesIntoHistory(
   recipeMetaByMenu: Map<string, Map<string, RecipeMeta>>,
   seenRecipe: Map<string, Set<string>>,
   scaleSlotsByMenu: Map<string, ScaleSlot[]>,
+  slotsWithDishes: Set<string>,
   unwrapHist: (recipes: HistRecipeJoin) => HistRecipe | null,
 ): void {
+  const scaledOnSlot = new Set<string>();
   for (const d of dishRows) {
     const slotId = d.menu_slot_id as string;
     const menuId = slotIdToMenu.get(slotId);
@@ -96,6 +97,7 @@ function mergeDishRecipesIntoHistory(
       d.recipes as HistRecipe | HistRecipe[] | null | undefined,
     );
     if (!recipe?.id) continue;
+    slotsWithDishes.add(slotId);
     let meta = recipeMetaByMenu.get(menuId);
     if (!meta) {
       meta = new Map();
@@ -117,12 +119,9 @@ function mergeDishRecipesIntoHistory(
 
     const slotMeta = slotScaleMeta.get(slotId);
     if (!slotMeta) continue;
-    if (
-      recipe.id === slotMeta.mainId ||
-      recipe.id === slotMeta.companionId
-    ) {
-      continue;
-    }
+    const dedupeKey = `${slotId}:${recipe.id}`;
+    if (scaledOnSlot.has(dedupeKey)) continue;
+    scaledOnSlot.add(dedupeKey);
     const scaleSlots = scaleSlotsByMenu.get(menuId) ?? [];
     scaleSlots.push({
       recipeId: recipe.id,
@@ -163,9 +162,8 @@ export async function loadHistory(
     supabase
       .from("menu_slots")
       .select(
-        `id, menu_id, recipe_id, companion_recipe_id, day_index, servings,
-         recipes!menu_slots_recipe_id_fkey(${RECIPE_HISTORY_WITH_INGREDIENTS_SELECT}),
-         companion:recipes!menu_slots_companion_recipe_id_fkey(${RECIPE_HISTORY_WITH_INGREDIENTS_SELECT})`,
+        `id, menu_id, recipe_id, day_index, servings,
+         recipes!menu_slots_recipe_id_fkey(${RECIPE_HISTORY_WITH_INGREDIENTS_SELECT})`,
       )
       .in("menu_id", menuIds),
     supabase
@@ -266,37 +264,18 @@ export async function loadHistory(
     if (!row.menu_id) return;
 
     const main = unwrapHist(row.recipes as HistRecipe | HistRecipe[] | null);
-    const companion = unwrapHist(
-      (row as { companion?: HistRecipe | HistRecipe[] | null }).companion,
-    );
-
     const dayIndex = typeof row.day_index === "number" ? row.day_index : 1;
     const servings = typeof row.servings === "number" ? row.servings : 2;
-    const mainId = main?.id ?? row.recipe_id ?? null;
-    const companionId =
-      companion?.id ??
-      (typeof row.companion_recipe_id === "string"
-        ? row.companion_recipe_id
-        : null);
+    const primaryId = main?.id ?? row.recipe_id ?? null;
 
     if (typeof row.id === "string") {
       slotScaleMeta.set(row.id, {
         menuId: row.menu_id,
         dayIndex,
         servings,
-        mainId,
-        companionId,
+        primaryId,
       });
     }
-
-    const scaleSlots = scaleSlotsByMenu.get(row.menu_id) ?? [];
-    scaleSlots.push({
-      recipeId: mainId,
-      companionRecipeId: companionId,
-      dayIndex,
-      servings,
-    });
-    scaleSlotsByMenu.set(row.menu_id, scaleSlots);
 
     let meta = recipeMetaByMenu.get(row.menu_id);
     if (!meta) {
@@ -310,19 +289,19 @@ export async function loadHistory(
       seenRecipe.set(row.menu_id, seen);
     }
 
-    [main, companion].forEach((recipe) => {
-      if (!recipe?.id) return;
-      if (!meta.has(recipe.id)) {
-        meta.set(recipe.id, {
-          name: recipe.name,
-          bodyText: recipe.body_text ?? "",
-          ingredients: mapIngredientRows(recipe.critical_ingredients),
+    if (main?.id) {
+      if (!meta.has(main.id)) {
+        meta.set(main.id, {
+          name: main.name,
+          bodyText: main.body_text ?? "",
+          ingredients: mapIngredientRows(main.critical_ingredients),
         });
       }
-      if (!seen.has(recipe.id)) seen.add(recipe.id);
-    });
+      seen.add(main.id);
+    }
   });
 
+  const slotsWithDishes = new Set<string>();
   mergeDishRecipesIntoHistory(
     dishRows,
     slotIdToMenu,
@@ -330,8 +309,21 @@ export async function loadHistory(
     recipeMetaByMenu,
     seenRecipe,
     scaleSlotsByMenu,
+    slotsWithDishes,
     unwrapHist,
   );
+
+  // Primary recipe_id shim for slots without dish rows.
+  for (const [slotId, meta] of slotScaleMeta) {
+    if (slotsWithDishes.has(slotId) || !meta.primaryId) continue;
+    const scaleSlots = scaleSlotsByMenu.get(meta.menuId) ?? [];
+    scaleSlots.push({
+      recipeId: meta.primaryId,
+      dayIndex: meta.dayIndex,
+      servings: meta.servings,
+    });
+    scaleSlotsByMenu.set(meta.menuId, scaleSlots);
+  }
 
   recipeMetaByMenu.forEach((meta, menuId) => {
     const scaleSlots = scaleSlotsByMenu.get(menuId) ?? [];

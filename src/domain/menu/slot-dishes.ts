@@ -16,25 +16,6 @@ export type SlotDishWrite =
   | { plateRole: PlateRole; recipeId: string; snackLabel?: never }
   | { plateRole: "snack"; snackLabel: string; recipeId?: never };
 
-/** Map legacy main+companion assign onto Harvard / main roles for a meal. */
-export function legacyPairToDishWrites(
-  meal: MealSlot,
-  recipeId: string,
-  companionRecipeId: string | null,
-): SlotDishWrite[] {
-  if (meal === "snack") {
-    return [];
-  }
-  if (meal === "lunch" || meal === "dinner" || meal === "late_dinner") {
-    const out: SlotDishWrite[] = [{ plateRole: "protein", recipeId }];
-    if (companionRecipeId) {
-      out.push({ plateRole: "carb", recipeId: companionRecipeId });
-    }
-    return out;
-  }
-  return [{ plateRole: "main", recipeId }];
-}
-
 /**
  * Upsert full cookable dish set for a slot; delete stale template roles not
  * in the write set. Never snack. Upsert before delete (no wipe-then-fail).
@@ -83,24 +64,6 @@ export async function replaceSlotDishes(
     if (delError) return false;
   }
   return true;
-}
-
-/**
- * Legacy main+companion dual-write via replaceSlotDishes.
- * Prefer replaceSlotDishes with full Harvard roles from invent/assign.
- */
-export async function replaceCookableDishes(
-  supabase: SupabaseClient,
-  slotId: string,
-  meal: MealSlot,
-  recipeId: string,
-  companionRecipeId: string | null,
-): Promise<boolean> {
-  const writes = legacyPairToDishWrites(meal, recipeId, companionRecipeId).filter(
-    (w): w is Extract<SlotDishWrite, { recipeId: string }> =>
-      "recipeId" in w && typeof w.recipeId === "string",
-  );
-  return replaceSlotDishes(supabase, slotId, meal, writes);
 }
 
 /** Upsert snack label dish on a snack meal slot. */

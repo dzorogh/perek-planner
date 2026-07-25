@@ -1,10 +1,8 @@
-import {
-  mealAllowsCompanion,
-  type MealSlot,
-} from "@/domain/menu/constants";
+import type { MealSlot } from "@/domain/menu/constants";
 import type { PlateRole } from "@/domain/menu/meal-templates";
 import type { SuggestionCandidate } from "@/domain/suggestions/candidates";
 import {
+  isLunchDinnerMeal,
   looksLikeCompanionOnly,
   looksLikeHeavyAnimalProteinDish,
   looksLikeProteinDish,
@@ -13,7 +11,7 @@ import type {
   ProposedAssignment,
   SlotPrompt,
 } from "@/domain/suggestions/openrouter-generate";
-import { legacyFksFromDishes } from "@/domain/suggestions/role-slots";
+import { primaryRecipeIdFromDishes } from "@/domain/suggestions/role-slots";
 
 export type PlateKind = "complete" | "needs_companion";
 
@@ -25,8 +23,8 @@ export type PickCompanionOptions = {
 };
 
 /**
- * Normalize proposals to dishes[] (+ legacy FK shim).
- * Legacy recipeId/companion → dishes; dishes[] pass through (identity).
+ * Normalize proposals to dishes[] (+ optional primary recipeId shim).
+ * Legacy recipeId (+ optional companion → carb dish) → dishes; dishes[] pass through.
  */
 export function normalizePlateAssignments(
   slots: SlotPrompt[],
@@ -41,18 +39,17 @@ function normalizeOne(
   meal: MealSlot | undefined,
 ): ProposedAssignment {
   if (proposal.dishes?.length) {
-    const fks = legacyFksFromDishes(proposal.dishes);
+    const { recipeId } = primaryRecipeIdFromDishes(proposal.dishes);
     return {
       slotId: proposal.slotId,
       dishes: proposal.dishes,
-      recipeId: fks.recipeId ?? proposal.recipeId ?? proposal.dishes[0]!.recipeId,
-      companionRecipeId: fks.companionRecipeId,
+      recipeId: recipeId ?? proposal.recipeId ?? proposal.dishes[0]!.recipeId,
     };
   }
 
   const recipeId = proposal.recipeId;
   if (!recipeId) {
-    return { slotId: proposal.slotId, dishes: [], recipeId: "", companionRecipeId: null };
+    return { slotId: proposal.slotId, dishes: [], recipeId: "" };
   }
 
   const dishes = legacyPairToDishes(
@@ -60,12 +57,11 @@ function normalizeOne(
     recipeId,
     proposal.companionRecipeId ?? null,
   );
-  const fks = legacyFksFromDishes(dishes);
+  const { recipeId: primaryId } = primaryRecipeIdFromDishes(dishes);
   return {
     slotId: proposal.slotId,
     dishes,
-    recipeId: fks.recipeId ?? recipeId,
-    companionRecipeId: fks.companionRecipeId,
+    recipeId: primaryId ?? recipeId,
   };
 }
 
@@ -74,7 +70,7 @@ function legacyPairToDishes(
   recipeId: string,
   companionRecipeId: string | null,
 ): Array<{ plateRole: PlateRole; recipeId: string }> {
-  if (!meal || !mealAllowsCompanion(meal)) {
+  if (!meal || !isLunchDinnerMeal(meal)) {
     return [{ plateRole: "main", recipeId }];
   }
   const out: Array<{ plateRole: PlateRole; recipeId: string }> = [
@@ -143,5 +139,5 @@ export function parsePlateKind(raw: unknown): PlateKind | null {
 }
 
 export function mealNeedsPlateKind(meal: MealSlot): boolean {
-  return mealAllowsCompanion(meal);
+  return isLunchDinnerMeal(meal);
 }

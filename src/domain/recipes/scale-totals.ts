@@ -61,9 +61,7 @@ type SlotLike = {
   dayIndex?: number;
   servings: number;
   recipeId: string | null;
-  companionRecipeId?: string | null;
   recipeValue?: RecipePerServingValue | null;
-  companionRecipeValue?: RecipePerServingValue | null;
   dishes?: ReadonlyArray<{
     recipeId: string | null;
     recipeValue?: RecipePerServingValue | null;
@@ -126,18 +124,14 @@ function accumulateSlotDishes(
     }
     return next;
   }
-  let next = acc;
   if (slot.recipeId) {
-    next = accumulateValue(next, slot.recipeValue, servings);
+    return accumulateValue(acc, slot.recipeValue, servings);
   }
-  if (slot.companionRecipeId) {
-    next = accumulateValue(next, slot.companionRecipeValue, servings);
-  }
-  return next;
+  return acc;
 }
 
 /**
- * Sum menu totals across role dishes (or legacy main + companion) + snacks.
+ * Sum menu totals across role dishes (or primary recipe shim) + snacks.
  * Only known values contribute; missing fields stay null if never seen.
  */
 export function sumMenuTotals(

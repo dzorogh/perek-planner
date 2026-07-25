@@ -1,4 +1,4 @@
-import { MEAL_SLOTS, mealAllowsCompanion, type MealSlot } from "@/domain/menu/constants";
+import { MEAL_SLOTS, type MealSlot } from "@/domain/menu/constants";
 import type { PlateRole } from "@/domain/menu/meal-templates";
 import type { SuggestionCandidate } from "@/domain/suggestions/candidates";
 import { pickUnusedCandidate } from "@/domain/suggestions/dish-similarity";
@@ -14,7 +14,7 @@ import type {
   ProposedAssignment,
   SlotPrompt,
 } from "@/domain/suggestions/openrouter-generate";
-import { legacyFksFromDishes } from "@/domain/suggestions/role-slots";
+import { primaryRecipeIdFromDishes } from "@/domain/suggestions/role-slots";
 
 /** Share of cookable slots whose recipe appears on 2+ distinct days. */
 export const MIN_BATCH_SLOT_RATIO = 0.5;
@@ -25,7 +25,10 @@ export const MIN_BATCH_SLOT_RATIO = 0.5;
  */
 function primaryRecipeId(p: ProposedAssignment): string | undefined {
   if (p.recipeId) return p.recipeId;
-  return legacyFksFromDishes(p.dishes ?? []).recipeId ?? p.dishes?.[0]?.recipeId;
+  return (
+    primaryRecipeIdFromDishes(p.dishes ?? []).recipeId ??
+    p.dishes?.[0]?.recipeId
+  );
 }
 
 export function isMenuUniformAcrossDays(
@@ -194,7 +197,7 @@ function assignMealBatch(
     const recipeId = selectBatchRecipeId(
       index, mealSlots.length, mealIndex, candidateCount, primary, secondary,
     );
-    const plateRole: PlateRole = mealAllowsCompanion(meal) ? "protein" : "main";
+    const plateRole: PlateRole = isLunchDinnerMeal(meal) ? "protein" : "main";
     out.push({
       slotId: slot.slotId,
       recipeId,
@@ -264,7 +267,6 @@ export function enforceDayVariety(
       ) {
         return fallback.map((p) => ({
           ...p,
-          companionRecipeId: null,
           dishes: p.dishes ?? [{ plateRole: "main" as const, recipeId: p.recipeId! }],
         }));
       }
@@ -275,16 +277,13 @@ export function enforceDayVariety(
     const mainUnchanged = originalMain.get(p.slotId) === p.recipeId;
     if (mainUnchanged) {
       const dishes = dishesBySlot.get(p.slotId) ?? p.dishes ?? [];
-      const fks = legacyFksFromDishes(dishes);
       return {
         ...p,
         dishes: dishes.length > 0 ? dishes : p.dishes,
-        companionRecipeId: fks.companionRecipeId,
       };
     }
     return {
       ...p,
-      companionRecipeId: null,
       dishes: p.dishes,
     };
   });
@@ -342,7 +341,6 @@ export function ensureHeavyAnimalOnLunchDinner(
             ? {
                 ...p,
                 recipeId: heavy.recipeId,
-                companionRecipeId: null,
                 dishes: [{ plateRole: "protein" as const, recipeId: heavy.recipeId }],
               }
             : p,
@@ -359,7 +357,6 @@ export function ensureHeavyAnimalOnLunchDinner(
   const forced: ProposedAssignment = {
     slotId: fallbackSlot.slotId,
     recipeId: fallbackHeavy,
-    companionRecipeId: null,
     dishes: [{ plateRole: "protein", recipeId: fallbackHeavy }],
   };
   if (proposals.some((p) => p.slotId === fallbackSlot.slotId)) {
@@ -723,7 +720,7 @@ function toProposals(
     .filter((s) => bySlot.has(s.slotId))
     .map((s) => {
       const recipeId = bySlot.get(s.slotId)!;
-      const plateRole: PlateRole = mealAllowsCompanion(s.meal)
+      const plateRole: PlateRole = isLunchDinnerMeal(s.meal)
         ? "protein"
         : "main";
       return {

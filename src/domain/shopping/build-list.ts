@@ -62,7 +62,6 @@ function collectRecipeServings(
   slots: ReadonlyArray<{
     id: string;
     recipe_id: string | null;
-    companion_recipe_id: string | null;
     servings: number;
   }>,
   dishRows: ReadonlyArray<{
@@ -88,11 +87,11 @@ function collectRecipeServings(
   );
 
   for (const s of slots) {
-    // Prefer dishes for slots that have them; else legacy columns.
+    // Prefer dishes for slots that have them; else primary recipe_id shim.
     if (slotsWithDishRecipe.has(s.id)) continue;
     const servings = servingsBySlot.get(s.id) ?? 2;
-    for (const id of [s.recipe_id, s.companion_recipe_id]) {
-      if (typeof id === "string") out.push({ recipeId: id, servings });
+    if (typeof s.recipe_id === "string") {
+      out.push({ recipeId: s.recipe_id, servings });
     }
   }
 
@@ -200,7 +199,7 @@ async function loadShoppingSources(
   const [slotsRes, snacksRes] = await Promise.all([
     supabase
       .from("menu_slots")
-      .select("id, recipe_id, companion_recipe_id, servings")
+      .select("id, recipe_id, servings")
       .eq("menu_id", menuId),
     supabase.from("menu_snacks").select("id, label").eq("menu_id", menuId),
   ]);
@@ -212,7 +211,6 @@ async function loadShoppingSources(
   const slots = (slotsRes.data ?? []) as Array<{
     id: string;
     recipe_id: string | null;
-    companion_recipe_id: string | null;
     servings: number;
   }>;
   const slotIds = slots.map((s) => s.id);

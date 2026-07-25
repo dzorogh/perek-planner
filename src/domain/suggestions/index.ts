@@ -40,6 +40,7 @@ export {
 } from "@/domain/suggestions/expand-menu-recipes";
 export {
   clearCompanionForSlot,
+  clearDishRoleForSlot,
   modifyRecipeAcrossMenu,
   refuseAndReplaceRecipeAcrossMenu,
   resuggestRecipeAcrossMenu,
@@ -64,11 +65,11 @@ export {
   emitRoleSlots,
   expandDishAssignments,
   filterCoversToMeal,
-  legacyFksFromDishes,
   mealDayPairKey,
   mergeDishAssignments,
   parseCoversRoles,
   parseCoversRolesForMeal,
+  primaryRecipeIdFromDishes,
   remainingOpenRoles,
   roleSlotKey,
 } from "@/domain/suggestions/role-slots";

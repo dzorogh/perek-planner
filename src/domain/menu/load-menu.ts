@@ -46,18 +46,12 @@ export type MenuSlotView = {
   meal: MealSlot;
   /** Role-labeled dishes (Story 6.1). */
   dishes: MenuSlotDishView[];
-  /** Legacy shim: primary cookable dish (protein or main). */
+  /** Optional primary shim: protein/main from dishes (or recipe_id). */
   recipeId: string | null;
   recipeName: string | null;
   recipeBodyText: string | null;
   recipeIngredients: RecipeIngredientView[];
   recipeValue: RecipePerServingValue;
-  /** Legacy shim: secondary cookable dish if present. */
-  companionRecipeId: string | null;
-  companionRecipeName: string | null;
-  companionRecipeBodyText: string | null;
-  companionRecipeIngredients: RecipeIngredientView[];
-  companionRecipeValue: RecipePerServingValue;
   servings: number;
 };
 
@@ -136,9 +130,8 @@ export async function loadMenuSkeleton(
     supabase
       .from("menu_slots")
       .select(
-        `id, day_index, meal, recipe_id, companion_recipe_id, servings,
+        `id, day_index, meal, recipe_id, servings,
          recipes!menu_slots_recipe_id_fkey(${RECIPE_WITH_INGREDIENTS_SELECT}),
-         companion:recipes!menu_slots_companion_recipe_id_fkey(${RECIPE_WITH_INGREDIENTS_SELECT}),
          menu_slot_dishes(
            id, plate_role, sort_order, recipe_id, snack_label,
            recipes(covers_roles, ${RECIPE_WITH_INGREDIENTS_SELECT})
@@ -223,10 +216,8 @@ function mapMenuSlot(
     day_index: number;
     meal: unknown;
     recipe_id: string | null;
-    companion_recipe_id: string | null;
     servings: unknown;
     recipes: unknown;
-    companion?: unknown;
     menu_slot_dishes?: unknown;
   },
   dayCount: number,
@@ -242,9 +233,7 @@ function mapMenuSlot(
 
   const dishes = mapDishes(row.menu_slot_dishes);
   const recipe = unwrapRecipe(row.recipes as RecipeJoinInput);
-  const companion = unwrapRecipe(row.companion as RecipeJoinInput);
   const primary = pickPrimaryDish(dishes);
-  const secondary = pickSecondaryDish(dishes, primary?.id ?? null);
 
   return {
     id: row.id,
@@ -258,14 +247,6 @@ function mapMenuSlot(
       primary?.recipeIngredients ??
       mapIngredientRows(recipe?.critical_ingredients),
     recipeValue: dishOrJoinValue(primary, recipe),
-    companionRecipeId: secondary?.recipeId ?? row.companion_recipe_id ?? null,
-    companionRecipeName: secondary?.recipeName ?? companion?.name ?? null,
-    companionRecipeBodyText:
-      secondary?.recipeBodyText ?? companion?.body_text ?? null,
-    companionRecipeIngredients:
-      secondary?.recipeIngredients ??
-      mapIngredientRows(companion?.critical_ingredients),
-    companionRecipeValue: dishOrJoinValue(secondary, companion),
     servings: typeof row.servings === "number" ? row.servings : 2,
   };
 }
@@ -301,22 +282,6 @@ function pickPrimaryDish(dishes: MenuSlotDishView[]): MenuSlotDishView | null {
     dishes.find((d) => d.plateRole === "protein" || d.plateRole === "main") ??
     dishes.find((d) => d.recipeId) ??
     null
-  );
-}
-
-function pickSecondaryDish(
-  dishes: MenuSlotDishView[],
-  primaryId: string | null,
-): MenuSlotDishView | null {
-  return (
-    dishes.find(
-      (d) =>
-        d.recipeId &&
-        d.id !== primaryId &&
-        (d.plateRole === "carb" ||
-          d.plateRole === "veg" ||
-          d.plateRole === "soup"),
-    ) ?? null
   );
 }
 

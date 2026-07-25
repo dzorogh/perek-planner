@@ -30,22 +30,16 @@ function namedDishesFromSlot(slot: MenuSlotView): NamedDish[] {
         : [],
     );
   }
-  const out: NamedDish[] = [];
   if (slot.recipeId && slot.recipeName) {
-    out.push({
-      id: slot.recipeId,
-      name: slot.recipeName,
-      value: slot.recipeValue,
-    });
+    return [
+      {
+        id: slot.recipeId,
+        name: slot.recipeName,
+        value: slot.recipeValue,
+      },
+    ];
   }
-  if (slot.companionRecipeId && slot.companionRecipeName) {
-    out.push({
-      id: slot.companionRecipeId,
-      name: slot.companionRecipeName,
-      value: slot.companionRecipeValue,
-    });
-  }
-  return out;
+  return [];
 }
 
 /** Aggregate cookable recipes in a menu with how many distinct days each spans. */

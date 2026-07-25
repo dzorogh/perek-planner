@@ -88,7 +88,7 @@ export async function suggestCompanionAction(
 
   const result = await withMenuMutationLock(menuId, () =>
     resuggestSlotForUser(supabase, user.id, menuId, slotId, {
-      target: "companion",
+      target: "carb",
     }),
   );
   if (!result.ok) return result;

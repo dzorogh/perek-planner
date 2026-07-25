@@ -55,11 +55,16 @@ function sumMenuTotals(slots, options = {}) {
 
   for (const slot of slots) {
     const servings = resolveServings(slot.servings, 2);
+    if (slot.dishes && slot.dishes.length > 0) {
+      for (const dish of slot.dishes) {
+        if (dish.recipeId) {
+          acc = accumulateValue(acc, dish.recipeValue, servings);
+        }
+      }
+      continue;
+    }
     if (slot.recipeId) {
       acc = accumulateValue(acc, slot.recipeValue, servings);
-    }
-    if (slot.companionRecipeId) {
-      acc = accumulateValue(acc, slot.companionRecipeValue, servings);
     }
   }
 
@@ -164,15 +169,16 @@ const totals = sumMenuTotals([
     servings: 2,
     recipeId: "a",
     recipeValue: chicken,
-    companionRecipeId: "b",
-    companionRecipeValue: omelette,
+    dishes: [
+      { recipeId: "a", recipeValue: chicken },
+      { recipeId: "b", recipeValue: omelette },
+    ],
   },
   {
     servings: 2,
     recipeId: "a",
     recipeValue: chicken,
-    companionRecipeId: null,
-    companionRecipeValue: null,
+    dishes: [{ recipeId: "a", recipeValue: chicken }],
   },
 ]);
 assert(

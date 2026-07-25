@@ -111,15 +111,6 @@ export function isMealSlot(value: string): value is MealSlot {
   return (MEAL_SLOTS as readonly string[]).includes(value);
 }
 
-/** Meals that may get an optional companion (гарнир / protein). */
-export const COMPANION_MEALS = ["lunch", "dinner", "late_dinner"] as const;
-
-export type CompanionMeal = (typeof COMPANION_MEALS)[number];
-
-export function mealAllowsCompanion(meal: MealSlot): boolean {
-  return (COMPANION_MEALS as readonly string[]).includes(meal);
-}
-
 /** Parse selected cookable meals from form (never includes snack). */
 export function parseSelectedMeals(raw: FormDataEntryValue | null): MealSlot[] {
   if (typeof raw !== "string" || !raw.trim()) return [];

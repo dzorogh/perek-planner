@@ -120,19 +120,14 @@ export function mergeDishAssignments(
   return [...kept, ...incoming];
 }
 
-/** Legacy menu_slots FK shim until Story 6.3 UI reads dishes only. */
-export function legacyFksFromDishes(dishes: ReadonlyArray<SlotDishAssignment>): {
-  recipeId: string | null;
-  companionRecipeId: string | null;
-} {
+/** Primary menu_slots.recipe_id shim from dishes (protein/main only). */
+export function primaryRecipeIdFromDishes(
+  dishes: ReadonlyArray<SlotDishAssignment>,
+): { recipeId: string | null } {
   const by = new Map(dishes.map((d) => [d.plateRole, d.recipeId]));
   const recipeId =
     by.get("protein") ?? by.get("main") ?? dishes[0]?.recipeId ?? null;
-  const carbId = by.get("carb") ?? null;
-  // One-pot covers protein+carb with the same recipe — DB forbids companion=main.
-  const companionRecipeId =
-    carbId && recipeId && carbId !== recipeId ? carbId : null;
-  return { recipeId, companionRecipeId };
+  return { recipeId };
 }
 
 /** Expand one recipe id across its primary role + covers into dish rows. */
