@@ -1,5 +1,5 @@
 /**
- * Anon RLS deny for shopping_lists / shopping_list_lines (Epic 3).
+ * Anon RLS deny for shopping_lists (curated selection).
  * Usage: node --env-file=.env.local scripts/verify-rls-shopping-lists.mjs
  */
 
@@ -19,11 +19,28 @@ const supabase = createClient(url, anon);
 await assertAnonDenied(
   supabase,
   "shopping_lists",
-  "Apply supabase/migrations/20260720090000_slot_servings_shopping_lists.sql first.",
+  "Apply supabase/migrations/20260726170000_shopping_list_curated_selection.sql first.",
 );
-await assertAnonDenied(
-  supabase,
-  "shopping_list_lines",
-  "Apply supabase/migrations/20260720090000_slot_servings_shopping_lists.sql first.",
-);
+
+// Snapshot lines must be dropped — only PGRST205 (missing relation) is PASS.
+{
+  const { error } = await supabase.from("shopping_list_lines").select("*").limit(1);
+  if (!error) {
+    console.error(
+      "FAIL: shopping_list_lines still readable — drop via curated_selection migration.",
+    );
+    process.exit(1);
+  }
+  if (error.code === "PGRST205") {
+    console.log("PASS: shopping_list_lines table absent");
+  } else {
+    console.error(
+      "FAIL: shopping_list_lines must be dropped (expected PGRST205), got:",
+      error.code,
+      error.message,
+    );
+    process.exit(1);
+  }
+}
+
 console.log("All shopping_lists RLS anon checks passed");

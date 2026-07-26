@@ -154,3 +154,9 @@ All previously open items were closed in the deferred-work sweep. Strikethrough 
 - source_spec: `_bmad-output/implementation-artifacts/spec-cross-tab-replace-busy.md`
   summary: Import domain helpers in verify-menu-live-sync-logic instead of duplicated copies.
   evidence: Existing verify:* scripts often duplicate pure helpers; drift risk called out in review.
+
+## Deferred from: spec-shopping-list-persist-realtime.md (2026-07-26)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-shopping-list-persist-realtime.md`
+  summary: Refresh shopping SOURCE when recipe critical_ingredients change without a menu-row mutation.
+  evidence: ShoppingLiveSync listens to shopping_lists + menu tables only; ingredient edits on a shared recipe can leave open shopping-list quantities stale until a menu event or reload.

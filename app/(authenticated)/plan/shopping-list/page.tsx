@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { ShoppingListClient } from "@/components/shopping/shopping-list-view";
 import { loadMenuSkeleton } from "@/domain/menu/load-menu";
+import { loadShoppingSelection } from "@/domain/shopping/load-shopping-selection";
 import { buildShoppingSourceFromMenu } from "@/domain/shopping/source";
 import { createClient } from "@/lib/supabase/server";
 
@@ -54,6 +55,12 @@ export default async function PlanShoppingListPage({
   }
 
   const source = buildShoppingSourceFromMenu(menu);
+  const selection = await loadShoppingSelection(supabase, menuId);
+  const initialProductKeys = selection.ok ? selection.productKeys : [];
+  const loadError = selection.ok
+    ? null
+    : (selection.error ?? "Не удалось загрузить сохранённый список.");
+  const slotIds = menu.slots.map((slot) => slot.id);
 
   return (
     <div className="w-full">
@@ -64,7 +71,12 @@ export default async function PlanShoppingListPage({
           заказа.
         </p>
       </div>
-      <ShoppingListClient source={source} />
+      <ShoppingListClient
+        source={source}
+        initialProductKeys={initialProductKeys}
+        slotIds={slotIds}
+        loadError={loadError}
+      />
       <Link
         href={`/plan/menu?menuId=${encodeURIComponent(menuId)}`}
         className="mt-8 inline-block text-sm font-medium text-primary underline-offset-4 hover:underline"

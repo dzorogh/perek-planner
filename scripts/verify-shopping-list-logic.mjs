@@ -99,6 +99,39 @@ function removeCuratedProduct(cart, contributed, productKey) {
   }
 }
 
+function pruneOrphanProductKeys(dishes, productKeys) {
+  const present = new Set();
+  for (const dish of dishes) {
+    for (const product of dish.products) {
+      present.add(product.productKey);
+    }
+  }
+  const seen = new Set();
+  const kept = [];
+  for (const key of productKeys) {
+    if (!present.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    kept.push(key);
+  }
+  return kept;
+}
+
+function hydrateCuratedCartFromKeys(dishes, productKeys) {
+  const cart = new Map();
+  const contributed = new Set();
+  const appliedKeys = [];
+  for (const key of pruneOrphanProductKeys(dishes, productKeys)) {
+    addProductAcrossAllDishes(cart, contributed, dishes, key);
+    if (cart.has(key)) appliedKeys.push(key);
+  }
+  return { cart, contributed, appliedKeys };
+}
+
+/** Mirror of shopping-live-sync-logic shouldApplyRemoteShoppingRefresh */
+function shouldApplyRemoteShoppingRefresh(isPending) {
+  return !isPending;
+}
+
 /** Aggregate amount_per_serving × servings by name+unit (legacy flat snapshot). */
 function scaledIngredientAmount(row, servings) {
   if (!row.unit || row.amount_per_serving <= 0) return null;
@@ -296,4 +329,36 @@ if (formatQuantity(2.4, "pcs") !== "3 шт") {
   process.exit(1);
 }
 
-console.log("PASS: shopping list quantity + curated merge + copy logic");
+const orphanKey = shoppingProductKey("исчезнувший", "g");
+const hydrate = hydrateCuratedCartFromKeys(dishes, [saltKey, orphanKey, saltKey]);
+if (
+  hydrate.appliedKeys.length !== 1 ||
+  hydrate.appliedKeys[0] !== saltKey ||
+  hydrate.cart.get(saltKey)?.quantityAmount !== 16
+) {
+  console.error("FAIL hydrate applies live keys + qty", hydrate);
+  process.exit(1);
+}
+if (hydrate.cart.has(orphanKey)) {
+  console.error("FAIL hydrate must drop orphans", hydrate.cart);
+  process.exit(1);
+}
+
+const pruned = pruneOrphanProductKeys(dishes, [saltKey, orphanKey, saltKey]);
+if (pruned.length !== 1 || pruned[0] !== saltKey) {
+  console.error("FAIL prune orphans + dedupe", pruned);
+  process.exit(1);
+}
+
+if (shouldApplyRemoteShoppingRefresh(false) !== true) {
+  console.error("FAIL idle → apply remote shopping refresh");
+  process.exit(1);
+}
+if (shouldApplyRemoteShoppingRefresh(true) !== false) {
+  console.error("FAIL pending → skip remote shopping refresh");
+  process.exit(1);
+}
+
+console.log(
+  "PASS: shopping list quantity + curated merge + hydrate/prune + copy logic",
+);

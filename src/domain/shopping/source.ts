@@ -275,6 +275,49 @@ export function removeCuratedProduct(
   }
 }
 
+/** Product keys that still appear in at least one SOURCE dish. */
+export function pruneOrphanProductKeys(
+  dishes: readonly ShoppingSourceDish[],
+  productKeys: readonly string[] | null | undefined,
+): string[] {
+  const present = new Set<string>();
+  for (const dish of dishes) {
+    for (const product of dish.products) {
+      present.add(product.productKey);
+    }
+  }
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  for (const key of productKeys ?? []) {
+    if (!present.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    kept.push(key);
+  }
+  return kept;
+}
+
+/**
+ * Rebuild curated cart + contribution set by replaying keys against live SOURCE.
+ * Orphan keys (no matching dish product) are skipped.
+ */
+export function hydrateCuratedCartFromKeys(
+  dishes: readonly ShoppingSourceDish[],
+  productKeys: readonly string[] | null | undefined,
+): {
+  cart: Map<string, CuratedShoppingLine>;
+  contributed: Set<string>;
+  appliedKeys: string[];
+} {
+  const cart = new Map<string, CuratedShoppingLine>();
+  const contributed = new Set<string>();
+  const appliedKeys: string[] = [];
+  for (const key of pruneOrphanProductKeys(dishes, productKeys)) {
+    addProductAcrossAllDishes(cart, contributed, dishes, key);
+    if (cart.has(key)) appliedKeys.push(key);
+  }
+  return { cart, contributed, appliedKeys };
+}
+
 export function formatCuratedShoppingCopy(
   lines: readonly CuratedShoppingLine[],
 ): string {
