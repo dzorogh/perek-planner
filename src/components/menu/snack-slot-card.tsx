@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import { CommentDialog } from "@/components/feedback/comment-dialog";
+import { clearBodyPointerEvents } from "@/components/menu/clear-body-pointer-events";
 import { useMenuSlotBusy } from "@/components/menu/menu-slot-busy";
 import { SlotDishLine } from "@/components/menu/slot-dish-line";
 import { SlotGeneratingOverlay } from "@/components/menu/slot-generating-overlay";
@@ -86,10 +87,37 @@ function SnackSlotActions({
   inline?: boolean;
 }): ReactNode {
   const empty = !snack;
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  useLayoutEffect(() => {
+    if (!busy) return;
+    setMenuOpen(false);
+    clearBodyPointerEvents();
+  }, [busy]);
+
+  function closeMenu() {
+    setMenuOpen(false);
+    clearBodyPointerEvents();
+  }
+
+  function openRefuseDialog() {
+    closeMenu();
+    requestAnimationFrame(() => {
+      clearBodyPointerEvents();
+      setRefuseOpen(true);
+    });
+  }
+
   const menu = (
     <>
       <div className={inline ? "relative z-10" : "absolute right-2 top-2 z-10"}>
-        <DropdownMenu>
+        <DropdownMenu
+          open={menuOpen}
+          onOpenChange={(open) => {
+            setMenuOpen(open);
+            if (!open) clearBodyPointerEvents();
+          }}
+        >
           <DropdownMenuTrigger asChild>
             <Button
               type="button"
@@ -111,7 +139,10 @@ function SnackSlotActions({
               <DropdownMenuItem
                 disabled={busy}
                 className="focus:bg-background focus:text-primary"
-                onSelect={onSuggest}
+                onSelect={() => {
+                  closeMenu();
+                  onSuggest();
+                }}
               >
                 {suggestPending ? "Подбираем…" : "Предложить"}
               </DropdownMenuItem>
@@ -120,7 +151,10 @@ function SnackSlotActions({
                 <DropdownMenuItem
                   disabled={busy}
                   className="focus:bg-background focus:text-primary"
-                  onSelect={onResuggest}
+                  onSelect={() => {
+                    closeMenu();
+                    onResuggest();
+                  }}
                 >
                   {resuggestPending || sharedBusyLabel
                     ? "Заменяем…"
@@ -129,7 +163,7 @@ function SnackSlotActions({
                 <DropdownMenuItem
                   disabled={busy}
                   className="text-warning-fg focus:bg-background focus:text-warning-fg"
-                  onSelect={() => setRefuseOpen(true)}
+                  onSelect={openRefuseDialog}
                 >
                   Не предлагать
                 </DropdownMenuItem>
@@ -156,13 +190,19 @@ function SnackSlotActions({
       {snack ? (
         <CommentDialog
           open={refuseOpen}
-          onOpenChange={setRefuseOpen}
+          onOpenChange={(open) => {
+            setRefuseOpen(open);
+            if (!open) clearBodyPointerEvents();
+          }}
           title="Не предлагать"
           description="Перекус уберём из этого меню и больше не будем предлагать. Напишите почему — генератор учтёт это дальше."
           submitLabel="Убрать и заменить"
           pending={refusePending}
           error={refuseState && !refuseState.ok ? refuseState.error : null}
-          onSubmit={onRefuseSubmit}
+          onSubmit={(comment) => {
+            clearBodyPointerEvents();
+            onRefuseSubmit(comment);
+          }}
         />
       ) : null}
     </>

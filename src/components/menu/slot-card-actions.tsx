@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import { CommentDialog } from "@/components/feedback/comment-dialog";
+import { clearBodyPointerEvents } from "@/components/menu/clear-body-pointer-events";
 import { useMenuSlotBusy } from "@/components/menu/menu-slot-busy";
 import { SlotGeneratingOverlay } from "@/components/menu/slot-generating-overlay";
 import { Button } from "@/components/ui/button";
@@ -181,6 +182,7 @@ export function SlotCardActions({
   placement = "overlay",
 }: SlotCardActionsProps) {
   const { recipeBusyLabel, setRecipeBusy, setActionBusy } = useMenuSlotBusy();
+  const [menuOpen, setMenuOpen] = useState(false);
   const [refuseOpen, setRefuseOpen] = useState(false);
   const [modifyOpen, setModifyOpen] = useState(false);
   const [suggestState, suggestFormAction, suggestPending] = useActionState<
@@ -243,10 +245,31 @@ export function SlotCardActions({
     })
     : (sharedBusyLabel ?? "Заменяем…");
 
+  useLayoutEffect(() => {
+    if (!busy) return;
+    setMenuOpen(false);
+    clearBodyPointerEvents();
+  }, [busy]);
+
+  function closeMenu() {
+    setMenuOpen(false);
+    clearBodyPointerEvents();
+  }
+
+  function openDialogAfterMenu(open: () => void) {
+    closeMenu();
+    // Let DropdownMenu's dismissable-layer release body lock before Dialog mounts.
+    requestAnimationFrame(() => {
+      clearBodyPointerEvents();
+      open();
+    });
+  }
+
   function runAction(
     action: (payload: FormData) => void,
     extra?: Record<string, string>,
   ) {
+    closeMenu();
     const fd = new FormData();
     fd.set("menuId", menuId);
     fd.set("slotId", slotId);
@@ -268,7 +291,13 @@ export function SlotCardActions({
   const actionsChrome = (
     <>
       <div className={inline ? "relative z-10" : "absolute right-2 top-2 z-10"}>
-        <DropdownMenu>
+        <DropdownMenu
+          open={menuOpen}
+          onOpenChange={(open) => {
+            setMenuOpen(open);
+            if (!open) clearBodyPointerEvents();
+          }}
+        >
           <DropdownMenuTrigger asChild>
             <Button
               type="button"
@@ -292,9 +321,9 @@ export function SlotCardActions({
             clearPending={clearPending}
             onSuggest={() => runAction(suggestFormAction)}
             onResuggest={() => runAction(resuggestFormAction)}
-            onModify={() => setModifyOpen(true)}
+            onModify={() => openDialogAfterMenu(() => setModifyOpen(true))}
             onClear={() => runAction(clearFormAction)}
-            onRefuse={() => setRefuseOpen(true)}
+            onRefuse={() => openDialogAfterMenu(() => setRefuseOpen(true))}
           />
         </DropdownMenu>
       </div>
@@ -321,7 +350,10 @@ export function SlotCardActions({
     <>
       <CommentDialog
         open={modifyOpen}
-        onOpenChange={setModifyOpen}
+        onOpenChange={(open) => {
+          setModifyOpen(open);
+          if (!open) clearBodyPointerEvents();
+        }}
         title="Изменить блюдо"
         description="Опишите, что поменять в блюде или рецепте — ИИ сразу подготовит вариант."
         fieldLabel="Пожелание"
@@ -333,13 +365,17 @@ export function SlotCardActions({
         error={modifyState && !modifyState.ok ? modifyState.error : null}
         onSubmit={(comment) => {
           setModifyOpen(false);
+          clearBodyPointerEvents();
           runAction(modifyFormAction, { comment });
         }}
       />
 
       <CommentDialog
         open={refuseOpen}
-        onOpenChange={setRefuseOpen}
+        onOpenChange={(open) => {
+          setRefuseOpen(open);
+          if (!open) clearBodyPointerEvents();
+        }}
         title="Не предлагать"
         description="Блюдо уберём из этого меню и больше не будем предлагать. Напишите почему — генератор учтёт это дальше."
         submitLabel="Убрать и заменить"
@@ -347,6 +383,7 @@ export function SlotCardActions({
         error={refuseState && !refuseState.ok ? refuseState.error : null}
         onSubmit={(comment) => {
           setRefuseOpen(false);
+          clearBodyPointerEvents();
           runAction(refuseFormAction, { comment });
         }}
       />
