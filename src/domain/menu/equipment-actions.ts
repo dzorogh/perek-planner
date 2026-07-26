@@ -1,7 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-
+import { revalidatePlanForMenu } from "@/domain/menu/revalidate-plan";
 import { parseEquipmentCsv } from "@/domain/menu/equipment";
 import { upsertAvailableEquipment } from "@/domain/settings/available-equipment";
 import { createClient } from "@/lib/supabase/server";
@@ -41,6 +40,6 @@ export async function updateMenuEquipmentAction(
 
   await upsertAvailableEquipment(supabase, user.id, equipment);
 
-  revalidatePath("/plan/menu");
+  revalidatePlanForMenu(menuId);
   return { ok: true };
 }

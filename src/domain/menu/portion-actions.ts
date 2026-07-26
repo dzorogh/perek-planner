@@ -1,7 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-
+import { revalidatePlanForMenu } from "@/domain/menu/revalidate-plan";
 import { createClient } from "@/lib/supabase/server";
 
 export type PortionActionState =
@@ -41,7 +40,6 @@ export async function updateSlotServingsAction(
     return { ok: false, error: "Не удалось сохранить порции." };
   }
 
-  revalidatePath("/plan/portions");
-  revalidatePath("/plan/shopping-list");
+  revalidatePlanForMenu(menuId);
   return { ok: true };
 }

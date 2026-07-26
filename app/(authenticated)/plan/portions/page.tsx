@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
 
+import { planShoppingListPath } from "@/components/layout/plan-paths";
+
 type PlanPortionsPageProps = {
   searchParams: Promise<{ menuId?: string }>;
 };
@@ -11,7 +13,7 @@ export default async function PlanPortionsPage({
   const { menuId: rawMenuId } = await searchParams;
   const menuId = rawMenuId?.trim() ?? "";
   if (menuId) {
-    redirect(`/plan/shopping-list?menuId=${encodeURIComponent(menuId)}`);
+    redirect(planShoppingListPath(menuId));
   }
   redirect("/history");
 }

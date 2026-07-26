@@ -1,22 +1,27 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 
+import {
+  parsePlanMenuId,
+  planMenuPath,
+  planShoppingListPath,
+} from "@/components/layout/plan-paths";
 import { cn } from "@/lib/utils";
 
 const STEPS = [
-  { href: "/plan/menu", label: "Состав", id: "menu" },
-  { href: "/plan/shopping-list", label: "Список", id: "list" },
+  { step: "menu", label: "Состав", id: "menu" },
+  { step: "list", label: "Список", id: "list" },
 ] as const;
 
 type PillNavProps = {
-  activeHref?: string;
+  activeHref?: "/plan/menu" | "/plan/shopping-list";
 };
 
 export function PillNav({ activeHref = "/plan/menu" }: PillNavProps) {
-  const searchParams = useSearchParams();
-  const menuId = searchParams.get("menuId");
+  const pathname = usePathname();
+  const menuId = parsePlanMenuId(pathname);
 
   return (
     <nav
@@ -24,15 +29,19 @@ export function PillNav({ activeHref = "/plan/menu" }: PillNavProps) {
       className="flex gap-1.5 rounded-full bg-background p-1"
     >
       {STEPS.map((step) => {
-        const isActive = step.href === activeHref;
+        const gateHref =
+          step.step === "menu" ? "/plan/menu" : "/plan/shopping-list";
+        const isActive = gateHref === activeHref;
         const href = menuId
-          ? `${step.href}?menuId=${encodeURIComponent(menuId)}`
-          : step.href;
+          ? step.step === "menu"
+            ? planMenuPath(menuId)
+            : planShoppingListPath(menuId)
+          : gateHref;
 
         if (!menuId && step.id === "list") {
           return (
             <span
-              key={step.href}
+              key={step.id}
               role="link"
               tabIndex={0}
               aria-disabled="true"
@@ -55,7 +64,7 @@ export function PillNav({ activeHref = "/plan/menu" }: PillNavProps) {
 
         return (
           <Link
-            key={step.href}
+            key={step.id}
             href={href}
             className={cn(
               "rounded-full px-3.5 py-1.5 text-[13px] transition-colors",

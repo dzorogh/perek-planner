@@ -1,5 +1,6 @@
 "use server";
 
+import { planShoppingListPath } from "@/components/layout/plan-paths";
 import { revalidatePath } from "next/cache";
 
 import { createClient } from "@/lib/supabase/server";
@@ -126,6 +127,6 @@ export async function setShoppingSelectionAction(
     return { ok: false, error: "Не удалось сохранить список покупок." };
   }
 
-  revalidatePath("/plan/shopping-list");
+  revalidatePath(planShoppingListPath(id));
   return { ok: true, productKeys: keys };
 }

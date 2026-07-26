@@ -4,16 +4,21 @@
  */
 
 function isPlanRoute(pathname) {
-  return (
-    pathname.startsWith("/plan/menu") ||
-    pathname.startsWith("/plan/shopping-list") ||
-    pathname.startsWith("/plan/portions")
-  );
+  if (pathname === "/plan/menu" || pathname === "/plan/shopping-list") {
+    return true;
+  }
+  if (pathname.startsWith("/plan/portions")) return true;
+  return /^\/plan\/[^/]+\/(?:menu|shopping-list)\/?$/.test(pathname);
 }
 
 function resolveWizardActiveHref(pathname) {
-  if (pathname.startsWith("/plan/shopping-list")) return "/plan/shopping-list";
-  if (pathname.startsWith("/plan/portions")) return "/plan/shopping-list";
+  if (
+    pathname === "/plan/shopping-list" ||
+    pathname.endsWith("/shopping-list") ||
+    pathname.startsWith("/plan/portions")
+  ) {
+    return "/plan/shopping-list";
+  }
   return "/plan/menu";
 }
 
@@ -21,6 +26,18 @@ function resolvePrimaryActiveHref(pathname) {
   if (pathname.startsWith("/history")) return "/history";
   if (pathname.startsWith("/settings")) return "/settings";
   return undefined;
+}
+
+function parsePlanMenuId(pathname) {
+  const match = pathname.match(
+    /^\/plan\/([^/]+)\/(?:menu|shopping-list)\/?$/,
+  );
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1] ?? "");
+  } catch {
+    return match[1] ?? null;
+  }
 }
 
 let failed = 0;
@@ -33,8 +50,10 @@ function check(name, cond) {
 }
 
 check("off-plan: /", !isPlanRoute("/"));
-check("plan: menu", isPlanRoute("/plan/menu"));
-check("plan: list", isPlanRoute("/plan/shopping-list"));
+check("plan: menu gate", isPlanRoute("/plan/menu"));
+check("plan: list gate", isPlanRoute("/plan/shopping-list"));
+check("plan: scoped menu", isPlanRoute("/plan/abc/menu"));
+check("plan: scoped list", isPlanRoute("/plan/abc/shopping-list"));
 check("plan: portions legacy", isPlanRoute("/plan/portions"));
 check("off-plan: history", !isPlanRoute("/history"));
 check("off-plan: settings", !isPlanRoute("/settings"));
@@ -44,15 +63,30 @@ check(
   "wizard active home defaults to menu",
   resolveWizardActiveHref("/") === "/plan/menu",
 );
-check("wizard active menu", resolveWizardActiveHref("/plan/menu") === "/plan/menu");
+check("wizard active menu gate", resolveWizardActiveHref("/plan/menu") === "/plan/menu");
 check(
-  "wizard active list",
+  "wizard active scoped menu",
+  resolveWizardActiveHref("/plan/abc/menu") === "/plan/menu",
+);
+check(
+  "wizard active list gate",
   resolveWizardActiveHref("/plan/shopping-list") === "/plan/shopping-list",
+);
+check(
+  "wizard active scoped list",
+  resolveWizardActiveHref("/plan/abc/shopping-list") === "/plan/shopping-list",
 );
 check(
   "wizard active portions → list",
   resolveWizardActiveHref("/plan/portions") === "/plan/shopping-list",
 );
+
+check("parse menu id", parsePlanMenuId("/plan/abc-123/menu") === "abc-123");
+check(
+  "parse list id",
+  parsePlanMenuId("/plan/abc-123/shopping-list") === "abc-123",
+);
+check("parse gate null", parsePlanMenuId("/plan/menu") === null);
 
 check("primary history", resolvePrimaryActiveHref("/history") === "/history");
 check("primary settings", resolvePrimaryActiveHref("/settings") === "/settings");

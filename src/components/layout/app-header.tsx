@@ -60,16 +60,7 @@ export function AppHeader() {
       {showWizard ? (
         <div className="border-b border-border bg-[#F8FAFC]">
           <div className={cn(chromeInner, "flex-wrap gap-2 py-2.5")}>
-            <Suspense
-              fallback={
-                <nav
-                  aria-label="Шаги планирования"
-                  className="flex gap-1.5 rounded-full bg-background p-1"
-                />
-              }
-            >
-              <PillNav activeHref={wizardActiveHref} />
-            </Suspense>
+            <PillNav activeHref={wizardActiveHref} />
           </div>
         </div>
       ) : null}

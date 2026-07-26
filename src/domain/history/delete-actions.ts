@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { revalidatePlanForMenu } from "@/domain/menu/revalidate-plan";
 import { createClient } from "@/lib/supabase/server";
 
 export type DeleteMenuActionState =
@@ -41,7 +42,6 @@ export async function deleteMenuAction(
   }
 
   revalidatePath("/history");
-  revalidatePath("/plan/menu");
-  revalidatePath("/plan/shopping-list");
+  revalidatePlanForMenu(menuId);
   return { ok: true };
 }

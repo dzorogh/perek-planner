@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import { planMenuPath } from "@/components/layout/plan-paths";
 import {
   isValidDayCount,
   isValidPeopleCount,
@@ -72,8 +73,8 @@ export async function createMenuSkeletonAction(
     const hit = recentCreates.get(cacheKey);
     if (hit && Date.now() - hit.at < IDEMPOTENCY_TTL_MS) {
       revalidatePath("/history");
-      revalidatePath("/plan/menu");
-      redirect(`/plan/menu?menuId=${hit.menuId}`);
+      revalidatePath(planMenuPath(hit.menuId));
+      redirect(planMenuPath(hit.menuId));
     }
   }
 
@@ -117,6 +118,6 @@ export async function createMenuSkeletonAction(
   }
 
   revalidatePath("/history");
-  revalidatePath("/plan/menu");
-  redirect(`/plan/menu?menuId=${result.menuId}`);
+  revalidatePath(planMenuPath(result.menuId));
+  redirect(planMenuPath(result.menuId));
 }

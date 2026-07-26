@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { DeleteMenuButton } from "@/components/history/delete-menu-button";
 import { HistoryRatingRow } from "@/components/history/history-rating-row";
+import { planMenuPath } from "@/components/layout/plan-paths";
 import { loadHistory } from "@/domain/history/load-history";
 import { createClient } from "@/lib/supabase/server";
 
@@ -90,7 +91,7 @@ export default async function HistoryPage() {
                     </h2>
                     <p className="text-xs text-muted-foreground">{label}</p>
                     <Link
-                      href={`/plan/menu?menuId=${encodeURIComponent(menu.menuId)}`}
+                      href={planMenuPath(menu.menuId)}
                       className="mt-1 inline-block text-xs font-medium text-primary underline-offset-4 hover:underline"
                     >
                       Открыть меню

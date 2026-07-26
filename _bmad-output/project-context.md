@@ -57,7 +57,8 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Browser Supabase client for auth/UI and Realtime (menu live sync: listen `postgres_changes` + Broadcast busy overlays; shopping live sync: same-browser `BroadcastChannel` after persist + listen-only `postgres_changes` on `shopping_lists`/menu tables → debounced `router.refresh()`); data writes + AI via server client/actions — never mutate menu/shopping rows from the browser
 - UI: Soft Workshop / light-only desktop; Russian copy; English glossary ids in domain (`Menu`, `Recipe`, `Snack`, …)
 - Suggestions: invent → persist → assign **persisted ids only**; eligibility = fridge-keep + refusal/dislike hard-suppress
-- Shopping list: dish-grouped SOURCE via `buildShoppingSourceFromMenu(menu)`; curated cart persists `curated_product_keys` on `shopping_lists` (server actions, `user_id` denormalized for RLS/Realtime); hydrate qty from live SOURCE; copy curated lines only; live sync on `/plan/shopping-list`
+- Plan routes: `/plan/{menuId}/menu` and `/plan/{menuId}/shopping-list` (gates without id: `/plan/menu`, `/plan/shopping-list`)
+- Shopping list: dish-grouped SOURCE via `buildShoppingSourceFromMenu(menu)`; curated cart persists `curated_product_keys` on `shopping_lists` (server actions, `user_id` denormalized for RLS/Realtime); hydrate qty from live SOURCE; copy curated lines only; live sync on scoped shopping-list route
 
 ### Testing Rules
 

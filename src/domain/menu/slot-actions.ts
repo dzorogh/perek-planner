@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { revalidatePlanForMenu } from "@/domain/menu/revalidate-plan";
 import { withMenuMutationLock } from "@/domain/menu/menu-mutation-lock";
 import { isPlateRole } from "@/domain/menu/meal-templates";
 import {
@@ -73,8 +74,7 @@ export async function resuggestSlotAction(
   }
   if (!result?.ok) return result;
 
-  revalidatePath("/plan/menu");
-  revalidatePath("/plan/shopping-list");
+  revalidatePlanForMenu(menuId);
   return { ok: true };
 }
 
@@ -107,8 +107,7 @@ export async function suggestCompanionAction(
   }
   if (!result?.ok) return result;
 
-  revalidatePath("/plan/menu");
-  revalidatePath("/plan/shopping-list");
+  revalidatePlanForMenu(menuId);
   return { ok: true };
 }
 
@@ -140,8 +139,7 @@ export async function resuggestRecipeAcrossMenuAction(
   }
   if (!result?.ok) return result;
 
-  revalidatePath("/plan/menu");
-  revalidatePath("/plan/shopping-list");
+  revalidatePlanForMenu(menuId);
   return { ok: true };
 }
 
@@ -177,8 +175,7 @@ export async function modifyRecipeAcrossMenuAction(
   }
   if (!result?.ok) return result;
 
-  revalidatePath("/plan/menu");
-  revalidatePath("/plan/shopping-list");
+  revalidatePlanForMenu(menuId);
   return { ok: true };
 }
 
@@ -214,8 +211,7 @@ export async function refuseSlotAction(
   }
   if (!result?.ok) return result;
 
-  revalidatePath("/plan/menu");
-  revalidatePath("/plan/shopping-list");
+  revalidatePlanForMenu(menuId);
   revalidatePath("/settings");
   return { ok: true };
 }
@@ -237,7 +233,6 @@ export async function clearCompanionAction(
   const result = await clearCompanionForSlot(supabase, menuId, slotId);
   if (!result.ok) return result;
 
-  revalidatePath("/plan/menu");
-  revalidatePath("/plan/shopping-list");
+  revalidatePlanForMenu(menuId);
   return { ok: true };
 }

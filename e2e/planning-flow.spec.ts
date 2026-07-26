@@ -41,7 +41,7 @@ test.describe("Planning happy path (authenticated)", () => {
     await createDialog.getByRole("radio", { name: "2 чел." }).click();
     await createDialog.getByRole("button", { name: "Сгенерировать" }).click();
 
-    await expect(page).toHaveURL(/\/plan\/menu\?menuId=/, { timeout: 120_000 });
+    await expect(page).toHaveURL(/\/plan\/[^/]+\/menu/, { timeout: 120_000 });
     await expect(page.getByRole("heading", { name: "Меню" })).toBeVisible();
     await expect(page.locator('[data-component="menu-sheet"]')).toHaveCount(2);
     await expect(
@@ -82,7 +82,7 @@ test.describe("Planning happy path (authenticated)", () => {
       .getByRole("navigation", { name: "Шаги планирования" })
       .getByRole("link", { name: "Список" })
       .click();
-    await expect(page).toHaveURL(/\/plan\/shopping-list\?menuId=/, {
+    await expect(page).toHaveURL(/\/plan\/[^/]+\/shopping-list/, {
       timeout: 20_000,
     });
     await expect(

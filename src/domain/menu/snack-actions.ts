@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { revalidatePlanForMenu } from "@/domain/menu/revalidate-plan";
 import {
   refuseAndReplaceSnackAcrossMenu,
   resuggestSnackForMenu,
@@ -52,8 +53,7 @@ export async function resuggestSnackAction(
   );
   if (!result.ok) return result;
 
-  revalidatePath("/plan/menu");
-  revalidatePath("/plan/shopping-list");
+  revalidatePlanForMenu(menuId);
   return { ok: true };
 }
 
@@ -81,8 +81,7 @@ export async function refuseSnackAction(
   );
   if (!result.ok) return result;
 
-  revalidatePath("/plan/menu");
-  revalidatePath("/plan/shopping-list");
+  revalidatePlanForMenu(menuId);
   revalidatePath("/settings");
   return { ok: true };
 }
@@ -145,8 +144,7 @@ export async function updateSnackLabelAction(
     return { ok: false, error: "Snack не найден." };
   }
 
-  revalidatePath("/plan/menu");
-  revalidatePath("/plan/shopping-list");
+  revalidatePlanForMenu(menuId);
   return { ok: true };
 }
 
@@ -177,8 +175,7 @@ export async function clearSnackAction(
     return { ok: false, error: "Не удалось очистить Snack." };
   }
 
-  revalidatePath("/plan/menu");
-  revalidatePath("/plan/shopping-list");
+  revalidatePlanForMenu(menuId);
   return { ok: true };
 }
 
@@ -248,7 +245,6 @@ export async function suggestSnackForDayAction(
     }
   }
 
-  revalidatePath("/plan/menu");
-  revalidatePath("/plan/shopping-list");
+  revalidatePlanForMenu(menuId);
   return { ok: true };
 }
