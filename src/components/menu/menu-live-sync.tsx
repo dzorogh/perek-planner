@@ -59,6 +59,12 @@ export function MenuLiveSync({ menuId, slotIds }: MenuLiveSyncProps) {
 
   useEffect(() => {
     aliveRef.current = true;
+    if (!menuId) return;
+
+    let cancelled = false;
+    const supabase = createClient();
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let authSub: { unsubscribe: () => void } | null = null;
 
     function showNotice() {
       if (!aliveRef.current) return;
@@ -93,76 +99,94 @@ export function MenuLiveSync({ menuId, slotIds }: MenuLiveSyncProps) {
       }, DEBOUNCE_MS);
     }
 
-    if (!menuId) return;
+    async function start() {
+      const { data } = await supabase.auth.getSession();
+      if (cancelled) return;
 
-    const supabase = createClient();
-    const onMenuScoped = () => {
-      scheduleRefresh();
-    };
-    const onDish = (payload: {
-      new?: DishRow | null;
-      old?: DishRow | null;
-    }) => {
-      const nextId = payload.new?.menu_slot_id;
-      const prevId = payload.old?.menu_slot_id;
-      const match =
-        menuSlotDishEventMatchesMenu(nextId, slotIdsRef.current) ||
-        menuSlotDishEventMatchesMenu(prevId, slotIdsRef.current);
-      if (match) scheduleRefresh();
-    };
+      const token = data.session?.access_token;
+      // Without JWT, Realtime connects as anon and RLS drops all postgres_changes.
+      if (token) await supabase.realtime.setAuth(token);
 
-    const channel = supabase
-      .channel(`menu-live:${menuId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "menus",
-          filter: `id=eq.${menuId}`,
-        },
-        onMenuScoped,
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "menu_slots",
-          filter: `menu_id=eq.${menuId}`,
-        },
-        onMenuScoped,
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "menu_snacks",
-          filter: `menu_id=eq.${menuId}`,
-        },
-        onMenuScoped,
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "menu_slot_dishes",
-        },
-        onDish,
-      )
-      .subscribe((status) => {
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          console.warn("menu live sync channel:", status);
+      if (cancelled) return;
+
+      const {
+        data: { subscription },
+      } = supabase.auth.onAuthStateChange((_event, session) => {
+        if (session?.access_token) {
+          void supabase.realtime.setAuth(session.access_token);
         }
       });
+      authSub = subscription;
+
+      const onMenuScoped = () => {
+        scheduleRefresh();
+      };
+
+      const onDish = (payload: {
+        new?: DishRow | null;
+        old?: DishRow | null;
+      }) => {
+        const nextId = payload.new?.menu_slot_id;
+        const prevId = payload.old?.menu_slot_id;
+        const match =
+          menuSlotDishEventMatchesMenu(nextId, slotIdsRef.current) ||
+          menuSlotDishEventMatchesMenu(prevId, slotIdsRef.current);
+        if (match) scheduleRefresh();
+      };
+
+      channel = supabase
+        .channel(`menu-live:${menuId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "menus",
+            filter: `id=eq.${menuId}`,
+          },
+          onMenuScoped,
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "menu_slots",
+            filter: `menu_id=eq.${menuId}`,
+          },
+          onMenuScoped,
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "menu_snacks",
+            filter: `menu_id=eq.${menuId}`,
+          },
+          onMenuScoped,
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "menu_slot_dishes",
+          },
+          onDish,
+        )
+        .subscribe();
+    }
+
+    void start();
 
     return () => {
+      cancelled = true;
       aliveRef.current = false;
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
       if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
-      void supabase.removeChannel(channel);
+      authSub?.unsubscribe();
+      if (channel) void supabase.removeChannel(channel);
     };
   }, [menuId]);
 
