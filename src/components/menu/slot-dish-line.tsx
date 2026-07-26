@@ -113,9 +113,9 @@ function SheetRowBody({
         style={{ backgroundColor: accent }}
       />
       <div className="min-w-0 flex-1">
-        <div className="flex items-start gap-x-2.5">
+        <div className="flex items-baseline gap-x-2.5">
           <span
-            className="w-[5.75rem] shrink-0 text-[11px] font-semibold leading-tight"
+            className="w-[5.75rem] shrink-0 text-[11px] font-semibold leading-5"
             style={{ color: accent }}
           >
             <RoleCaptionParts caption={roleCaption} />
