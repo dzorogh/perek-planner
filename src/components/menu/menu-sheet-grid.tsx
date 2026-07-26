@@ -20,6 +20,7 @@ import {
   rolesForMeal,
   type PlateRole,
 } from "@/domain/menu/meal-templates";
+import { roleLinesForDishes } from "@/domain/menu/role-lines";
 import {
   recipeBatchScale,
   type RecipeBatchScale,
@@ -68,32 +69,6 @@ function primaryShimDishes(
   return [shimDish(slot, primaryRole, template.indexOf(primaryRole))];
 }
 
-function primaryDishByRole(
-  dishes: readonly MenuSlotDishView[],
-): Map<PlateRole, MenuSlotDishView> {
-  const byRole = new Map<PlateRole, MenuSlotDishView>();
-  for (const dish of dishes) {
-    const prev = byRole.get(dish.plateRole);
-    if (!prev || (!prev.recipeId && dish.recipeId)) {
-      byRole.set(dish.plateRole, dish);
-    }
-  }
-  return byRole;
-}
-
-function rolesCoveredByOnePots(
-  dishes: readonly MenuSlotDishView[],
-): Set<PlateRole> {
-  const covered = new Set<PlateRole>();
-  for (const dish of dishes) {
-    if (!dish.recipeId) continue;
-    for (const r of dish.coversRoles ?? []) {
-      if (r !== dish.plateRole) covered.add(r);
-    }
-  }
-  return covered;
-}
-
 function roleLinesForSlot(slot: MenuSlotView): Array<{
   role: PlateRole;
   dish: MenuSlotDishView | null;
@@ -102,17 +77,9 @@ function roleLinesForSlot(slot: MenuSlotView): Array<{
   const template: readonly PlateRole[] = isTemplateMeal(slot.meal)
     ? rolesForMeal(slot.meal)
     : ["main"];
-
   const sourceDishes =
     slot.dishes.length > 0 ? slot.dishes : primaryShimDishes(slot, template);
-  const primaryByRole = primaryDishByRole(sourceDishes);
-  const rolesFilledByCover = rolesCoveredByOnePots(sourceDishes);
-
-  return template.flatMap((role) => {
-    const dish = primaryByRole.get(role) ?? null;
-    if (rolesFilledByCover.has(role) && !dish?.recipeId) return [];
-    return [{ role, dish, template }];
-  });
+  return roleLinesForDishes(slot.meal, sourceDishes);
 }
 
 function mealsPresent(slots: MenuSlotView[]): MealSlot[] {

@@ -80,6 +80,18 @@ function DishMeta({
   return null;
 }
 
+function RoleCaptionParts({ caption }: { caption: string }) {
+  const parts = caption.split(" · ");
+  if (parts.length <= 1) return <>{caption}</>;
+  return (
+    <span className="flex flex-col gap-0.5">
+      {parts.map((part) => (
+        <span key={part}>{part}</span>
+      ))}
+    </span>
+  );
+}
+
 function SheetRowBody({
   roleCaption,
   accent,
@@ -101,12 +113,12 @@ function SheetRowBody({
         style={{ backgroundColor: accent }}
       />
       <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-x-2.5">
+        <div className="flex items-start gap-x-2.5">
           <span
-            className="w-[5.75rem] shrink-0 text-[11px] font-semibold leading-5"
+            className="w-[5.75rem] shrink-0 text-[11px] font-semibold leading-tight"
             style={{ color: accent }}
           >
-            {roleCaption}
+            <RoleCaptionParts caption={roleCaption} />
           </span>
           <div className="min-w-0 flex-1">
             {empty ? (

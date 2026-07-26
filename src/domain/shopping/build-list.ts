@@ -426,29 +426,14 @@ async function prepareShoppingList(
   };
 }
 
+/** Flat copy of persisted lines (no kind sections). Prefer formatCuratedShoppingCopy for UI cart. */
 export function formatShoppingListCopy(list: ShoppingListView): string {
   if (list.lines.length === 0) {
     return "Список покупок пуст.";
   }
-  const sections = {
-    ingredient: [] as string[],
-    pantry: [] as string[],
-    snack: [] as string[],
-  };
-  for (const line of list.lines) {
-    sections[line.lineKind].push(
+  const body = list.lines.map(
+    (line) =>
       `• ${formatLineLabel(line.ingredientName, line.quantityAmount, line.quantityUnit)}`,
-    );
-  }
-  const parts: string[] = ["Список покупок"];
-  if (sections.ingredient.length) {
-    parts.push("", "Блюда:", ...sections.ingredient);
-  }
-  if (sections.pantry.length) {
-    parts.push("", "Базовые продукты:", ...sections.pantry);
-  }
-  if (sections.snack.length) {
-    parts.push("", "Перекусы:", ...sections.snack);
-  }
-  return parts.join("\n");
+  );
+  return ["Список покупок", "", ...body].join("\n");
 }

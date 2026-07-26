@@ -1,108 +1,268 @@
 "use client";
 
-import { useState } from "react";
+import { Check, Plus, X } from "lucide-react";
+import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import type { ShoppingListView } from "@/domain/shopping/build-list";
-import { formatShoppingListCopy } from "@/domain/shopping/build-list";
+import { formatQuantity } from "@/domain/shopping/quantity";
+import {
+  addAllDishProducts,
+  addProductAcrossAllDishes,
+  contributionKey,
+  formatCuratedShoppingCopy,
+  removeCuratedProduct,
+  type CuratedShoppingLine,
+  type ShoppingSourceDish,
+  type ShoppingSourceView,
+} from "@/domain/shopping/source";
 
 type ShoppingListViewProps = {
-  list: ShoppingListView;
+  source: ShoppingSourceView;
 };
 
-const KIND_LABEL: Record<ShoppingListView["lines"][number]["lineKind"], string> =
-{
-  ingredient: "Блюда",
-  pantry: "Базовые продукты",
-  snack: "Перекусы",
-};
+function pluralRu(n: number, one: string, few: string, many: string): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+}
 
-export function ShoppingListClient({ list }: ShoppingListViewProps) {
+export function ShoppingListClient({ source }: ShoppingListViewProps) {
+  const [cart, setCart] = useState<Map<string, CuratedShoppingLine>>(
+    () => new Map(),
+  );
+  const [contributed, setContributed] = useState<Set<string>>(() => new Set());
   const [copied, setCopied] = useState(false);
-  const [copyError, setCopyError] = useState<string | null>(null);
+  const [copyHint, setCopyHint] = useState<string | null>(null);
+
+  const dishById = useMemo(() => {
+    const map = new Map<string, ShoppingSourceDish>();
+    for (const dish of source.dishes) map.set(dish.id, dish);
+    return map;
+  }, [source.dishes]);
+
+  const curatedLines = useMemo(() => [...cart.values()], [cart]);
+
+  function commit(
+    nextCart: Map<string, CuratedShoppingLine>,
+    nextContributed: Set<string>,
+  ) {
+    setCart(new Map(nextCart));
+    setContributed(new Set(nextContributed));
+    setCopied(false);
+    setCopyHint(null);
+  }
+
+  function onToggleProduct(productKey: string) {
+    const nextCart = new Map(cart);
+    const nextContributed = new Set(contributed);
+    if (nextCart.has(productKey)) {
+      removeCuratedProduct(nextCart, nextContributed, productKey);
+    } else {
+      addProductAcrossAllDishes(
+        nextCart,
+        nextContributed,
+        source.dishes,
+        productKey,
+      );
+    }
+    commit(nextCart, nextContributed);
+  }
+
+  function onAddAll(dishId: string) {
+    const dish = dishById.get(dishId);
+    if (!dish) return;
+    const nextCart = new Map(cart);
+    const nextContributed = new Set(contributed);
+    addAllDishProducts(nextCart, nextContributed, source.dishes, dish);
+    commit(nextCart, nextContributed);
+  }
+
+  function onRemove(productKey: string) {
+    const nextCart = new Map(cart);
+    const nextContributed = new Set(contributed);
+    removeCuratedProduct(nextCart, nextContributed, productKey);
+    commit(nextCart, nextContributed);
+  }
 
   async function onCopy() {
-    const text = formatShoppingListCopy(list);
-    setCopyError(null);
+    if (curatedLines.length === 0) {
+      setCopyHint("Сначала добавьте продукты в список.");
+      setCopied(false);
+      return;
+    }
+    const text = formatCuratedShoppingCopy(curatedLines);
+    setCopyHint(null);
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2500);
     } catch {
       setCopied(false);
-      setCopyError("Не удалось скопировать список. Скопируйте вручную.");
+      setCopyHint("Не удалось скопировать список. Скопируйте вручную.");
     }
   }
 
-  const byKind = {
-    ingredient: list.lines.filter((l) => l.lineKind === "ingredient"),
-    pantry: list.lines.filter((l) => l.lineKind === "pantry"),
-    snack: list.lines.filter((l) => l.lineKind === "snack"),
-  };
-
   return (
-    <div className="max-w-xl">
-      <div className="flex flex-wrap items-center gap-3">
-        <Button
-          type="button"
-          data-component="shopping-list-cta"
-          className="rounded-sm"
-          onClick={() => void onCopy()}
-        >
-          Копировать список
-        </Button>
-      </div>
+    <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
+      <section
+        data-component="shopping-source-panel"
+        className="min-w-0 rounded-md border border-border bg-card p-4 sm:p-5"
+      >
+        <h2 className="text-sm font-semibold text-accent">Продукты по блюдам</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Добавляйте «+» или всё блюдо сразу — список справа.
+        </p>
 
-      {copied ? (
-        <p className="mt-3 text-sm text-primary" role="status">
-          Список скопирован.
-        </p>
-      ) : null}
-      {copyError ? (
-        <p className="mt-3 text-sm text-warning-fg" role="alert">
-          {copyError}
-        </p>
-      ) : null}
-
-      {list.lines.length === 0 ? (
-        <p className="mt-6 text-sm text-muted-foreground">
-          Список пуст — добавьте блюда или перекусы в меню.
-        </p>
-      ) : (
-        <div className="mt-6 space-y-5">
-          {(["ingredient", "pantry", "snack"] as const).map((kind) => {
-            const lines = byKind[kind];
-            if (lines.length === 0) return null;
-            return (
-              <section key={kind}>
-                <h2 className="text-sm font-semibold text-accent">
-                  {KIND_LABEL[kind]}
-                </h2>
-                {kind === "pantry" ? (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Базовые продукты — отфильтруйте при покупке при необходимости.
-                  </p>
-                ) : null}
-                <ul className="mt-2 space-y-1.5">
-                  {lines.map((line) => (
-                    <li
-                      key={line.id}
-                      className="flex items-baseline justify-between gap-4 text-sm text-foreground"
+        {source.dishes.length === 0 ? (
+          <p className="mt-6 text-sm text-muted-foreground">
+            Список пуст — добавьте блюда или перекусы в меню.
+          </p>
+        ) : (
+          <div className="mt-4 space-y-5">
+            {source.dishes.map((dish) => {
+              const allIn = dish.products.every((p) =>
+                contributed.has(contributionKey(dish.id, p.productKey)),
+              );
+              return (
+                <div key={dish.id} data-dish-id={dish.id}>
+                  <div className="mb-2 flex items-baseline justify-between gap-3">
+                    <h3 className="text-sm font-semibold text-foreground">
+                      {dish.name}
+                    </h3>
+                    <button
+                      type="button"
+                      data-component="dish-add-all"
+                      disabled={allIn}
+                      onClick={() => onAddAll(dish.id)}
+                      className="shrink-0 text-xs font-medium text-primary underline-offset-4 hover:underline disabled:cursor-default disabled:text-muted-foreground disabled:no-underline"
                     >
-                      <span>{line.ingredientName}</span>
-                      {line.quantityLabel ? (
-                        <span className="shrink-0 tabular-nums text-muted-foreground">
-                          {line.quantityLabel}
-                        </span>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            );
-          })}
+                      {allIn ? "Всё добавлено" : "Добавить всё"}
+                    </button>
+                  </div>
+                  <ul className="space-y-1">
+                    {dish.products.map((product) => {
+                      const selected = cart.has(product.productKey);
+                      return (
+                        <li
+                          key={`${dish.id}:${product.productKey}`}
+                          className={`flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm ${selected
+                            ? "bg-primary/5 text-foreground"
+                            : "text-foreground"
+                            }`}
+                        >
+                          <span className="min-w-0 flex-1">{product.name}</span>
+                          {product.quantityLabel ? (
+                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                              {product.quantityLabel}
+                            </span>
+                          ) : null}
+                          <button
+                            type="button"
+                            data-component="product-add"
+                            onClick={() => onToggleProduct(product.productKey)}
+                            aria-label={
+                              selected
+                                ? `Убрать из списка: ${product.name}`
+                                : `Добавить: ${product.name}`
+                            }
+                            className={`inline-flex size-7 shrink-0 items-center justify-center rounded-sm border transition-colors ${selected
+                                ? "border-primary/30 bg-primary/10 text-primary hover:border-destructive/40 hover:bg-destructive/5 hover:text-destructive"
+                                : "border-border bg-card text-primary hover:border-primary/40 hover:bg-background"
+                              }`}
+                          >
+                            {selected ? (
+                              <Check className="size-3.5" aria-hidden />
+                            ) : (
+                              <Plus className="size-3.5" aria-hidden />
+                            )}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <section
+        data-component="shopping-list-panel"
+        className="min-w-0 rounded-md border border-border bg-card p-4 sm:p-5 lg:sticky lg:top-4"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-accent">Список покупок</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {curatedLines.length === 0
+                ? "Пока пусто"
+                : `${curatedLines.length} ${pluralRu(curatedLines.length, "позиция", "позиции", "позиций")}`}
+            </p>
+          </div>
+          <Button
+            type="button"
+            data-component="shopping-list-cta"
+            className="rounded-sm"
+            onClick={() => void onCopy()}
+          >
+            Копировать список
+          </Button>
         </div>
-      )}
+
+        {copied ? (
+          <p className="mt-3 text-sm text-primary" role="status">
+            Список скопирован.
+          </p>
+        ) : null}
+        {copyHint ? (
+          <p className="mt-3 text-sm text-warning-fg" role="status">
+            {copyHint}
+          </p>
+        ) : null}
+
+        {curatedLines.length === 0 ? (
+          <div className="mt-8 rounded-sm border border-dashed border-border bg-background px-4 py-8 text-center">
+            <p className="text-sm font-medium text-foreground">Список пока пуст</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Нажимайте «+» у продуктов слева — они появятся здесь.
+            </p>
+          </div>
+        ) : (
+          <ul className="mt-4 space-y-1">
+            {curatedLines.map((line) => {
+              const qty = formatQuantity(
+                line.quantityAmount,
+                line.quantityUnit,
+              );
+              return (
+                <li
+                  key={line.productKey}
+                  className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm"
+                >
+                  <span className="min-w-0 flex-1">{line.ingredientName}</span>
+                  {qty ? (
+                    <span className="shrink-0 tabular-nums text-muted-foreground">
+                      {qty}
+                    </span>
+                  ) : null}
+                  <button
+                    type="button"
+                    data-component="product-remove"
+                    onClick={() => onRemove(line.productKey)}
+                    aria-label={`Убрать: ${line.ingredientName}`}
+                    className="inline-flex size-7 shrink-0 items-center justify-center rounded-sm border border-border text-muted-foreground hover:border-destructive/40 hover:text-destructive"
+                  >
+                    <X className="size-3.5" aria-hidden />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }

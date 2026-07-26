@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Список покупок — курация — Keplo</title>
+<style>
+  /*
+    Shopping list curation mock · 2026-07-26
+    Left: dish-grouped product SOURCE · Right: curated list (starts empty)
+    Soft Workshop + Lavender Workshop. Merge by product name + unit.
+  */
+  :root {
+    --bg: #EEF2FF;
+    --surface: #FFFFFF;
+    --fg: #1E293B;
+    --muted: #64748B;
+    --primary: #4338CA;
+    --accent: #312E81;
+    --border: #E0E7FF;
+    --empty: #F8FAFC;
+    --r-sm: 10px;
+    --r-md: 12px;
+    --r-lg: 14px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.45;
+    padding: 28px 32px 64px;
+  }
+
+  .browser {
+    max-width: 1240px;
+    margin: 0 auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 20px 48px rgba(49, 46, 129, 0.1);
+  }
+  .chrome {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 14px;
+    background: linear-gradient(180deg, var(--empty), var(--bg));
+    border-bottom: 1px solid var(--border);
+  }
+  .dots { display: flex; gap: 6px; }
+  .dots i { width: 10px; height: 10px; border-radius: 50%; display: block; }
+  .dots i:nth-child(1) { background: #FCA5A5; }
+  .dots i:nth-child(2) { background: #FDE047; }
+  .dots i:nth-child(3) { background: #86EFAC; }
+  .url {
+    flex: 1; font-size: 12px; color: var(--muted);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 999px; padding: 6px 12px;
+  }
+
+  .mock-banner {
+    margin: 0;
+    padding: 8px 28px;
+    background: #312E81;
+    color: #EEF2FF;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+
+  .app-header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 20px; padding: 14px 28px;
+    border-bottom: 1px solid var(--border);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; }
+  .mark { width: 32px; height: 32px; display: block; }
+  .wordmark { font-size: 17px; font-weight: 700; color: var(--accent); letter-spacing: -0.03em; }
+  .header-actions { display: flex; align-items: center; gap: 18px; }
+  .nav-link { font-size: 13px; color: var(--muted); text-decoration: none; }
+  .btn-create {
+    font-size: 13px; font-weight: 600; color: #fff;
+    background: var(--primary); padding: 7px 14px; border-radius: var(--r-sm);
+    text-decoration: none;
+  }
+  .btn-out {
+    font-size: 13px; color: var(--muted); background: #F1F5F9;
+    padding: 7px 12px; border-radius: var(--r-sm); border: none; font-family: inherit;
+    cursor: pointer;
+  }
+
+  .wizard {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 28px;
+    background: var(--empty);
+    border-bottom: 1px solid var(--border);
+  }
+  .wizard-label {
+    font-size: 11px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.04em; margin-right: 4px;
+  }
+  .pills {
+    display: flex; gap: 4px;
+    background: var(--bg); padding: 3px; border-radius: 999px;
+  }
+  .pill {
+    padding: 5px 13px; font-size: 13px; border-radius: 999px;
+    color: var(--muted); text-decoration: none;
+  }
+  .pill.active {
+    background: var(--surface); color: var(--primary); font-weight: 600;
+    box-shadow: 0 1px 2px rgba(67, 56, 202, 0.15);
+  }
+  .pill.ready { color: var(--primary); }
+
+  .content { padding: 20px 28px 32px; background: var(--bg); }
+
+  .page-head {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 16px; margin-bottom: 18px;
+  }
+  h1 {
+    font-size: 24px; font-weight: 700; letter-spacing: -0.02em;
+  }
+  .lede {
+    margin-top: 6px; font-size: 13px; color: var(--muted); max-width: 52ch;
+  }
+  .btn-copy {
+    flex-shrink: 0;
+    font-family: inherit;
+    font-size: 14px; font-weight: 600;
+    color: #fff; background: var(--primary);
+    border: none; border-radius: var(--r-md);
+    padding: 10px 18px; cursor: pointer;
+  }
+  .btn-copy:hover { background: var(--accent); }
+  .btn-copy:disabled {
+    opacity: 0.45; cursor: not-allowed;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr minmax(300px, 360px);
+    gap: 18px;
+    align-items: start;
+  }
+
+  .source-panel {
+    min-width: 0;
+  }
+  .dish-group + .dish-group { margin-top: 4px; }
+
+  .dish-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 12px;
+    padding: 14px 4px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .dish-name {
+    font-size: 15px; font-weight: 700; color: var(--accent);
+    letter-spacing: -0.01em;
+  }
+  .dish-add-all {
+    font-family: inherit;
+    font-size: 13px; font-weight: 600;
+    color: var(--primary);
+    background: none; border: none;
+    cursor: pointer; padding: 0;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-color: rgba(67, 56, 202, 0.35);
+  }
+  .dish-add-all:hover { color: var(--accent); }
+  .dish-add-all:disabled {
+    color: var(--muted); text-decoration: none; cursor: default; opacity: 0.7;
+  }
+
+  .product-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 8px;
+    border-radius: var(--r-sm);
+    border: 1px solid transparent;
+  }
+  .product-row:hover { background: rgba(255, 255, 255, 0.55); }
+  .product-row.is-selected {
+    background: rgba(67, 56, 202, 0.06);
+    border-color: rgba(67, 56, 202, 0.12);
+  }
+  .product-name {
+    font-size: 14px; font-weight: 500;
+    min-width: 0;
+  }
+  .product-row.is-selected .product-name { color: var(--accent); }
+  .product-qty {
+    font-size: 13px; color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .btn-add {
+    width: 30px; height: 30px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-family: inherit; font-size: 18px; font-weight: 500; line-height: 1;
+    color: var(--primary);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .btn-add:hover:not(:disabled) {
+    border-color: var(--primary);
+    background: var(--bg);
+  }
+  .btn-add:disabled,
+  .btn-add.is-added {
+    color: var(--primary);
+    background: rgba(67, 56, 202, 0.1);
+    border-color: transparent;
+    cursor: default;
+    font-size: 15px;
+  }
+
+  .list-panel {
+    position: sticky;
+    top: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    padding: 16px 16px 14px;
+    min-height: 320px;
+    display: flex;
+    flex-direction: column;
+  }
+  .list-panel-title {
+    font-size: 13px; font-weight: 700;
+    color: var(--accent);
+    letter-spacing: -0.01em;
+    margin-bottom: 4px;
+  }
+  .list-panel-sub {
+    font-size: 12px; color: var(--muted);
+    margin-bottom: 12px;
+  }
+  .list-body { flex: 1; }
+
+  .list-empty {
+    flex: 1;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center;
+    padding: 36px 16px;
+    background: var(--empty);
+    border: 1px dashed var(--border);
+    border-radius: var(--r-md);
+    min-height: 220px;
+  }
+  .list-empty strong {
+    display: block;
+    font-size: 14px; font-weight: 600; color: var(--fg);
+  }
+  .list-empty span {
+    display: block;
+    margin-top: 6px;
+    font-size: 13px; color: var(--muted); max-width: 26ch;
+  }
+
+  .cart-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .cart-row:last-child { border-bottom: none; }
+  .cart-name { font-size: 14px; font-weight: 500; }
+  .cart-qty {
+    font-size: 13px; color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .btn-remove {
+    width: 28px; height: 28px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-family: inherit; font-size: 16px; line-height: 1;
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .btn-remove:hover {
+    color: var(--fg);
+    background: var(--empty);
+    border-color: var(--border);
+  }
+
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 28px;
+    transform: translateX(-50%) translateY(12px);
+    background: var(--accent);
+    color: #EEF2FF;
+    font-size: 13px; font-weight: 600;
+    padding: 10px 16px;
+    border-radius: 999px;
+    box-shadow: 0 10px 28px rgba(49, 46, 129, 0.28);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 160ms ease, transform 160ms ease;
+    z-index: 40;
+  }
+  .toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; }
+    .list-panel { position: static; }
+    .page-head { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+
+<div class="browser">
+  <div class="chrome">
+    <div class="dots" aria-hidden="true"><i></i><i></i><i></i></div>
+    <div class="url">app.keplo.ru/plan/shopping</div>
+  </div>
+
+  <p class="mock-banner">MOCK · курация списка покупок · coaching mock · key-shopping-list-curate-2026-07-26.html</p>
+
+  <header class="app-header">
+    <a class="brand" href="#">
+      <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <rect width="32" height="32" rx="9" fill="#4338CA"/>
+        <rect x="7" y="9" width="5" height="14" rx="1.5" fill="#EEF2FF"/>
+        <rect x="13.5" y="9" width="5" height="14" rx="1.5" fill="#C7D2FE"/>
+        <rect x="20" y="9" width="5" height="14" rx="1.5" fill="#EEF2FF"/>
+      </svg>
+      <span class="wordmark">Keplo</span>
+    </a>
+    <div class="header-actions">
+      <a class="btn-create" href="#">Создать меню</a>
+      <a class="nav-link" href="#">История</a>
+      <a class="nav-link" href="#">Настройки</a>
+      <button class="btn-out" type="button">Выйти</button>
+    </div>
+  </header>
+
+  <div class="wizard">
+    <span class="wizard-label">План</span>
+    <nav class="pills" aria-label="Шаги планирования">
+      <a class="pill ready" href="#">Новое меню</a>
+      <a class="pill ready" href="#">Меню</a>
+      <span class="pill active">Список</span>
+    </nav>
+  </div>
+
+  <div class="content">
+    <div class="page-head">
+      <div>
+        <h1>Список покупок</h1>
+        <p class="lede">Добавьте нужные продукты из блюд меню — одинаковые позиции объединятся. Копируется только ваш список справа.</p>
+      </div>
+      <button type="button" class="btn-copy" data-component="shopping-list-cta" id="copyBtn">Копировать список</button>
+    </div>
+
+    <div class="layout">
+      <section class="source-panel" data-component="shopping-source-panel" aria-label="Продукты по блюдам" id="sourcePanel"></section>
+
+      <aside class="list-panel" data-component="shopping-list-panel" aria-label="Ваш список покупок">
+        <div class="list-panel-title">Ваш список</div>
+        <p class="list-panel-sub" id="listCount">Пока пусто</p>
+        <div class="list-body" id="listBody"></div>
+      </aside>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  const DISHES = [
+    {
+      id: "fish",
+      name: "Запечённая рыба",
+      products: [
+        { id: "fish-fillet", name: "Филе рыбы", qty: "800 г" },
+        { id: "lemon", name: "Лимон", qty: "1 шт" },
+        { id: "onion", name: "Лук репчатый", qty: "200 г" }
+      ]
+    },
+    {
+      id: "meatballs",
+      name: "Тефтели",
+      products: [
+        { id: "mince", name: "Фарш мясной", qty: "400 г" },
+        { id: "onion", name: "Лук репчатый", qty: "200 г" },
+        { id: "carrot", name: "Морковь", qty: "200 г" },
+        { id: "rice", name: "Рис", qty: "100 г" }
+      ]
+    },
+    {
+      id: "chicken",
+      name: "Курица в сливках",
+      products: [
+        { id: "chicken-fillet", name: "Куриное филе", qty: "800 г" },
+        { id: "cream", name: "Сливки 20%", qty: "400 мл" },
+        { id: "onion", name: "Лук репчатый", qty: "240 г" }
+      ]
+    },
+    {
+      id: "snack",
+      name: "Перекус — творог с огурцом",
+      products: [
+        { id: "cottage", name: "Творог 5%", qty: "400 г" },
+        { id: "cucumber", name: "Огурцы", qty: "2 шт" }
+      ]
+    }
+  ];
+
+  /** @type {Map<string, { id: string, name: string, amount: number, unit: string }>} */
+  const cart = new Map();
+  /** Contributions already merged: "dishId::productId" */
+  const contributed = new Set();
+
+  const sourcePanel = document.getElementById("sourcePanel");
+  const listBody = document.getElementById("listBody");
+  const listCount = document.getElementById("listCount");
+  const copyBtn = document.getElementById("copyBtn");
+  const toastEl = document.getElementById("toast");
+  let toastTimer = null;
+
+  function contribKey(dishId, productId) {
+    return dishId + "::" + productId;
+  }
+
+  function parseQty(qty) {
+    const m = String(qty).trim().match(/^(\d+(?:[.,]\d+)?)\s*(.+)$/);
+    if (!m) return { amount: 0, unit: String(qty).trim() };
+    return {
+      amount: parseFloat(m[1].replace(",", ".")),
+      unit: m[2].trim()
+    };
+  }
+
+  function formatQty(amount, unit) {
+    const n = Number.isInteger(amount) ? String(amount) : String(Math.round(amount * 10) / 10).replace(".", ",");
+    return unit ? n + " " + unit : n;
+  }
+
+  function showToast(message) {
+    toastEl.textContent = message;
+    toastEl.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {
+      toastEl.classList.remove("show");
+    }, 1800);
+  }
+
+  function addProductFromDish(dishId, product) {
+    const key = contribKey(dishId, product.id);
+    if (contributed.has(key)) return;
+    const parsed = parseQty(product.qty);
+    const existing = cart.get(product.id);
+    if (existing) {
+      if (existing.unit === parsed.unit) {
+        existing.amount += parsed.amount;
+      } else {
+        existing.amount += parsed.amount;
+      }
+    } else {
+      cart.set(product.id, {
+        id: product.id,
+        name: product.name,
+        amount: parsed.amount,
+        unit: parsed.unit
+      });
+    }
+    contributed.add(key);
+  }
+
+  function addDish(dishId) {
+    const dish = DISHES.find(function (d) { return d.id === dishId; });
+    if (!dish) return;
+    dish.products.forEach(function (p) {
+      addProductFromDish(dishId, p);
+    });
+    render();
+  }
+
+  function removeProduct(productId) {
+    cart.delete(productId);
+    Array.from(contributed).forEach(function (key) {
+      if (key.endsWith("::" + productId)) contributed.delete(key);
+    });
+    render();
+  }
+
+  function productInCart(productId) {
+    return cart.has(productId);
+  }
+
+  function dishFullyAdded(dish) {
+    return dish.products.every(function (p) {
+      return contributed.has(contribKey(dish.id, p.id));
+    });
+  }
+
+  function renderSource() {
+    sourcePanel.innerHTML = DISHES.map(function (dish) {
+      const allIn = dishFullyAdded(dish);
+      const rows = dish.products.map(function (p) {
+        const selected = productInCart(p.id);
+        const fromThisDish = contributed.has(contribKey(dish.id, p.id));
+        return (
+          '<div class="product-row' + (selected ? " is-selected" : "") + '" data-product-id="' + p.id + '">' +
+            '<span class="product-name">' + escapeHtml(p.name) + "</span>" +
+            '<span class="product-qty">' + escapeHtml(p.qty) + "</span>" +
+            '<button type="button" class="btn-add' + (fromThisDish ? " is-added" : "") + '"' +
+              ' data-component="product-add"' +
+              ' data-product-id="' + p.id + '"' +
+              ' data-dish-id="' + dish.id + '"' +
+              (fromThisDish ? " disabled" : "") +
+              ' aria-label="' + (fromThisDish ? "Уже добавлено из этого блюда: " : "Добавить: ") + escapeAttr(p.name) + '"' +
+            ">" + (fromThisDish ? "✓" : "+") + "</button>" +
+          "</div>"
+        );
+      }).join("");
+
+      return (
+        '<div class="dish-group" data-dish-id="' + dish.id + '">' +
+          '<div class="dish-head">' +
+            '<h2 class="dish-name">' + escapeHtml(dish.name) + "</h2>" +
+            '<button type="button" class="dish-add-all" data-component="dish-add-all" data-dish-id="' + dish.id + '"' +
+              (allIn ? " disabled" : "") +
+            ">" + (allIn ? "Всё добавлено" : "Добавить всё") + "</button>" +
+          "</div>" +
+          rows +
+        "</div>"
+      );
+    }).join("");
+  }
+
+  function renderCart() {
+    const items = Array.from(cart.values());
+    if (items.length === 0) {
+      listCount.textContent = "Пока пусто";
+      listBody.innerHTML =
+        '<div class="list-empty">' +
+          "<strong>Список пока пуст</strong>" +
+          "<span>Нажимайте «+» у продуктов слева — они появятся здесь.</span>" +
+        "</div>";
+      return;
+    }
+
+    listCount.textContent = items.length + " " + plural(items.length, "позиция", "позиции", "позиций");
+    listBody.innerHTML = items.map(function (item) {
+      return (
+        '<div class="cart-row" data-product-id="' + item.id + '">' +
+          '<span class="cart-name">' + escapeHtml(item.name) + "</span>" +
+          '<span class="cart-qty">' + escapeHtml(formatQty(item.amount, item.unit)) + "</span>" +
+          '<button type="button" class="btn-remove" data-component="product-remove" data-product-id="' + item.id + '"' +
+            ' aria-label="Убрать: ' + escapeAttr(item.name) + '">×</button>' +
+        "</div>"
+      );
+    }).join("");
+  }
+
+  function render() {
+    renderSource();
+    renderCart();
+  }
+
+  function plural(n, one, few, many) {
+    const mod10 = n % 10;
+    const mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return one;
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+    return many;
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+  function escapeAttr(s) { return escapeHtml(s); }
+
+  function findProduct(dishId, productId) {
+    const dish = DISHES.find(function (d) { return d.id === dishId; });
+    if (!dish) return null;
+    return dish.products.find(function (p) { return p.id === productId; }) || null;
+  }
+
+  function cartText() {
+    return Array.from(cart.values())
+      .map(function (item) {
+        return item.name + " — " + formatQty(item.amount, item.unit);
+      })
+      .join("\n");
+  }
+
+  sourcePanel.addEventListener("click", function (e) {
+    const addBtn = e.target.closest('[data-component="product-add"]');
+    if (addBtn && !addBtn.disabled) {
+      const dishId = addBtn.getAttribute("data-dish-id");
+      const product = findProduct(dishId, addBtn.getAttribute("data-product-id"));
+      if (product) {
+        addProductFromDish(dishId, product);
+        render();
+      }
+      return;
+    }
+    const allBtn = e.target.closest('[data-component="dish-add-all"]');
+    if (allBtn && !allBtn.disabled) {
+      addDish(allBtn.getAttribute("data-dish-id"));
+    }
+  });
+
+  listBody.addEventListener("click", function (e) {
+    const removeBtn = e.target.closest('[data-component="product-remove"]');
+    if (removeBtn) {
+      removeProduct(removeBtn.getAttribute("data-product-id"));
+    }
+  });
+
+  copyBtn.addEventListener("click", function () {
+    if (cart.size === 0) {
+      showToast("Сначала добавьте продукты в список.");
+      return;
+    }
+    const text = cartText();
+    function ok() { showToast("Список скопирован."); }
+    function fail() {
+      // Fallback for file:// without clipboard permission
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        ok();
+      } catch (err) {
+        showToast("Не удалось скопировать.");
+      }
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(ok).catch(fail);
+    } else {
+      fail();
+    }
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

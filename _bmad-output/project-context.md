@@ -57,7 +57,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Browser Supabase client for auth/UI only; data + AI via server client/actions
 - UI: Soft Workshop / light-only desktop; Russian copy; English glossary ids in domain (`Menu`, `Recipe`, `Snack`, …)
 - Suggestions: invent → persist → assign **persisted ids only**; eligibility = fridge-keep + refusal/dislike hard-suppress
-- Shopping list: `buildShoppingList(menuId)` snapshot (ingredient names + snacks); no in-app cart edit
+- Shopping list: dish-grouped SOURCE via `buildShoppingSourceFromMenu(menu)`; client curated cart (add/merge/remove); copy curated lines only; empty cart on visit
 
 ### Testing Rules
 

@@ -1,5 +1,5 @@
 /**
- * Pure logic checks for Shopping list quantity formatting + copy.
+ * Pure logic checks for Shopping list quantity, dish-source merge, curated copy.
  * Usage: node scripts/verify-shopping-list-logic.mjs
  */
 
@@ -35,34 +35,71 @@ function formatLineLabel(ingredientName, amount, unit) {
   return qty ? `${ingredientName} — ${qty}` : ingredientName;
 }
 
-function formatShoppingListCopy(list) {
-  if (list.lines.length === 0) {
-    return "Список покупок пуст.";
-  }
-  const sections = {
-    ingredient: [],
-    pantry: [],
-    snack: [],
-  };
-  for (const line of list.lines) {
-    sections[line.lineKind].push(
-      `• ${formatLineLabel(line.ingredientName, line.quantityAmount, line.quantityUnit)}`,
-    );
-  }
-  const parts = ["Список покупок"];
-  if (sections.ingredient.length) {
-    parts.push("", "Блюда:", ...sections.ingredient);
-  }
-  if (sections.pantry.length) {
-    parts.push("", "Базовые продукты:", ...sections.pantry);
-  }
-  if (sections.snack.length) {
-    parts.push("", "Перекусы:", ...sections.snack);
-  }
-  return parts.join("\n");
+/** Mirror of src/domain/suggestions/dish-similarity.ts normalizeDishName */
+function normalizeDishName(name) {
+  return name
+    .trim()
+    .toLowerCase()
+    .replaceAll("ё", "е")
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-/** Aggregate amount_per_serving × servings by name+unit. */
+function shoppingProductKey(name, unit) {
+  return `${normalizeDishName(name)}|${unit ?? ""}`;
+}
+
+function contributionKey(dishId, productKey) {
+  return `${dishId}::${productKey}`;
+}
+
+function formatCuratedShoppingCopy(lines) {
+  if (lines.length === 0) return "Список покупок пуст.";
+  const body = lines.map(
+    (line) =>
+      `• ${formatLineLabel(line.ingredientName, line.quantityAmount, line.quantityUnit)}`,
+  );
+  return ["Список покупок", "", ...body].join("\n");
+}
+
+function addProductContribution(cart, contributed, dishId, product) {
+  const cKey = contributionKey(dishId, product.productKey);
+  if (contributed.has(cKey)) return;
+  const existing = cart.get(product.productKey);
+  if (!existing) {
+    cart.set(product.productKey, {
+      productKey: product.productKey,
+      ingredientName: product.name,
+      quantityAmount: product.quantityAmount,
+      quantityUnit: product.quantityUnit,
+    });
+  } else if (
+    existing.quantityAmount != null &&
+    product.quantityAmount != null &&
+    existing.quantityUnit === product.quantityUnit
+  ) {
+    existing.quantityAmount += product.quantityAmount;
+  }
+  contributed.add(cKey);
+}
+
+function addProductAcrossAllDishes(cart, contributed, dishes, productKey) {
+  for (const dish of dishes) {
+    const product = dish.products.find((p) => p.productKey === productKey);
+    if (!product) continue;
+    addProductContribution(cart, contributed, dish.id, product);
+  }
+}
+
+function removeCuratedProduct(cart, contributed, productKey) {
+  cart.delete(productKey);
+  for (const key of [...contributed]) {
+    if (key.endsWith(`::${productKey}`)) contributed.delete(key);
+  }
+}
+
+/** Aggregate amount_per_serving × servings by name+unit (legacy flat snapshot). */
 function scaledIngredientAmount(row, servings) {
   if (!row.unit || row.amount_per_serving <= 0) return null;
   return row.amount_per_serving * servings;
@@ -110,34 +147,29 @@ function aggregateLines(slots, ingredientsByRecipe) {
   return [...byKey.values()];
 }
 
-const empty = formatShoppingListCopy({ lines: [] });
+const empty = formatCuratedShoppingCopy([]);
 if (empty !== "Список покупок пуст.") {
   console.error("FAIL empty", empty);
   process.exit(1);
 }
 
-const text = formatShoppingListCopy({
-  lines: [
-    {
-      ingredientName: "курица",
-      lineKind: "ingredient",
-      quantityAmount: 360,
-      quantityUnit: "g",
-    },
-    {
-      ingredientName: "соль",
-      lineKind: "pantry",
-      quantityAmount: 4,
-      quantityUnit: "g",
-    },
-    {
-      ingredientName: "йогурт",
-      lineKind: "snack",
-      quantityAmount: null,
-      quantityUnit: null,
-    },
-  ],
-});
+const text = formatCuratedShoppingCopy([
+  {
+    ingredientName: "курица",
+    quantityAmount: 360,
+    quantityUnit: "g",
+  },
+  {
+    ingredientName: "соль",
+    quantityAmount: 4,
+    quantityUnit: "g",
+  },
+  {
+    ingredientName: "йогурт",
+    quantityAmount: null,
+    quantityUnit: null,
+  },
+]);
 
 if (!text.includes("курица — 360 г") || !text.includes("соль — 4 г")) {
   console.error("FAIL qty copy", text);
@@ -145,6 +177,103 @@ if (!text.includes("курица — 360 г") || !text.includes("соль — 4 
 }
 if (!text.includes("йогурт") || text.includes("йогурт —")) {
   console.error("FAIL snack no qty", text);
+  process.exit(1);
+}
+if (text.includes("Блюда:") || text.includes("Базовые продукты:") || text.includes("Перекусы:")) {
+  console.error("FAIL no kind sections", text);
+  process.exit(1);
+}
+
+const saltKey = shoppingProductKey("Соль", "g");
+const dishes = [
+  {
+    id: "fish",
+    products: [
+      { productKey: saltKey, name: "Соль", quantityAmount: 4, quantityUnit: "g" },
+    ],
+  },
+  {
+    id: "carrot",
+    products: [
+      { productKey: saltKey, name: "соль", quantityAmount: 4, quantityUnit: "g" },
+    ],
+  },
+  {
+    id: "pasta",
+    products: [
+      { productKey: saltKey, name: "соль", quantityAmount: 8, quantityUnit: "g" },
+    ],
+  },
+];
+const cart = new Map();
+const contributed = new Set();
+addProductAcrossAllDishes(cart, contributed, dishes, saltKey);
+// idempotent re-add
+addProductAcrossAllDishes(cart, contributed, dishes, saltKey);
+
+const salt = cart.get(saltKey);
+if (!salt || salt.quantityAmount !== 16) {
+  console.error("FAIL merge salt across dishes", salt);
+  process.exit(1);
+}
+if (
+  !contributed.has(contributionKey("fish", saltKey)) ||
+  !contributed.has(contributionKey("carrot", saltKey)) ||
+  !contributed.has(contributionKey("pasta", saltKey))
+) {
+  console.error("FAIL contributions", contributed);
+  process.exit(1);
+}
+
+removeCuratedProduct(cart, contributed, saltKey);
+if (cart.has(saltKey) || contributed.size !== 0) {
+  console.error("FAIL remove clears contributions", cart, contributed);
+  process.exit(1);
+}
+
+const pepperKeyYe = shoppingProductKey("Перец черный молотый", "g");
+const pepperKeyYo = shoppingProductKey("Перец чёрный молотый", "g");
+if (pepperKeyYe !== pepperKeyYo) {
+  console.error("FAIL ё/е normalize", pepperKeyYe, pepperKeyYo);
+  process.exit(1);
+}
+const pepperDishes = [
+  {
+    id: "salad",
+    products: [
+      {
+        productKey: pepperKeyYe,
+        name: "Перец черный молотый",
+        quantityAmount: 4,
+        quantityUnit: "g",
+      },
+    ],
+  },
+  {
+    id: "fish2",
+    products: [
+      {
+        productKey: pepperKeyYo,
+        name: "Перец чёрный молотый",
+        quantityAmount: 2,
+        quantityUnit: "g",
+      },
+    ],
+  },
+];
+const pepperCart = new Map();
+const pepperContrib = new Set();
+addProductAcrossAllDishes(pepperCart, pepperContrib, pepperDishes, pepperKeyYe);
+const pepper = pepperCart.get(pepperKeyYe);
+if (!pepper || pepper.quantityAmount !== 6) {
+  console.error("FAIL merge pepper ё/е", pepper);
+  process.exit(1);
+}
+
+const creamA = shoppingProductKey("сливки 20%", "ml");
+const creamB = shoppingProductKey("сливки 20 %", "ml");
+if (creamA !== creamB) {
+  console.error("FAIL punctuation/space normalize", creamA, creamB);
   process.exit(1);
 }
 
@@ -167,4 +296,4 @@ if (formatQuantity(2.4, "pcs") !== "3 шт") {
   process.exit(1);
 }
 
-console.log("PASS: shopping list quantity + copy logic");
+console.log("PASS: shopping list quantity + curated merge + copy logic");
