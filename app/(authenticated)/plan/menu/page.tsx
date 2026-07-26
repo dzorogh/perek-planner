@@ -1,21 +1,24 @@
 import Link from "next/link";
 
-import { ContinueToShoppingButton } from "@/components/menu/continue-to-shopping-button";
-import { DayCardGrid } from "@/components/menu/day-card-grid";
-import { MenuDishList } from "@/components/menu/menu-dish-list";
-import { MenuEquipmentEditor } from "@/components/menu/menu-equipment-editor";
+import { MenuSettingsChips } from "@/components/menu/menu-settings-chips";
+import { MenuSheetGrid } from "@/components/menu/menu-sheet-grid";
 import { MenuTotalsBar } from "@/components/recipes/recipe-value-line";
-import { summarizeMenuDishes } from "@/domain/menu/dish-summary";
+import { MEAL_SLOTS, type MealSlot } from "@/domain/menu/constants";
 import { loadMenuSkeleton } from "@/domain/menu/load-menu";
 import { sumMenuTotals } from "@/domain/recipes/scale-totals";
 import { createClient } from "@/lib/supabase/server";
 
 type PlanMenuPageProps = {
-  searchParams: Promise<{ menuId?: string; error?: string }>;
+  searchParams: Promise<{ menuId?: string }>;
 };
 
+function mealsFromSlots(slots: { meal: string }[]): MealSlot[] {
+  const present = new Set(slots.map((s) => s.meal));
+  return MEAL_SLOTS.filter((m) => present.has(m));
+}
+
 export default async function PlanMenuPage({ searchParams }: PlanMenuPageProps) {
-  const { menuId: rawMenuId, error: errorParam } = await searchParams;
+  const { menuId: rawMenuId } = await searchParams;
   const menuId = rawMenuId?.trim() ?? "";
 
   if (!menuId) {
@@ -55,34 +58,28 @@ export default async function PlanMenuPage({ searchParams }: PlanMenuPageProps) 
     );
   }
 
+  const people = menu.slots.find((s) => s.servings > 0)?.servings ?? 2;
+  const chipMeals: MealSlot[] = [
+    ...mealsFromSlots(menu.slots),
+    ...(menu.snacks.length > 0 ? (["snack"] as const) : []),
+  ];
+
   return (
     <div className="w-full">
-      <div className="mb-8 max-w-xl">
+      <div className="mb-2">
         <h1 className="page-title">Меню</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Меню на {menu.dayCount}{" "}
-          {menu.dayCount === 1
-            ? "день"
-            : menu.dayCount >= 2 && menu.dayCount <= 4
-              ? "дня"
-              : "дней"}
-          ,{" "}
-          {menu.slots[0]?.servings ?? 2} чел. на приём — проверьте слоты, при
-          необходимости замените.
+          Проверьте блюда и при необходимости замените. Список — в шагах выше.
         </p>
-        {errorParam === "continue" ? (
-          <p className="mt-2 text-sm text-warning-fg" role="alert">
-            Не удалось продолжить. Попробуйте снова.
-          </p>
-        ) : null}
+        <MenuSettingsChips
+          dayCount={menu.dayCount}
+          people={people}
+          meals={chipMeals}
+          equipment={menu.availableEquipment}
+        />
       </div>
 
-      <MenuEquipmentEditor
-        menuId={menu.id}
-        initialEquipment={menu.availableEquipment}
-      />
-
-      <DayCardGrid
+      <MenuSheetGrid
         menuId={menu.id}
         dayCount={menu.dayCount}
         slots={menu.slots}
@@ -90,15 +87,14 @@ export default async function PlanMenuPage({ searchParams }: PlanMenuPageProps) 
       />
 
       <MenuTotalsBar
+        className="mt-5 rounded-lg border border-border bg-surface px-5 py-4"
+        dayCount={menu.dayCount}
+        people={people}
         totals={sumMenuTotals(menu.slots, {
           snacks: menu.snacks,
-          snackServings: menu.slots.find((s) => s.servings > 0)?.servings ?? 2,
+          snackServings: people,
         })}
       />
-
-      <MenuDishList dishes={summarizeMenuDishes(menu.slots)} />
-
-      <ContinueToShoppingButton menuId={menu.id} />
     </div>
   );
 }

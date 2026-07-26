@@ -104,3 +104,21 @@ All previously open items were closed in the deferred-work sweep. Strikethrough 
 - `canClear` only for carb — MVP secondary clear scope from story; not expanding clear to veg/soup in 6.3
 - `verify-plate-role-labels-logic.mjs` duplicates domain helpers — same pure-script pattern as other verify:logic files
 - Parallel empty-role «Предложить» lacks cell-level busy — busy overlay still keyed on shared `recipeId`; empty lines can race
+
+## Deferred from: spec-menu-sheet-redesign.md (2026-07-26)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-menu-sheet-redesign.md`
+  summary: Align remote Supabase migration version fingerprint for `fruit` with local `20260726150000_plate_role_fruit.sql` (remote listed as `20260726113927_plate_role_fruit`).
+  evidence: Blind Hunter found local file version ≠ remote `list_migrations` version; risk of drift on other envs.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-menu-sheet-redesign.md`
+  summary: Expand e2e beyond sheets + refusal + Список — assert chips, fruit role, portion meta, totals D, absence of cut blocks.
+  evidence: `e2e/planning-flow.spec.ts` still only covers happy-path structure; AC gaps noted in adversarial review.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-menu-sheet-redesign.md`
+  summary: Refresh docs (`docs/api-contracts.md`, `docs/component-inventory.md`) after removing UJ-1 CTA / DayCardGrid / MenuDishList.
+  evidence: Docs still list `continueToShoppingListAction`, `getSlotEditPassedAction`, deleted components.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-menu-sheet-redesign.md`
+  summary: Decide fate of leftover `uj1-gate.ts` + `slot_edit_passed_at` column now that shopping is ungated.
+  evidence: Gate removed from nav/build-list; verify-uj1 still mirrors pure predicate; column unused by new UX.

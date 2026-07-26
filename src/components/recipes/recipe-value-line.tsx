@@ -1,7 +1,8 @@
 import {
   formatCompactValueLine,
-  formatKbjuLine,
+  formatMenuTotalsDisplay,
   formatPerServingDetailLine,
+  formatPortionValueLine,
   scalePerServing,
   type RecipePerServingValue,
   type ScaledRecipeTotals,
@@ -11,17 +12,25 @@ type RecipeValueLineProps = {
   value: RecipePerServingValue;
   /** Scale factor (slot servings or batch totalServings). Default 1 = per serving. */
   servings?: number;
+  /**
+   * When set, render «N порции · unit₽ · unit ккал» instead of scaled compact line.
+   * `servings` is ignored for the numeric scale in this mode.
+   */
+  portionCount?: number;
   className?: string;
 };
 
-/** Compact «360 ₽ · 900 ккал» for slot / list rows. */
+/** Compact «360 ₽ · 900 ккал» or portion «4 порции · 70 ₽ · 350 ккал». */
 export function RecipeValueLine({
   value,
   servings = 1,
+  portionCount,
   className = "text-xs tabular-nums text-muted-foreground",
 }: RecipeValueLineProps) {
-  const totals = scalePerServing(value, servings);
-  const line = formatCompactValueLine(totals);
+  const line =
+    portionCount != null && portionCount >= 1
+      ? formatPortionValueLine(value, portionCount)
+      : formatCompactValueLine(scalePerServing(value, servings));
   if (!line) return null;
   return <p className={className}>{line}</p>;
 }
@@ -41,23 +50,23 @@ export function RecipeValueDetail({ value }: RecipeValueDetailProps) {
 
 type MenuTotalsBarProps = {
   totals: ScaledRecipeTotals;
+  dayCount: number;
+  people: number;
   className?: string;
 };
 
 /** Menu-level total block; hidden when nothing known. */
 export function MenuTotalsBar({
   totals,
-  className = "mt-6 max-w-xl",
+  dayCount,
+  people,
+  className = "mt-6",
 }: MenuTotalsBarProps) {
-  const compact = formatCompactValueLine(totals);
-  const kbju = formatKbjuLine(totals);
-  // Compact already has kcal; show macros-only remainder when present.
-  const macrosOnly = (() => {
-    if (!kbju) return null;
-    const parts = kbju.split(" · ").filter((p) => !p.endsWith(" ккал"));
-    return parts.length > 0 ? parts.join(" · ") : null;
-  })();
-  if (!compact && !macrosOnly) return null;
+  const { primary, perCapita } = formatMenuTotalsDisplay(totals, {
+    dayCount,
+    people,
+  });
+  if (!primary && !perCapita) return null;
 
   return (
     <section
@@ -67,15 +76,17 @@ export function MenuTotalsBar({
     >
       <h2
         id="menu-totals-title"
-        className="text-sm font-semibold text-foreground"
+        className="text-sm font-semibold text-accent"
       >
         Итого по меню
       </h2>
-      <div className="mt-2 space-y-1 text-sm tabular-nums text-muted-foreground">
-        {compact ? (
-          <p className="font-semibold text-foreground">{compact}</p>
+      <div className="mt-2 space-y-1.5 text-sm tabular-nums">
+        {primary ? (
+          <p className="font-semibold text-foreground">{primary}</p>
         ) : null}
-        {macrosOnly ? <p>{macrosOnly}</p> : null}
+        {perCapita ? (
+          <p className="text-muted-foreground">{perCapita}</p>
+        ) : null}
       </div>
     </section>
   );

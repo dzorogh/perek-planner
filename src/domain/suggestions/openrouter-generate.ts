@@ -49,7 +49,7 @@ Hard rules when dayCount >= 2 and candidates allow:
 - Prefer candidates with freshlyInvented=true or recentlyUsed=false.
 - You alone judge culinary near-duplicates (no keyword filter in code). Be strict.
 - When currentMenuDishes is non-empty (slot replace): do not assign a near-variant of those names.
-- Breakfast / second_breakfast / afternoon_snack: cooked morning dishes ONLY with plate_role=main. Never assign lunch/dinner plates or snacks. Never set companion.
+- Breakfast: cooked morning with plate_role=main and fruit with plate_role=fruit when openRoles lists them. Second_breakfast / afternoon_snack: plate_role=main only. Never assign lunch/dinner plates or snacks. Never set companion.
 - Lunch: roles soup+protein+veg+carb when openRoles lists them. Dinner/late_dinner: protein+veg+carb — NO soup.
 - Prefer dishes[] in the response. You may use legacy recipeId + companionRecipeId (carb) for protein+carb only.
 - NEVER invent plateKind / needs_companion architecture. NEVER invent recipe ids.

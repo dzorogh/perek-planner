@@ -72,18 +72,18 @@ const POSITION_SYSTEM = `You invent ONE new Russian home-cooking recipe for a ho
 This dish will be cooked once and eaten on TWO consecutive menu days (batch cook).
 Plate role is FIXED by the app — invent recipe content for that role only.
 Respond with a single JSON object:
-{"recipe":{"name":"...","body_text":"...","fridge_keep_days":N,"plate_role":"main"|"soup"|"protein"|"veg"|"carb","covers_roles":["protein","carb"]?,"required_equipment":["stove"|"oven"|"air_fryer"|"grill"|"multicooker"|"pressure_cooker"|"microwave",...],"price_rub_per_serving":N,"nutrition_per_serving":{"kcal":N,"protein_g":N,"fat_g":N,"carbs_g":N},"critical_ingredients":[{"name":"...","kind":"critical"|"pantry","amount":N,"unit":"g"|"ml"|"pcs"|"tsp"|"tbsp"},...]}}.
+{"recipe":{"name":"...","body_text":"...","fridge_keep_days":N,"plate_role":"main"|"fruit"|"soup"|"protein"|"veg"|"carb","covers_roles":["protein","carb"]?,"required_equipment":["stove"|"oven"|"air_fryer"|"grill"|"multicooker"|"pressure_cooker"|"microwave",...],"price_rub_per_serving":N,"nutrition_per_serving":{"kcal":N,"protein_g":N,"fat_g":N,"carbs_g":N},"critical_ingredients":[{"name":"...","kind":"critical"|"pantry","amount":N,"unit":"g"|"ml"|"pcs"|"tsp"|"tbsp"},...]}}.
 Rules:
-- required_equipment: non-empty; MUST be ⊆ availableEquipment. HARD: never invent a dish needing equipment outside availableEquipment.
+- required_equipment: MUST be ⊆ availableEquipment; use [] when no appliances needed. HARD: never invent a dish needing equipment outside availableEquipment.
 - Invent exactly ONE recipe for the requested plate_role.
 - Optional covers_roles for one-pots (e.g. плов as protein covering protein+carb). Only claim roles the dish truly covers.
 - HARD: never invent a near-duplicate of currentMenuDishes / avoidNames / previousMenusDishes.
 - fridge_keep_days: integer 1..7, MUST be >= menuDayCount from the request.
-- body_text: SHORT Russian steps, each on its own line numbered "1. ", "2. ", … (protein/main 3–5; soup/veg/carb 2–4).
+- body_text: SHORT Russian steps, each on its own line numbered "1. ", "2. ", … (protein/main 3–5; soup/veg/carb 2–4; fruit may be 1–2 or empty prep).
 - HARD shopping-list completeness: every buyable food in name or body_text MUST appear in critical_ingredients with amount+unit per 1 adult serving.
-- At least one kind=critical ingredient. Prefer 3–8 ingredients (sides 2–5).
+- At least one kind=critical ingredient. Prefer 3–8 ingredients (sides/fruit 1–5).
 - price_rub_per_serving: integer RUBLES; NEVER above 400; omit if uncertain (no zeros).
-- Breakfast / second_breakfast / afternoon_snack: morning food ONLY; plate_role=main. NEVER roast chicken, soup, plov, cutlets.
+- Breakfast / second_breakfast / afternoon_snack: morning food for plate_role=main; plate_role=fruit = fruit / fruit dish. NEVER roast chicken, soup, plov, cutlets.
 - Lunch / dinner / late_dinner protein: real savory meal; prefer meat/fish. NEVER morning forms.
 - NEVER invent snacks / перекусы. Do not invent recipe ids. NEVER plate_kind / companion.
 - Honor operatorTasteNotes: constraint PRIMARY; exampleDish secondary.`;

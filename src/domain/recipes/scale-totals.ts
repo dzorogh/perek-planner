@@ -194,10 +194,10 @@ function formatMacroG(value: number | null): string | null {
   if (value == null || !Number.isFinite(value) || value < 0) return null;
   const rounded =
     value >= 10 ? Math.round(value) : Math.round(value * 10) / 10;
-  const label = Number.isInteger(rounded)
-    ? String(rounded)
-    : String(rounded).replace(".", ",");
-  return label;
+  if (!Number.isInteger(rounded)) {
+    return String(rounded).replace(".", ",");
+  }
+  return rounded.toLocaleString("ru-RU");
 }
 
 /** «450 ккал · Б 25 · Ж 12 · У 40» — omit missing parts. Null if nothing known. */
@@ -229,6 +229,85 @@ export function formatCompactValueLine(totals: ScaledRecipeTotals): string | nul
     parts.push(`${Math.round(totals.caloriesKcal)} ккал`);
   }
   return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+/** Russian plural for порция. */
+export function portionCountLabel(count: number): string {
+  const n = Math.trunc(count);
+  if (!Number.isFinite(n) || n < 1) return "0 порций";
+  const n100 = n % 100;
+  const n10 = n % 10;
+  if (n100 >= 11 && n100 <= 14) return `${n} порций`;
+  if (n10 === 1) return `${n} порция`;
+  if (n10 >= 2 && n10 <= 4) return `${n} порции`;
+  return `${n} порций`;
+}
+
+/**
+ * Dish row meta: «4 порции · 70 ₽ · 350 ккал»
+ * Unit price/kcal = one portion; count = day-occurrences × people.
+ */
+export function formatPortionValueLine(
+  value: RecipePerServingValue,
+  portionCount: number,
+): string | null {
+  const unit = scalePerServing(value, 1);
+  const price = formatPriceRub(unit.priceCents);
+  const kcal =
+    unit.caloriesKcal != null && Number.isFinite(unit.caloriesKcal)
+      ? `${Math.round(unit.caloriesKcal).toLocaleString("ru-RU")} ккал`
+      : null;
+  const parts = [portionCountLabel(portionCount)];
+  if (price) parts.push(price);
+  if (kcal) parts.push(kcal);
+  return parts.join(" · ");
+}
+
+/** Macros with gram units: «Белки 940 г · Жиры 740 г · Углеводы 1 536 г». */
+export function formatMacrosWordsLine(totals: {
+  proteinG: number | null;
+  fatG: number | null;
+  carbsG: number | null;
+}): string | null {
+  const parts: string[] = [];
+  const p = formatMacroG(totals.proteinG);
+  const f = formatMacroG(totals.fatG);
+  const c = formatMacroG(totals.carbsG);
+  if (p != null) parts.push(`Белки ${p} г`);
+  if (f != null) parts.push(`Жиры ${f} г`);
+  if (c != null) parts.push(`Углеводы ${c} г`);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+/**
+ * Menu totals D: primary «… за меню», secondary «~W ккал / чел. / день».
+ */
+export function formatMenuTotalsDisplay(
+  totals: ScaledRecipeTotals,
+  opts: { dayCount: number; people: number },
+): { primary: string | null; perCapita: string | null } {
+  const price = formatPriceRub(totals.priceCents);
+  const kcal =
+    totals.caloriesKcal != null && Number.isFinite(totals.caloriesKcal)
+      ? `${Math.round(totals.caloriesKcal).toLocaleString("ru-RU")} ккал`
+      : null;
+  const macros = formatMacrosWordsLine(totals);
+  const head = [price, kcal, macros].filter(Boolean).join(" · ");
+  const primary = head ? `${head} за меню` : null;
+
+  let perCapita: string | null = null;
+  const days = Math.trunc(opts.dayCount);
+  const people = Math.trunc(opts.people);
+  if (
+    totals.caloriesKcal != null &&
+    Number.isFinite(totals.caloriesKcal) &&
+    days >= 1 &&
+    people >= 1
+  ) {
+    const per = Math.round(totals.caloriesKcal / days / people);
+    perCapita = `~${per.toLocaleString("ru-RU")} ккал / чел. / день`;
+  }
+  return { primary, perCapita };
 }
 
 /**

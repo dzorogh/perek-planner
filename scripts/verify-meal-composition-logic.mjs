@@ -3,10 +3,10 @@
  * Usage: node scripts/verify-meal-composition-logic.mjs
  */
 
-const PLATE_ROLES = ["main", "soup", "protein", "veg", "carb", "snack"];
+const PLATE_ROLES = ["main", "soup", "protein", "veg", "carb", "fruit", "snack"];
 
 const MEAL_TEMPLATES = {
-  breakfast: ["main"],
+  breakfast: ["main", "fruit"],
   second_breakfast: ["main"],
   afternoon_snack: ["main"],
   lunch: ["soup", "protein", "veg", "carb"],
@@ -36,11 +36,12 @@ function assertTemplateShape(meal) {
       roles.every((r, i) => r === HARVARD[i])
     );
   }
-  if (
-    meal === "breakfast" ||
-    meal === "second_breakfast" ||
-    meal === "afternoon_snack"
-  ) {
+  if (meal === "breakfast") {
+    return (
+      roles.length === 2 && roles[0] === "main" && roles[1] === "fruit"
+    );
+  }
+  if (meal === "second_breakfast" || meal === "afternoon_snack") {
     return roles.length === 1 && roles[0] === "main";
   }
   if (meal === "snack") {
@@ -62,7 +63,7 @@ function check(name, cond) {
 check("lunch has soup + Harvard", assertTemplateShape("lunch"));
 check("dinner Harvard no soup", assertTemplateShape("dinner"));
 check("late_dinner Harvard no soup", assertTemplateShape("late_dinner"));
-check("breakfast main only", assertTemplateShape("breakfast"));
+check("breakfast main + fruit", assertTemplateShape("breakfast"));
 check("afternoon_snack is main (Полдник ≠ Перекус)", assertTemplateShape("afternoon_snack"));
 check("snack is snack (Перекус)", assertTemplateShape("snack"));
 
@@ -90,7 +91,9 @@ check(
 
 check(
   "plate roles vocabulary",
-  PLATE_ROLES.includes("soup") && PLATE_ROLES.includes("snack"),
+  PLATE_ROLES.includes("soup") &&
+    PLATE_ROLES.includes("fruit") &&
+    PLATE_ROLES.includes("snack"),
 );
 
 /** emitRoleSlots-equivalent (inline): open roles × meals × day pairs. */

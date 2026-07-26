@@ -99,10 +99,69 @@ function formatMacroG(value) {
   if (value == null || !Number.isFinite(value) || value < 0) return null;
   const rounded =
     value >= 10 ? Math.round(value) : Math.round(value * 10) / 10;
-  const label = Number.isInteger(rounded)
-    ? String(rounded)
-    : String(rounded).replace(".", ",");
-  return label;
+  if (!Number.isInteger(rounded)) {
+    return String(rounded).replace(".", ",");
+  }
+  return rounded.toLocaleString("ru-RU");
+}
+
+function portionCountLabel(count) {
+  const n = Math.trunc(count);
+  if (!Number.isFinite(n) || n < 1) return "0 порций";
+  const n100 = n % 100;
+  const n10 = n % 10;
+  if (n100 >= 11 && n100 <= 14) return `${n} порций`;
+  if (n10 === 1) return `${n} порция`;
+  if (n10 >= 2 && n10 <= 4) return `${n} порции`;
+  return `${n} порций`;
+}
+
+function formatPortionValueLine(value, portionCount) {
+  const unit = scalePerServing(value, 1);
+  const price = formatPriceRub(unit.priceCents);
+  const kcal =
+    unit.caloriesKcal != null && Number.isFinite(unit.caloriesKcal)
+      ? `${Math.round(unit.caloriesKcal).toLocaleString("ru-RU")} ккал`
+      : null;
+  const parts = [portionCountLabel(portionCount)];
+  if (price) parts.push(price);
+  if (kcal) parts.push(kcal);
+  return parts.join(" · ");
+}
+
+function formatMacrosWordsLine(totals) {
+  const parts = [];
+  const p = formatMacroG(totals.proteinG);
+  const f = formatMacroG(totals.fatG);
+  const c = formatMacroG(totals.carbsG);
+  if (p != null) parts.push(`Белки ${p} г`);
+  if (f != null) parts.push(`Жиры ${f} г`);
+  if (c != null) parts.push(`Углеводы ${c} г`);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+function formatMenuTotalsDisplay(totals, opts) {
+  const price = formatPriceRub(totals.priceCents);
+  const kcal =
+    totals.caloriesKcal != null && Number.isFinite(totals.caloriesKcal)
+      ? `${Math.round(totals.caloriesKcal).toLocaleString("ru-RU")} ккал`
+      : null;
+  const macros = formatMacrosWordsLine(totals);
+  const head = [price, kcal, macros].filter(Boolean).join(" · ");
+  const primary = head ? `${head} за меню` : null;
+  let perCapita = null;
+  const days = Math.trunc(opts.dayCount);
+  const people = Math.trunc(opts.people);
+  if (
+    totals.caloriesKcal != null &&
+    Number.isFinite(totals.caloriesKcal) &&
+    days >= 1 &&
+    people >= 1
+  ) {
+    const per = Math.round(totals.caloriesKcal / days / people);
+    perCapita = `~${per.toLocaleString("ru-RU")} ккал / чел. / день`;
+  }
+  return { primary, perCapita };
 }
 
 function formatKbjuLine(totals) {
@@ -361,6 +420,73 @@ assert(
     carbsGPerServing: null,
   }) === null,
 );
+assert(
+  "portion meta with price+kcal",
+  formatPortionValueLine(
+    {
+      priceCentsPerServing: 7000,
+      caloriesKcalPerServing: 350,
+      proteinGPerServing: null,
+      fatGPerServing: null,
+      carbsGPerServing: null,
+    },
+    4,
+  ) === "4 порции · 70 ₽ · 350 ккал",
+);
+assert(
+  "portion meta keeps count without price/kcal",
+  formatPortionValueLine(
+    {
+      priceCentsPerServing: null,
+      caloriesKcalPerServing: null,
+      proteinGPerServing: null,
+      fatGPerServing: null,
+      carbsGPerServing: null,
+    },
+    4,
+  ) === "4 порции",
+);
+assert(
+  "macros words use ru-RU thousands",
+  formatMacrosWordsLine({
+    proteinG: 940,
+    fatG: 740,
+    carbsG: 1536,
+  }) === "Белки 940 г · Жиры 740 г · Углеводы 1\u00a0536 г" ||
+    formatMacrosWordsLine({
+      proteinG: 940,
+      fatG: 740,
+      carbsG: 1536,
+    }) === "Белки 940 г · Жиры 740 г · Углеводы 1 536 г",
+);
+{
+  const d = formatMenuTotalsDisplay(
+    {
+      priceCents: 800000,
+      caloriesKcal: 16320,
+      proteinG: 940,
+      fatG: 740,
+      carbsG: 1536,
+    },
+    { dayCount: 4, people: 2 },
+  );
+  assert(
+    "totals D primary ends with за меню",
+    Boolean(d.primary?.endsWith(" за меню")),
+  );
+  assert(
+    "totals D primary has localized kcal",
+    Boolean(
+      d.primary?.includes("16\u00a0320 ккал") ||
+        d.primary?.includes("16 320 ккал"),
+    ),
+  );
+  assert(
+    "totals D per-capita",
+    d.perCapita === "~2\u00a0040 ккал / чел. / день" ||
+      d.perCapita === "~2 040 ккал / чел. / день",
+  );
+}
 
 if (failed > 0) {
   console.error(`\n${failed} failed`);

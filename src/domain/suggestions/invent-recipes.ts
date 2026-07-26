@@ -35,6 +35,7 @@ import {
   OpenRouterError,
   type ChatCompletionsFn,
 } from "@/lib/openrouter/client";
+import { slog, slogError } from "@/lib/server-log";
 
 /**
  * How many *fresh* dishes we want for a staggered batch menu.
@@ -76,7 +77,7 @@ export type InventRecipeDraft = {
   plateRole: PlateRole;
   /** Multi-role one-pot claim; persisted as recipes.covers_roles. */
   coversRoles: PlateRole[] | null;
-  /** Equipment required to cook; must be ⊆ menu.available_equipment. */
+  /** Equipment required to cook; ⊆ menu.available_equipment. Empty = none. */
   requiredEquipment: EquipmentId[];
   /** Estimated cost per 1 adult serving in kopecks; omit when uncertain. */
   priceCentsPerServing: number | null;
@@ -110,20 +111,20 @@ Cover the meal mix requested: breakfast-appropriate cooked dishes AND lunch/dinn
 Plate roles are FIXED vocabulary — invent recipe CONTENT, not meal architecture.
 Use common grocery ingredients available in Russian supermarkets.
 Respond with a single JSON object:
-{"recipes":[{"name":"...","body_text":"...","fridge_keep_days":N,"plate_role":"main"|"soup"|"protein"|"veg"|"carb","covers_roles":["protein","carb"]?,"suitable_meals":["breakfast"|"lunch"|"dinner",...],"required_equipment":["stove"|"oven"|"air_fryer"|"grill"|"multicooker"|"pressure_cooker"|"microwave",...],"price_rub_per_serving":N,"nutrition_per_serving":{"kcal":N,"protein_g":N,"fat_g":N,"carbs_g":N},"critical_ingredients":[{"name":"...","kind":"critical"|"pantry","amount":N,"unit":"g"|"ml"|"pcs"|"tsp"|"tbsp"},...]}]}.
+{"recipes":[{"name":"...","body_text":"...","fridge_keep_days":N,"plate_role":"main"|"fruit"|"soup"|"protein"|"veg"|"carb","covers_roles":["protein","carb"]?,"suitable_meals":["breakfast"|"lunch"|"dinner",...],"required_equipment":["stove"|"oven"|"air_fryer"|"grill"|"multicooker"|"pressure_cooker"|"microwave",...],"price_rub_per_serving":N,"nutrition_per_serving":{"kcal":N,"protein_g":N,"fat_g":N,"carbs_g":N},"critical_ingredients":[{"name":"...","kind":"critical"|"pantry","amount":N,"unit":"g"|"ml"|"pcs"|"tsp"|"tbsp"},...]}]}.
 Rules:
-- required_equipment: non-empty array of equipment ids REQUIRED to cook the dish (subset of availableEquipment from the request). Use only: stove, oven, air_fryer, grill, multicooker, pressure_cooker, microwave. HARD: never invent a dish that needs equipment outside availableEquipment.
+- required_equipment: equipment ids REQUIRED to cook (subset of availableEquipment). Use only: stove, oven, air_fryer, grill, multicooker, pressure_cooker, microwave. Use [] when no appliances are needed (raw salad / no-heat / fruit). HARD: never invent a dish that needs equipment outside availableEquipment.
 - Prefer dishes that use the available set realistically; you need NOT use every available appliance in the batch.
 - HARD variety: never invent a near-duplicate of previousMenusDishes, avoidNames, or currentMenuDishes. You judge similarity by culinary form + base, not by exact string match.
   Too close (FORBIDDEN): оладьи≈панкейки; творожная запеканка с ягодами≈творожные запеканки с изюмом; сырники с изюмом≈сырники с ягодами; овсяная каша с яблоком≈овсянка с грушей; куриные котлеты≈котлеты из курицы.
   Distinct enough (OK): творожная запеканка vs сырники; оладьи vs яичница; картофельная запеканка vs творожная запеканка; каша vs омлет.
   A topping/mix-in swap on the same form+base is NOT a new dish.
 - When currentMenuDishes is non-empty (slot replace): invent a clearly different form for that meal.
-- Include breakfast-suitable and lunch/dinner recipes as needed by meals. When breakfast is in meals, at least ~1/3 of plate_role=main must be true morning food.
+- Include breakfast-suitable and lunch/dinner recipes as needed by meals. When breakfast is in meals, at least ~1/3 of plate_role=main must be true morning food, and also invent plate_role=fruit (fresh fruit / fruit dish; suitable_meals includes breakfast).
 - When lunch and/or dinner are in meals: at least ONE plate_role=protein MUST be a meat/fish/heavy-animal dish. Egg/dairy/mushroom-only proteins do NOT satisfy this quota.
 - Lunch/dinner protein MUST prefer meat/fish/poultry. NEVER mark сырники, творожные оладьи/запеканки, каши, омлеты as lunch/dinner protein.
-- Breakfast = cooked morning food ONLY with plate_role=main. NEVER invent roast chicken, soups, plov, cutlets as breakfast.
-- plate_role values: main (breakfast family), soup, protein, veg, carb. NEVER plate_role=snack or companion. Legacy "companion" means carb.
+- Breakfast cooked food = plate_role=main. Fruit side = plate_role=fruit. NEVER invent roast chicken, soups, plov, cutlets as breakfast main/fruit.
+- plate_role values: main (breakfast family), fruit (breakfast fruit), soup, protein, veg, carb. NEVER plate_role=snack or companion. Legacy "companion" means carb.
 - One-pots (плов, лазанья, голубцы, пельмени): plate_role=protein with covers_roles including protein+carb (and other roles they truly cover). Do NOT invent a separate carb for the same one-pot.
 - For lunch/dinner also invent soup, veg, carb sides when not covered. Sauces/подливы are carb or veg — never breakfast mains.
 - Name sides by the dish itself («Грибной соус», «Картофельное пюре»). NEVER hardcode a pairing in the name («к пасте», «к мясу»).
@@ -216,12 +217,11 @@ export async function inventAndPersistRecipes(
 
   let drafts: InventRecipeDraft[];
   try {
-    drafts = await proposeInventDraftsWithMealMix(
+    drafts = await fetchInventDraftChunks(
       count,
       chat,
       tasteNotes,
       inventContext,
-      exactAvoidNames,
     );
   } catch (err) {
     if (err instanceof OpenRouterError) {
@@ -297,17 +297,6 @@ export function selectExactUniqueDrafts(
   return kept;
 }
 
-/** Count protein/main drafts that signal meat/fish. */
-export function countHeavyAnimalMainsInDrafts(
-  drafts: readonly InventRecipeDraft[],
-): number {
-  return drafts.filter(
-    (d) =>
-      (d.plateRole === "protein" || d.plateRole === "main") &&
-      looksLikeHeavyAnimalProteinDish(d.name),
-  ).length;
-}
-
 function isPrimaryRole(role: PlateRole): boolean {
   return role === "protein" || role === "main";
 }
@@ -316,28 +305,19 @@ function isSideRole(role: PlateRole): boolean {
   return role === "carb" || role === "veg" || role === "soup";
 }
 
-/** Snack/breakfast filters + meal-mix select; empty when L/D meat quota fails. */
+/** Meal-mix select for persist (prefer L/D-eligible mains; no hard fail). */
 function finalizeInventDraftsForPersist(
   drafts: InventRecipeDraft[],
   exactAvoidNames: string[],
   count: number,
   meals: readonly MealSlot[],
 ): InventRecipeDraft[] {
-  // Do not hard-drop drafts by name heuristics (snack/breakfast shape) —
-  // that rejects valid AI output. Prefer via selectInventDraftsForMeals.
-  const kept = selectInventDraftsForMeals(
+  return selectInventDraftsForMeals(
     drafts,
     exactAvoidNames,
     count,
     meals,
   );
-  if (
-    mealsIncludeLunchOrDinner(meals) &&
-    countHeavyAnimalMainsInDrafts(kept) === 0
-  ) {
-    return [];
-  }
-  return kept;
 }
 
 /**
@@ -401,48 +381,6 @@ export function selectInventDraftsForMeals(
   return kept;
 }
 
-async function proposeInventDraftsWithMealMix(
-  count: number,
-  chat: ChatCompletionsFn,
-  tasteNotes: TasteNote[],
-  context: {
-    meals?: readonly MealSlot[];
-    contextMeal?: MealSlot;
-    avoidNames?: string[];
-    previousMenusDishes?: string[];
-    currentMenuDishes?: string[];
-    menuDayCount?: number;
-    peoplePerMeal?: number;
-    availableEquipment?: readonly EquipmentId[];
-  },
-  exactAvoidNames: string[] = [],
-): Promise<InventRecipeDraft[]> {
-  const meals = context.meals ?? [];
-  let drafts = await fetchInventDraftChunks(count, chat, tasteNotes, context);
-
-  const keptHeavy = () =>
-    countHeavyAnimalMainsInDrafts(
-      selectInventDraftsForMeals(drafts, exactAvoidNames, count, meals),
-    );
-
-  if (mealsIncludeLunchOrDinner(meals) && keptHeavy() === 0) {
-    const retry = await fetchInventDraftChunks(count, chat, tasteNotes, {
-      ...context,
-      avoidNames: [
-        ...(context.avoidNames ?? []),
-        ...drafts.map((d) => d.name),
-      ],
-    });
-    drafts = [...drafts, ...retry];
-  }
-
-  if (mealsIncludeLunchOrDinner(meals) && keptHeavy() === 0) {
-    return [];
-  }
-
-  return drafts;
-}
-
 async function fetchInventDraftChunks(
   count: number,
   chat: ChatCompletionsFn,
@@ -503,7 +441,7 @@ export async function proposeInventedRecipes(
     ),
     avoidNames: uniqueExactNames(context.avoidNames ?? []).slice(0, 50),
     instruction:
-      "Invent inventCount NEW cooked recipes via AI (extras so we can keep targetKeep). Mix plate_role=main (breakfast), protein/soup/veg/carb (lunch/dinner). One-pots may set covers_roles. HARD: you own near-duplicate judgment — never invent the same culinary form+base as anything in previousMenusDishes, currentMenuDishes, or avoidNames. If currentMenuDishes is set, invent a clearly different form for contextMeal. Cover cooked breakfast and lunch/dinner as needed by meals — when breakfast is requested, invent real morning food with plate_role=main. Never roast chicken/soup/plov/cutlets for breakfast. When lunch/dinner are in meals: include at least ONE meat/fish protein. NEVER mark morning forms as lunch/dinner protein. Never invent перекусы/no-cook snacks. Honor operatorTasteNotes. Keep body_text short. HARD: every buyable food in name or body_text MUST be in critical_ingredients. fridge_keep_days >= menuDayCount. HARD: required_equipment must be non-empty and ⊆ availableEquipment. NEVER plate_kind.",
+      "Invent inventCount NEW cooked recipes via AI (extras so we can keep targetKeep). Mix plate_role=main (breakfast), protein/soup/veg/carb (lunch/dinner). One-pots may set covers_roles. HARD: you own near-duplicate judgment — never invent the same culinary form+base as anything in previousMenusDishes, currentMenuDishes, or avoidNames. If currentMenuDishes is set, invent a clearly different form for contextMeal. Cover cooked breakfast and lunch/dinner as needed by meals — when breakfast is requested, invent real morning food with plate_role=main. Never roast chicken/soup/plov/cutlets for breakfast. When lunch/dinner are in meals: include at least ONE meat/fish protein. NEVER mark morning forms as lunch/dinner protein. Never invent перекусы/no-cook snacks. Honor operatorTasteNotes. Keep body_text short. HARD: every buyable food in name or body_text MUST be in critical_ingredients. fridge_keep_days >= menuDayCount. HARD: required_equipment ⊆ availableEquipment ([] ok when no appliances needed). NEVER plate_kind.",
     operatorTasteNotes: tasteNotesForPrompt(tasteNotes),
   });
 
@@ -592,11 +530,11 @@ export function parseInventRecipesJson(content: string): InventRecipeDraft[] {
       return;
     }
 
-    const requiredEquipment = normalizeEquipmentList(
-      (row.required_equipment ?? row.requiredEquipment) as
-      | string[]
-      | undefined,
-    );
+    // [] = no appliances (salads / no-heat). Missing/invalid ids → drop draft.
+    const rawEquip = row.required_equipment ?? row.requiredEquipment;
+    const requiredEquipment = Array.isArray(rawEquip) && rawEquip.length === 0
+      ? []
+      : normalizeEquipmentList(rawEquip as string[] | undefined);
     if (!requiredEquipment) return;
 
     const plateRole = parseInventPlateRole(row.plate_role ?? row.plateRole);
@@ -754,6 +692,12 @@ export async function persistInventedRecipe(
     .single();
 
   if (recipeError || !recipe?.id) {
+    slogError("invent", "persist:recipe-fail", {
+      name: draft.name,
+      plateRole: draft.plateRole,
+      message: recipeError?.message ?? "no-id",
+      code: recipeError?.code,
+    });
     return { ok: false };
   }
 
@@ -771,10 +715,22 @@ export async function persistInventedRecipe(
     .insert(rows);
 
   if (ingError) {
+    slogError("invent", "persist:ingredients-fail", {
+      recipeId: recipe.id,
+      name: draft.name,
+      ingredientCount: rows.length,
+      message: ingError.message,
+      code: ingError.code,
+    });
     await supabase.from("recipes").delete().eq("id", recipe.id);
     return { ok: false };
   }
 
+  slog("invent", "persist:ok", {
+    recipeId: recipe.id,
+    name: draft.name,
+    ingredients: rows.length,
+  });
   return { ok: true, recipeId: recipe.id };
 }
 

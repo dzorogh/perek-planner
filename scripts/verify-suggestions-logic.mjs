@@ -383,7 +383,7 @@ function expandDishAssignments(plateRole, recipeId, coversRoles) {
 
 function remainingOpenRoles(meal, dishes) {
   const templates = {
-    breakfast: ["main"],
+    breakfast: ["main", "fruit"],
     lunch: ["soup", "protein", "veg", "carb"],
     dinner: ["protein", "veg", "carb"],
     afternoon_snack: ["main"],

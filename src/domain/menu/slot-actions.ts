@@ -1,10 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 
 import { withMenuMutationLock } from "@/domain/menu/menu-mutation-lock";
-import { markSlotEditPassed } from "@/domain/menu/uj1-gate";
 import { isPlateRole } from "@/domain/menu/meal-templates";
 import {
   clearCompanionForSlot,
@@ -203,42 +201,3 @@ export async function clearCompanionAction(
   revalidatePath("/plan/shopping-list");
   return { ok: true };
 }
-
-/** Mark UJ-1 passed and go to shopping list (legacy name kept as alias). */
-export async function continueToShoppingListAction(
-  formData: FormData,
-): Promise<void> {
-  const menuId = String(formData.get("menuId") ?? "");
-  if (!menuId) {
-    redirect("/plan/menu");
-  }
-
-  const { supabase, user } = await requireUser();
-  if (!user) {
-    redirect("/auth/login");
-  }
-
-  const { data: menu, error: menuError } = await supabase
-    .from("menus")
-    .select("id")
-    .eq("id", menuId)
-    .maybeSingle();
-
-  if (menuError || !menu) {
-    redirect("/plan/menu");
-  }
-
-  const marked = await markSlotEditPassed(supabase, menuId);
-  if (!marked.ok) {
-    redirect(
-      `/plan/menu?menuId=${encodeURIComponent(menuId)}&error=continue`,
-    );
-  }
-
-  revalidatePath("/plan/menu");
-  revalidatePath("/plan/shopping-list");
-  redirect(`/plan/shopping-list?menuId=${encodeURIComponent(menuId)}`);
-}
-
-/** @deprecated Use continueToShoppingListAction */
-export const continueToPortionsAction = continueToShoppingListAction;

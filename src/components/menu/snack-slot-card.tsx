@@ -35,6 +35,8 @@ type SnackSlotCardProps = {
   snack: MenuSnackView | null;
   /** Scale price/KBJU like meal slots (people per meal). */
   servings?: number;
+  portionCount?: number;
+  sheetLayout?: boolean;
 };
 
 function ActionError({ state }: { state: SnackActionState }) {
@@ -128,7 +130,7 @@ function SnackSlotActions({
                   className="text-warning-fg focus:bg-background focus:text-warning-fg"
                   onSelect={() => setRefuseOpen(true)}
                 >
-                  Никогда не предлагать
+                  Не предлагать
                 </DropdownMenuItem>
               </>
             )}
@@ -148,7 +150,7 @@ function SnackSlotActions({
         <CommentDialog
           open={refuseOpen}
           onOpenChange={setRefuseOpen}
-          title="Никогда не предлагать"
+          title="Не предлагать"
           description="Перекус уберём из этого меню и больше не будем предлагать. Напишите почему — генератор учтёт это дальше."
           submitLabel="Убрать и заменить"
           pending={refusePending}
@@ -165,6 +167,8 @@ export function SnackSlotCard({
   dayIndex,
   snack,
   servings = 1,
+  portionCount,
+  sheetLayout = false,
 }: SnackSlotCardProps) {
   const { snackBusyLabel, setSnackBusy } = useMenuSlotBusy();
   const [refuseOpen, setRefuseOpen] = useState(false);
@@ -213,7 +217,7 @@ export function SnackSlotCard({
   }
 
   return (
-    <div data-component="snack-slot">
+    <div data-component="snack-slot" data-empty={snack ? "false" : "true"}>
       <SlotDishLine
         menuId={menuId}
         slotId={snack?.id ?? `snack-day-${dayIndex}`}
@@ -221,6 +225,8 @@ export function SnackSlotCard({
         plainName={snack ? formatSnackLabel(snack.label) : null}
         plainValue={snack?.value ?? null}
         slotServings={servings}
+        portionCount={portionCount}
+        sheetLayout={sheetLayout}
         batch={{
           totalServings: servings,
           peoplePerMeal: servings,

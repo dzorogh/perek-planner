@@ -9,6 +9,7 @@ export const PLATE_ROLES = [
   "protein",
   "veg",
   "carb",
+  "fruit",
   "snack",
 ] as const;
 
@@ -28,7 +29,7 @@ export const TEMPLATE_MEALS = [
 export type TemplateMeal = (typeof TEMPLATE_MEALS)[number];
 
 export const MEAL_TEMPLATES: Record<TemplateMeal, readonly PlateRole[]> = {
-  breakfast: ["main"],
+  breakfast: ["main", "fruit"],
   second_breakfast: ["main"],
   afternoon_snack: ["main"],
   lunch: ["soup", "protein", "veg", "carb"],

@@ -34,6 +34,7 @@ import {
   OpenRouterError,
   type ChatCompletionsFn,
 } from "@/lib/openrouter/client";
+import { slog, slogError } from "@/lib/server-log";
 
 export type PlannedDish = {
   meal: MealSlot;
@@ -52,12 +53,13 @@ Structure: menu days are hard pairs from the request (e.g. [1,2], [3,4], [5,6]).
 Plate roles are FIXED by the app — invent a Russian dish name for each listed position. You do NOT invent meal architecture.
 
 Respond with a single JSON object (minified — no pretty-print, no markdown fences):
-{"dishes":[{"meal":"breakfast"|"lunch"|"dinner"|...,"dayPair":[1,2]|[3,4]|[5,6],"plate_role":"main"|"soup"|"protein"|"veg"|"carb","name":"...","covers_roles":["protein","carb"]?}]}.
+{"dishes":[{"meal":"breakfast"|"lunch"|"dinner"|...,"dayPair":[1,2]|[3,4]|[5,6],"plate_role":"main"|"fruit"|"soup"|"protein"|"veg"|"carb","name":"...","covers_roles":["protein","carb"]?}]}.
 
 Rules:
 - Include a dish for EVERY requested position (meal×dayPair×plate_role), OR cover a role via covers_roles on another dish for the same meal×dayPair. Never stop mid-array — the dishes list must be complete and valid JSON.
 - NEVER use plate_kind, companion, needs_companion, or role=companion. Roles are plate_role only.
-- Lunch positions: soup + protein + veg + carb. Dinner / late_dinner: protein + veg + carb (NO soup). Breakfast / second_breakfast / afternoon_snack: only main. NEVER invent snack / перекус here.
+- Lunch positions: soup + protein + veg + carb. Dinner / late_dinner: protein + veg + carb (NO soup). Breakfast: main + fruit. Second_breakfast / afternoon_snack: only main. NEVER invent snack / перекус here.
+- plate_role=fruit: a fruit / fruit dish name for breakfast only (e.g. яблоко, фруктовый салат) — not a cooked main.
 - One-pots may set covers_roles (e.g. плов as protein with covers_roles:["protein","carb"]) — then do NOT invent a separate dish for covered roles. Lunch still needs soup+veg if those are uncovered.
 - Breakfast / second_breakfast / afternoon_snack: morning food names only.
 - Lunch/dinner protein/soup/veg/carb: savory dinner food. Prefer meat/fish for protein. NEVER morning forms (сырники, оладьи, творожная запеканка, каша, омлет as L/D protein).
@@ -75,13 +77,14 @@ Days are hard pairs ([1,2], [3,4], [5,6]); the dish is eaten on both days of rep
 Plate roles are FIXED — invent content for the given plate_role only.
 
 Respond with a single JSON object. dishes MUST contain ONLY the new dish(es) for replacePosition — never copy keepDishes.
-{"dishes":[{"meal":"lunch","dayPair":[3,4],"plate_role":"protein"|"soup"|"veg"|"carb"|"main","name":"...","covers_roles":["protein","carb"]?}]}
+{"dishes":[{"meal":"lunch","dayPair":[3,4],"plate_role":"protein"|"soup"|"veg"|"carb"|"main"|"fruit","name":"...","covers_roles":["protein","carb"]?}]}
 
 Rules:
 - meal MUST equal replacePosition.meal exactly (English enum). NEVER put the dish name or Russian label in meal.
 - Return exactly ONE dish for replacePosition.plate_role (optional covers_roles for one-pots on protein).
 - NEW name(s) MUST NOT match or near-duplicate any string in avoidNames or keepDishes.
 - Lunch/dinner protein: savory; never morning forms.
+- plate_role=fruit: fruit / fruit dish only.
 - Names in Russian, sentence case. Honor operatorTasteNotes (constraint PRIMARY).
 - Never invent snacks / перекусы. NEVER plate_kind / companion.`;
 
@@ -90,7 +93,7 @@ Days are hard pairs; the dish is eaten on both days of modifyPosition.dayPair.
 Plate roles are FIXED — invent a variant for the given plate_role.
 
 Respond with a single JSON object. dishes MUST contain ONLY the modified dish(es) for modifyPosition.
-{"dishes":[{"meal":"lunch","dayPair":[3,4],"plate_role":"protein"|"soup"|"veg"|"carb"|"main","name":"...","covers_roles":["protein","carb"]?}]}
+{"dishes":[{"meal":"lunch","dayPair":[3,4],"plate_role":"protein"|"soup"|"veg"|"carb"|"main"|"fruit","name":"...","covers_roles":["protein","carb"]?}]}
 
 Rules:
 - meal MUST equal modifyPosition.meal exactly. Name goes ONLY in "name".
@@ -120,6 +123,13 @@ export async function proposeMenuNamePlan(
   const dayPairs = menuDayPairsForCount(context.dayCount);
   const positions = describePositions(meals, dayPairs);
   const chat = context.chat ?? openRouterChatCompletions;
+  const started = Date.now();
+  slog("plan", "start", {
+    dayCount: context.dayCount,
+    meals: [...meals],
+    positions: positions.length,
+    tasteNotes: context.tasteNotes.length,
+  });
 
   const baseUser = {
     meals: [...meals],
@@ -138,36 +148,48 @@ export async function proposeMenuNamePlan(
   const baseInstruction =
     "Invent dish NAMES for every listed plate_role position. Roles are FIXED by the app. Optional covers_roles for one-pots only. Strong variety: no near-duplicates; lunch≠dinner form on the same dayPair. Mix cooking methods — do not fill the menu with «запечённ…» names. Return complete minified JSON covering ALL positions.";
 
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const instruction =
-      attempt === 0
-        ? baseInstruction
-        : `${baseInstruction} Previous answer was truncated or incomplete — emit ONE complete minified JSON object with a dish for every position.`;
-    let content: string;
-    try {
-      content = await chat({
-        messages: [
-          { role: "system", content: PLAN_SYSTEM },
-          {
-            role: "user",
-            content: JSON.stringify({ ...baseUser, instruction }),
-          },
-        ],
-        responseFormatJson: true,
-        temperature: attempt === 0 ? 0.7 : 0.45,
+  let content: string;
+  try {
+    content = await chat({
+      messages: [
+        { role: "system", content: PLAN_SYSTEM },
+        {
+          role: "user",
+          content: JSON.stringify({ ...baseUser, instruction: baseInstruction }),
+        },
+      ],
+      responseFormatJson: true,
+      temperature: 0.7,
+    });
+  } catch (err) {
+    if (err instanceof OpenRouterError) {
+      slogError("plan", "fail", {
+        reason: "openrouter",
+        message: err.message,
+        status: err.causeStatus,
+        ms: Date.now() - started,
       });
-    } catch (err) {
-      if (err instanceof OpenRouterError) {
-        return { ok: false, reason: "openrouter" };
-      }
-      throw err;
+      return { ok: false, reason: "openrouter" };
     }
-
-    const plan = parseMenuNamePlanJson(content, meals, dayPairs);
-    if (plan) return { ok: true, plan };
+    throw err;
   }
 
-  return { ok: false, reason: "parse" };
+  const plan = parseMenuNamePlanJson(content, meals, dayPairs);
+  if (!plan) {
+    slogError("plan", "fail", {
+      reason: "parse",
+      contentChars: content.length,
+      contentPreview: content.slice(0, 240),
+      ms: Date.now() - started,
+    });
+    return { ok: false, reason: "parse" };
+  }
+  slog("plan", "ok", {
+    dishes: plan.length,
+    names: plan.map((d) => d.name),
+    ms: Date.now() - started,
+  });
+  return { ok: true, plan };
 }
 
 type PositionReplaceTarget = {
@@ -244,7 +266,7 @@ export async function proposePositionNamePlan(
     plateRole,
   };
 
-  return runPositionReplaceAttempts(normalized, {
+  return requestPositionReplacePlan(normalized, {
     chat: context.chat ?? openRouterChatCompletions,
     keepDishes: (context.keepDishes ?? []).map((d) => ({
       meal: d.meal,
@@ -252,7 +274,6 @@ export async function proposePositionNamePlan(
       plateRole: plateRoleFromKeepDish(d),
       name: d.name,
     })),
-    keepNames: (context.keepDishes ?? []).map((d) => d.name),
     previousMenusDishes: uniqueExactNames(
       context.previousMenusDishes ?? [],
     ).slice(0, 60),
@@ -313,26 +334,24 @@ export async function proposePositionModifyPlan(
   const avoidNames = uniqueExactNames(context.avoidNames ?? [])
     .filter((n) => !namesEqual(n, sourceName))
     .slice(0, 50);
+  const keepExistingCarb = Boolean(
+    context.keepExistingCarb ?? context.keepExistingCompanion,
+  );
 
-  return runPositionModifyAttempts(normalized, {
+  return requestPositionModifyPlan(normalized, {
     chat: context.chat ?? openRouterChatCompletions,
     sourceDish: {
       name: sourceName.slice(0, 120),
       bodyText: context.sourceDish.bodyText?.trim().slice(0, 1200) || undefined,
     },
     userWish: userWish.slice(0, 500),
-    keepExistingCarb: Boolean(
-      context.keepExistingCarb ?? context.keepExistingCompanion,
-    ),
+    keepExistingCarb,
     keepDishes: (context.keepDishes ?? []).map((d) => ({
       meal: d.meal,
       dayPair: [...d.dayPair] as number[],
       plateRole: plateRoleFromKeepDish(d),
       name: d.name,
     })),
-    keepNames: (context.keepDishes ?? [])
-      .map((d) => d.name)
-      .filter((n) => !namesEqual(n, sourceName)),
     previousMenusDishes: uniqueExactNames(
       context.previousMenusDishes ?? [],
     ).slice(0, 60),
@@ -340,50 +359,6 @@ export async function proposePositionModifyPlan(
     peoplePerMeal: context.peoplePerMeal ?? 2,
     tasteNotes: tasteNotesForPrompt(context.tasteNotes),
   });
-}
-
-async function runPositionReplaceAttempts(
-  position: PositionReplaceTarget,
-  args: {
-    chat: ChatCompletionsFn;
-    keepDishes: Array<{
-      meal: MealSlot;
-      dayPair: number[];
-      plateRole: PlateRole;
-      name: string;
-    }>;
-    keepNames: string[];
-    previousMenusDishes: string[];
-    avoidNames: string[];
-    peoplePerMeal: number;
-    tasteNotes: ReturnType<typeof tasteNotesForPrompt>;
-  },
-): Promise<PlanMenuNamesResult> {
-  let avoidNames = args.avoidNames;
-  const baseInstruction = `Return dishes with EXACTLY one NEW name for replacePosition.plate_role=${position.plateRole}. Do not echo keepDishes. Forbidden: every avoidNames entry.`;
-
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const result = await requestPositionReplacePlan(
-      position,
-      { ...args, avoidNames },
-      attempt === 0
-        ? baseInstruction
-        : `${baseInstruction} Previous answer reused a forbidden name — invent a clearly different one.`,
-    );
-    if (!result.ok) {
-      if (result.reason === "openrouter") return result;
-      continue;
-    }
-    const collisions = result.plan.filter((d) =>
-      [...avoidNames, ...args.keepNames].some((b) => namesEqual(b, d.name)),
-    );
-    if (collisions.length === 0) return result;
-    avoidNames = uniqueExactNames([
-      ...avoidNames,
-      ...collisions.map((d) => d.name),
-    ]).slice(0, 50);
-  }
-  return { ok: false, reason: "parse" };
 }
 
 async function requestPositionReplacePlan(
@@ -401,7 +376,6 @@ async function requestPositionReplacePlan(
     peoplePerMeal: number;
     tasteNotes: ReturnType<typeof tasteNotesForPrompt>;
   },
-  instruction: string,
 ): Promise<PlanMenuNamesResult> {
   let content: string;
   try {
@@ -421,7 +395,7 @@ async function requestPositionReplacePlan(
             previousMenusDishes: args.previousMenusDishes,
             avoidNames: args.avoidNames,
             peoplePerMeal: args.peoplePerMeal,
-            instruction,
+            instruction: `Return dishes with EXACTLY one NEW name for replacePosition.plate_role=${position.plateRole}. Do not echo keepDishes. Forbidden: every avoidNames entry.`,
             operatorTasteNotes: args.tasteNotes,
           }),
         },
@@ -439,66 +413,6 @@ async function requestPositionReplacePlan(
   const plan = parsePositionNamePlanJson(content, position);
   if (!plan) return { ok: false, reason: "parse" };
   return { ok: true, plan };
-}
-
-function modifyNameInstruction(
-  plateRole: PlateRole,
-  keepExistingCarb: boolean,
-): string {
-  if (keepExistingCarb) {
-    return `Return dishes with EXACTLY one VARIANT for modifyPosition.plate_role=${plateRole}. keepExistingCarb=true: do NOT cover carb via covers_roles. Matching source name is OK.`;
-  }
-  return `Return dishes with EXACTLY one VARIANT for modifyPosition.plate_role=${plateRole} from sourceDish + userWish. Same culinary form as source. Matching source name is OK.`;
-}
-
-async function runPositionModifyAttempts(
-  position: PositionReplaceTarget,
-  args: {
-    chat: ChatCompletionsFn;
-    sourceDish: PositionModifySource;
-    userWish: string;
-    keepExistingCarb: boolean;
-    keepDishes: Array<{
-      meal: MealSlot;
-      dayPair: number[];
-      plateRole: PlateRole;
-      name: string;
-    }>;
-    keepNames: string[];
-    previousMenusDishes: string[];
-    avoidNames: string[];
-    peoplePerMeal: number;
-    tasteNotes: ReturnType<typeof tasteNotesForPrompt>;
-  },
-): Promise<PlanMenuNamesResult> {
-  let avoidNames = args.avoidNames;
-  const baseInstruction = modifyNameInstruction(
-    position.plateRole,
-    args.keepExistingCarb,
-  );
-
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const result = await requestPositionModifyPlan(
-      position,
-      { ...args, avoidNames },
-      attempt === 0
-        ? baseInstruction
-        : `${baseInstruction} Previous answer collided with another menu dish — keep the variant of sourceDish but use a name that avoids avoidNames/keepDishes.`,
-    );
-    if (!result.ok) {
-      if (result.reason === "openrouter") return result;
-      continue;
-    }
-    const collisions = result.plan.filter((d) =>
-      [...avoidNames, ...args.keepNames].some((b) => namesEqual(b, d.name)),
-    );
-    if (collisions.length === 0) return result;
-    avoidNames = uniqueExactNames([
-      ...avoidNames,
-      ...collisions.map((d) => d.name),
-    ]).slice(0, 50);
-  }
-  return { ok: false, reason: "parse" };
 }
 
 async function requestPositionModifyPlan(
@@ -519,8 +433,11 @@ async function requestPositionModifyPlan(
     peoplePerMeal: number;
     tasteNotes: ReturnType<typeof tasteNotesForPrompt>;
   },
-  instruction: string,
 ): Promise<PlanMenuNamesResult> {
+  const instruction = args.keepExistingCarb
+    ? `Return dishes with EXACTLY one VARIANT for modifyPosition.plate_role=${position.plateRole}. keepExistingCarb=true: do NOT cover carb via covers_roles. Matching source name is OK.`
+    : `Return dishes with EXACTLY one VARIANT for modifyPosition.plate_role=${position.plateRole} from sourceDish + userWish. Same culinary form as source. Matching source name is OK.`;
+
   let content: string;
   try {
     content = await args.chat({

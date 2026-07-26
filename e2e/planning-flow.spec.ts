@@ -43,8 +43,13 @@ test.describe("Planning happy path (authenticated)", () => {
 
     await expect(page).toHaveURL(/\/plan\/menu\?menuId=/, { timeout: 120_000 });
     await expect(page.getByRole("heading", { name: "Меню" })).toBeVisible();
-    await expect(page.getByText("День 1")).toBeVisible();
-    await expect(page.getByText("День 4")).toBeVisible();
+    await expect(page.locator('[data-component="menu-sheet"]')).toHaveCount(2);
+    await expect(
+      page.getByRole("article", { name: "Лист: дни 1 и 2" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("article", { name: "Лист: дни 3 и 4" }),
+    ).toBeVisible();
 
     // Generated snack slot (meal-lane + overflow actions)
     await expect(page.getByText("Перекус", { exact: true }).first()).toBeVisible();
@@ -56,7 +61,7 @@ test.describe("Planning happy path (authenticated)", () => {
       page.getByRole("menuitem", { name: "Заменить" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("menuitem", { name: "Никогда не предлагать" }),
+      page.getByRole("menuitem", { name: "Не предлагать" }),
     ).toBeVisible();
     await page.keyboard.press("Escape");
 
@@ -73,7 +78,10 @@ test.describe("Planning happy path (authenticated)", () => {
       page.locator('[data-component="recipe-text-panel"]'),
     ).toHaveCount(0);
 
-    await page.getByRole("button", { name: "К списку покупок →" }).click();
+    await page
+      .getByRole("navigation", { name: "Шаги планирования" })
+      .getByRole("link", { name: "Список" })
+      .click();
     await expect(page).toHaveURL(/\/plan\/shopping-list\?menuId=/, {
       timeout: 20_000,
     });

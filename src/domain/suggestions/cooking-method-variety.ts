@@ -54,12 +54,13 @@ const METHOD_LABEL_RU: Record<CookingMethodKey, string> = {
 /** Prefer reinventing sides before proteins; later day-pairs first. */
 function replacePriority(d: NamedRoleDish): number {
   const roleRank: Record<PlateRole, number> = {
-    veg: 0,
-    carb: 1,
-    soup: 2,
-    snack: 3,
-    protein: 4,
-    main: 5,
+    fruit: 0,
+    veg: 1,
+    carb: 2,
+    soup: 3,
+    snack: 4,
+    protein: 5,
+    main: 6,
   };
   return (roleRank[d.plateRole] ?? 9) * 10 - d.dayPair[0];
 }

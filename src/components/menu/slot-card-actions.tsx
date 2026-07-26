@@ -113,7 +113,7 @@ function FilledDishMenuItems({
         className="text-warning-fg focus:bg-background focus:text-warning-fg"
         onSelect={onRefuse}
       >
-        Никогда не предлагать
+        Не предлагать
       </DropdownMenuItem>
     </>
   );
@@ -317,7 +317,7 @@ export function SlotCardActions({
       <CommentDialog
         open={refuseOpen}
         onOpenChange={setRefuseOpen}
-        title="Никогда не предлагать"
+        title="Не предлагать"
         description="Блюдо уберём из этого меню и больше не будем предлагать. Напишите почему — генератор учтёт это дальше."
         submitLabel="Убрать и заменить"
         pending={refusePending}

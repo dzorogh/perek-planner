@@ -1,11 +1,9 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 
 import { RecipeTextPanel } from "@/components/recipes/recipe-text-panel";
 import { MenuTotalsBar } from "@/components/recipes/recipe-value-line";
 import { ShoppingListClient } from "@/components/shopping/shopping-list-view";
 import { loadMenuSkeleton } from "@/domain/menu/load-menu";
-import { hasSlotEditPassed } from "@/domain/menu/uj1-gate";
 import { recipeBatchScale } from "@/domain/recipes/batch-scale";
 import type { RecipeIngredientView } from "@/domain/recipes/load-recipe";
 import {
@@ -44,10 +42,6 @@ export default async function PlanShoppingListPage({
   }
 
   const supabase = await createClient();
-  const passed = await hasSlotEditPassed(supabase, menuId);
-  if (!passed) {
-    redirect(`/plan/menu?menuId=${encodeURIComponent(menuId)}`);
-  }
 
   const [built, menuLoaded] = await Promise.all([
     buildShoppingList(supabase, menuId),
@@ -70,10 +64,12 @@ export default async function PlanShoppingListPage({
     );
   }
 
-  const slots = menuLoaded.menu?.slots ?? [];
-  const snacks = menuLoaded.menu?.snacks ?? [];
-  const snackServings =
-    slots.find((s) => s.servings > 0)?.servings ?? 2;
+  const menu = menuLoaded.menu;
+  const slots = menu?.slots ?? [];
+  const snacks = menu?.snacks ?? [];
+  const people = slots.find((s) => s.servings > 0)?.servings ?? 2;
+  const dayCount = menu?.dayCount ?? null;
+  const snackServings = people;
   const recipeMap = new Map<
     string,
     {
@@ -128,10 +124,14 @@ export default async function PlanShoppingListPage({
           создания меню). Копия всегда доступна.
         </p>
       </div>
-      <MenuTotalsBar
-        totals={sumMenuTotals(slots, { snacks, snackServings })}
-        className="mb-6 max-w-xl"
-      />
+      {dayCount != null ? (
+        <MenuTotalsBar
+          totals={sumMenuTotals(slots, { snacks, snackServings })}
+          dayCount={dayCount}
+          people={people}
+          className="mb-6 max-w-xl"
+        />
+      ) : null}
       <ShoppingListClient list={built.list} />
       {recipes.length > 0 ? (
         <section className="mt-8 max-w-xl">

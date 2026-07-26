@@ -15,17 +15,33 @@ type SlotDishLineProps = {
   menuId: string;
   slotId: string;
   plateRole: PlateRole;
+  /** Meal key — scopes `main` label (Завтрак only on breakfast). */
+  meal?: string | null;
   templateOrder?: readonly PlateRole[];
   dish?: MenuSlotDishView | null;
   /** Non-recipe filled line (e.g. Перекус label). Ignored when dish has recipeId. */
   plainName?: string | null;
   plainValue?: RecipePerServingValue | null;
   slotServings: number;
+  /** When set, value line uses portion meta (N порции · unit ₽ · unit ккал). */
+  portionCount?: number;
   batch: RecipeBatchScale;
   emptyLabel?: string;
   canClear?: boolean;
+  /** Sheet row: colored rail + role beside name (v5). */
+  sheetLayout?: boolean;
   /** Override default SlotCardActions (snack-specific overflow). */
   actions?: ReactNode;
+};
+
+const ROLE_ACCENT: Record<PlateRole, string> = {
+  main: "#6366F1",
+  fruit: "#E11D48",
+  soup: "#64748B",
+  protein: "#EA580C",
+  veg: "#16A34A",
+  carb: "#A16207",
+  snack: "#818CF8",
 };
 
 function SlotDishLineBody({
@@ -34,6 +50,7 @@ function SlotDishLineBody({
   dish,
   batch,
   slotServings,
+  portionCount,
   filledPlain,
   plainName,
   plainValue,
@@ -44,6 +61,7 @@ function SlotDishLineBody({
   dish: MenuSlotDishView | null;
   batch: RecipeBatchScale;
   slotServings: number;
+  portionCount?: number;
   filledPlain: boolean;
   plainName: string | null;
   plainValue: RecipePerServingValue | null;
@@ -63,7 +81,11 @@ function SlotDishLineBody({
           dayCount={batch.dayCount}
           triggerClassName="text-left text-sm font-semibold text-foreground underline decoration-border underline-offset-2 hover:text-primary"
         />
-        <RecipeValueLine value={dish.recipeValue} servings={slotServings} />
+        <RecipeValueLine
+          value={dish.recipeValue}
+          servings={slotServings}
+          portionCount={portionCount}
+        />
       </>
     );
   }
@@ -72,7 +94,11 @@ function SlotDishLineBody({
       <>
         <p className="text-sm font-semibold text-foreground">{plainName}</p>
         {plainValue ? (
-          <RecipeValueLine value={plainValue} servings={slotServings} />
+          <RecipeValueLine
+            value={plainValue}
+            servings={slotServings}
+            portionCount={portionCount}
+          />
         ) : null}
       </>
     );
@@ -84,14 +110,17 @@ export function SlotDishLine({
   menuId,
   slotId,
   plateRole,
+  meal = null,
   templateOrder,
   dish = null,
   plainName = null,
   plainValue = null,
   slotServings,
+  portionCount,
   batch,
   emptyLabel = "Пусто",
   canClear = false,
+  sheetLayout = false,
   actions,
 }: SlotDishLineProps) {
   const recipeId = dish?.recipeId ?? null;
@@ -102,7 +131,57 @@ export function SlotDishLine({
     plateRole,
     dish?.coversRoles,
     templateOrder,
+    meal,
   );
+  const accent = ROLE_ACCENT[plateRole] ?? "#94A3B8";
+
+  if (sheetLayout) {
+    return (
+      <div
+        data-component="slot-dish-line"
+        data-plate-role={plateRole}
+        data-empty={filled ? "false" : "true"}
+        data-layout="sheet"
+        className="relative grid grid-cols-[4px_5.75rem_minmax(0,1fr)_auto] items-stretch gap-x-2.5 rounded-md px-0 py-1.5 hover:bg-empty-slot"
+      >
+        <span
+          aria-hidden
+          className="min-h-[2.5rem] self-stretch rounded-full"
+          style={{ backgroundColor: accent }}
+        />
+        <span
+          className="self-start pt-0.5 text-[11px] font-semibold leading-snug"
+          style={{ color: accent }}
+        >
+          {roleCaption}
+        </span>
+        <div className="min-w-0 pr-1">
+          <SlotDishLineBody
+            hasRecipe={hasRecipe}
+            recipeId={recipeId}
+            dish={dish}
+            batch={batch}
+            slotServings={slotServings}
+            portionCount={portionCount}
+            filledPlain={filledPlain}
+            plainName={plainName}
+            plainValue={plainValue}
+            emptyLabel={emptyLabel}
+          />
+        </div>
+        {actions ?? (
+          <SlotCardActions
+            menuId={menuId}
+            slotId={slotId}
+            hasRecipe={hasRecipe}
+            recipeId={recipeId}
+            target={plateRole}
+            canClear={canClear && hasRecipe}
+          />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div
@@ -121,6 +200,7 @@ export function SlotDishLine({
           dish={dish}
           batch={batch}
           slotServings={slotServings}
+          portionCount={portionCount}
           filledPlain={filledPlain}
           plainName={plainName}
           plainValue={plainValue}

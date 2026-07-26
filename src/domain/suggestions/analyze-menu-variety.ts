@@ -31,11 +31,11 @@ export type AnalyzeMenuVarietyResult =
 
 const ANALYZE_SYSTEM = `You audit a Russian household batch-cook menu for culinary variety failures.
 The menu is already built as fixed day-pairs (days 1–2 and 3–4). Each dish spans its pair.
-Plate roles are FIXED (soup/protein/veg/carb/main) — audit culinary variety, not architecture.
+Plate roles are FIXED (soup/protein/veg/carb/main/fruit) — audit culinary variety, not architecture.
 Respond with a single JSON object:
 {"ok":true,"replace":[]}
 OR
-{"ok":false,"replace":[{"meal":"lunch"|"dinner"|"breakfast"|...,"dayPair":[1,2]|[3,4],"plate_role":"protein"|"soup"|"veg"|"carb"|"main","reason":"short Russian why"}]}.
+{"ok":false,"replace":[{"meal":"lunch"|"dinner"|"breakfast"|...,"dayPair":[1,2]|[3,4],"plate_role":"protein"|"soup"|"veg"|"carb"|"main"|"fruit","reason":"short Russian why"}]}.
 
 Audit HARD rules (flag a position to replace when broken):
 1) Same-day clash: on the same calendar days (same dayPair), lunch and dinner proteins must NOT be culinary near-duplicates (form+base). Word-order / topping swaps count as duplicates.

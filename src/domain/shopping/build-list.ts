@@ -1,6 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { hasSlotEditPassed } from "@/domain/menu/uj1-gate";
 import {
   formatLineLabel,
   formatQuantity,
@@ -282,14 +281,6 @@ export async function buildShoppingList(
   supabase: SupabaseClient,
   menuId: string,
 ): Promise<BuildResult> {
-  const passed = await hasSlotEditPassed(supabase, menuId);
-  if (!passed) {
-    return {
-      ok: false,
-      error: "Сначала проверьте меню и перейдите к списку покупок.",
-    };
-  }
-
   const { data: menu, error: menuError } = await supabase
     .from("menus")
     .select("id")
