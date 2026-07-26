@@ -3,7 +3,11 @@
 import { Check, Plus, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { ShoppingLiveSync } from "@/components/shopping/shopping-live-sync";
+import {
+  publishShoppingTabSelection,
+  ShoppingLiveSync,
+  type ShoppingSelectionPublisher,
+} from "@/components/shopping/shopping-live-sync";
 import { Button } from "@/components/ui/button";
 import { setShoppingSelectionAction } from "@/domain/shopping/shopping-actions";
 import { formatQuantity } from "@/domain/shopping/quantity";
@@ -58,7 +62,6 @@ export function ShoppingListClient({
   const [copyHint, setCopyHint] = useState<string | null>(null);
   const [persistError, setPersistError] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
-  const [isDirty, setIsDirty] = useState(false);
 
   const cartRef = useRef(cart);
   const contributedRef = useRef(contributed);
@@ -66,7 +69,12 @@ export function ShoppingListClient({
   const pendingCountRef = useRef(0);
   const dirtyRef = useRef(false);
   const aliveRef = useRef(true);
-  const selectionBlocked = Boolean(loadError);
+  const publishSelectionRef = useRef<ShoppingSelectionPublisher | null>(null);
+  const tabSelfIdRef = useRef(
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `shop-tab-${Math.random().toString(36).slice(2)}`,
+  );
 
   const initialKeysKey = initialProductKeys.join("\0");
   const sourceKey = useMemo(() => {
@@ -89,9 +97,7 @@ export function ShoppingListClient({
 
   useEffect(() => {
     // Do not clobber in-flight edits or unsaved dirty state after a failed persist.
-    if (pendingCountRef.current > 0 || dirtyRef.current) {
-      return;
-    }
+    if (pendingCountRef.current > 0 || dirtyRef.current) return;
     const hydrated = hydrateCuratedCartFromKeys(
       source.dishes,
       initialProductKeys,
@@ -117,21 +123,25 @@ export function ShoppingListClient({
       .then(async () => {
         const keys = cartKeys(cartRef.current);
         const result = await setShoppingSelectionAction(source.menuId, keys);
-        if (!aliveRef.current) return;
         if (!result.ok) {
+          if (!aliveRef.current) return;
           dirtyRef.current = true;
-          setIsDirty(true);
           setPersistError(result.error);
           return;
         }
+        // Notify peers even if this tab unmounted before the action returned.
+        if (publishSelectionRef.current) {
+          publishSelectionRef.current();
+        } else {
+          publishShoppingTabSelection(source.menuId, tabSelfIdRef.current);
+        }
+        if (!aliveRef.current) return;
         dirtyRef.current = false;
-        setIsDirty(false);
         setPersistError(null);
       })
       .catch(() => {
         if (!aliveRef.current) return;
         dirtyRef.current = true;
-        setIsDirty(true);
         setPersistError("Не удалось сохранить список покупок.");
       })
       .finally(() => {
@@ -146,7 +156,6 @@ export function ShoppingListClient({
     nextCart: Map<string, CuratedShoppingLine>,
     nextContributed: Set<string>,
   ) {
-    if (selectionBlocked) return;
     cartRef.current = nextCart;
     contributedRef.current = nextContributed;
     setCart(new Map(nextCart));
@@ -212,7 +221,8 @@ export function ShoppingListClient({
       <ShoppingLiveSync
         menuId={source.menuId}
         slotIds={slotIds}
-        isPending={isPending || isDirty}
+        isPending={isPending}
+        publishRef={publishSelectionRef}
       />
       {loadError ? (
         <p className="mb-4 text-sm text-warning-fg" role="status">
@@ -256,7 +266,7 @@ export function ShoppingListClient({
                       <button
                         type="button"
                         data-component="dish-add-all"
-                        disabled={allIn || selectionBlocked}
+                        disabled={allIn}
                         onClick={() => onAddAll(dish.id)}
                         className="shrink-0 text-xs font-medium text-primary underline-offset-4 hover:underline disabled:cursor-default disabled:text-muted-foreground disabled:no-underline"
                       >
@@ -270,8 +280,8 @@ export function ShoppingListClient({
                           <li
                             key={`${dish.id}:${product.productKey}`}
                             className={`flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm ${selected
-                                ? "bg-primary/5 text-foreground"
-                                : "text-foreground"
+                              ? "bg-primary/5 text-foreground"
+                              : "text-foreground"
                               }`}
                           >
                             <span className="min-w-0 flex-1">
@@ -285,7 +295,6 @@ export function ShoppingListClient({
                             <button
                               type="button"
                               data-component="product-add"
-                              disabled={selectionBlocked}
                               onClick={() =>
                                 onToggleProduct(product.productKey)
                               }
@@ -295,8 +304,8 @@ export function ShoppingListClient({
                                   : `Добавить: ${product.name}`
                               }
                               className={`inline-flex size-7 shrink-0 items-center justify-center rounded-sm border transition-colors disabled:opacity-50 ${selected
-                                  ? "border-primary/30 bg-primary/10 text-primary hover:border-destructive/40 hover:bg-destructive/5 hover:text-destructive"
-                                  : "border-border bg-card text-primary hover:border-primary/40 hover:bg-background"
+                                ? "border-primary/30 bg-primary/10 text-primary hover:border-destructive/40 hover:bg-destructive/5 hover:text-destructive"
+                                : "border-border bg-card text-primary hover:border-primary/40 hover:bg-background"
                                 }`}
                             >
                               {selected ? (
@@ -382,10 +391,9 @@ export function ShoppingListClient({
                     <button
                       type="button"
                       data-component="product-remove"
-                      disabled={selectionBlocked}
                       onClick={() => onRemove(line.productKey)}
                       aria-label={`Убрать: ${line.ingredientName}`}
-                      className="inline-flex size-7 shrink-0 items-center justify-center rounded-sm border border-border text-muted-foreground hover:border-destructive/40 hover:text-destructive disabled:opacity-50"
+                      className="inline-flex size-7 shrink-0 items-center justify-center rounded-sm border border-border text-muted-foreground hover:border-destructive/40 hover:text-destructive"
                     >
                       <X className="size-3.5" aria-hidden />
                     </button>

@@ -54,10 +54,10 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Session refresh: `proxy.ts` → `@/lib/supabase/middleware` (`updateSession`); preserve cookie copy-on-redirect
 - Mutations: server actions in `src/domain/**/**-actions.ts` + `revalidatePath` for touched routes
 - Deps: `app/` + `src/components/` → `src/domain/` → `src/lib/supabase|openrouter` — never OpenRouter from Client Components
-- Browser Supabase client for auth/UI and Realtime (menu live sync: listen `postgres_changes` + Broadcast busy overlays; shopping live sync: listen-only `postgres_changes` on `shopping_lists` + menu tables → debounced `router.refresh()`); data writes + AI via server client/actions — never mutate menu/shopping rows from the browser
+- Browser Supabase client for auth/UI and Realtime (menu live sync: listen `postgres_changes` + Broadcast busy overlays; shopping live sync: same-browser `BroadcastChannel` after persist + listen-only `postgres_changes` on `shopping_lists`/menu tables → debounced `router.refresh()`); data writes + AI via server client/actions — never mutate menu/shopping rows from the browser
 - UI: Soft Workshop / light-only desktop; Russian copy; English glossary ids in domain (`Menu`, `Recipe`, `Snack`, …)
 - Suggestions: invent → persist → assign **persisted ids only**; eligibility = fridge-keep + refusal/dislike hard-suppress
-- Shopping list: dish-grouped SOURCE via `buildShoppingSourceFromMenu(menu)`; curated cart persists `curated_product_keys` on `shopping_lists` (server actions); hydrate qty from live SOURCE; copy curated lines only; listen-only Realtime on `/plan/shopping-list`
+- Shopping list: dish-grouped SOURCE via `buildShoppingSourceFromMenu(menu)`; curated cart persists `curated_product_keys` on `shopping_lists` (server actions, `user_id` denormalized for RLS/Realtime); hydrate qty from live SOURCE; copy curated lines only; live sync on `/plan/shopping-list`
 
 ### Testing Rules
 

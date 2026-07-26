@@ -54,6 +54,7 @@ async function assertMenuOwned(
 async function ensureShoppingListRow(
   supabase: Awaited<ReturnType<typeof createClient>>,
   menuId: string,
+  userId: string,
 ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const { data: existing, error: selectError } = await supabase
     .from("shopping_lists")
@@ -72,6 +73,7 @@ async function ensureShoppingListRow(
     .from("shopping_lists")
     .insert({
       menu_id: menuId,
+      user_id: userId,
       curated_product_keys: [],
     })
     .select("id")
@@ -106,7 +108,7 @@ export async function setShoppingSelectionAction(
   const owned = await assertMenuOwned(supabase, user.id, id);
   if (!owned) return { ok: false, error: "Меню не найдено." };
 
-  const ensured = await ensureShoppingListRow(supabase, id);
+  const ensured = await ensureShoppingListRow(supabase, id, user.id);
   if (!ensured.ok) return ensured;
 
   const { data: updated, error: updateError } = await supabase

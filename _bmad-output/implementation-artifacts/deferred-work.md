@@ -160,3 +160,17 @@ All previously open items were closed in the deferred-work sweep. Strikethrough 
 - source_spec: `_bmad-output/implementation-artifacts/spec-shopping-list-persist-realtime.md`
   summary: Refresh shopping SOURCE when recipe critical_ingredients change without a menu-row mutation.
   evidence: ShoppingLiveSync listens to shopping_lists + menu tables only; ingredient edits on a shared recipe can leave open shopping-list quantities stale until a menu event or reload.
+
+## Deferred from: code review of spec-shopping-list-persist-realtime.md (2026-07-26)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-shopping-list-persist-realtime.md`
+  summary: Concurrent tabs last-write-wins on full `curated_product_keys` replace (no version/etag).
+  evidence: Spec design is full-key replace via `setShoppingSelectionAction`; per-tab queue does not serialize across clients.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-shopping-list-persist-realtime.md`
+  summary: Logic verify duplicates hydrate/prune helpers instead of importing domain.
+  evidence: `scripts/verify-shopping-list-logic.mjs` mirrors `source.ts`; drift risk (same pattern as other verify:* scripts).
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-shopping-list-persist-realtime.md`
+  summary: Anon RLS verify does not assert denormalized `user_id` SELECT/UPDATE policies.
+  evidence: `verify-rls-shopping-lists.mjs` checks anon deny + absence of lines only.
