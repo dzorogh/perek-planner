@@ -140,3 +140,17 @@ All previously open items were closed in the deferred-work sweep. Strikethrough 
 - source_spec: `_bmad-output/implementation-artifacts/spec-replace-dish-form-diversity.md`
   summary: Add verify/logic coverage for `replacedDishes` threading on main/role/carb replace paths.
   evidence: No unit/integration tests for the new payload field or role scoping.
+
+## Deferred from: spec-cross-tab-replace-busy.md (2026-07-26)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-cross-tab-replace-busy.md`
+  summary: Harden busy Broadcast (private channel / authz) so forged busy cannot spam peers.
+  evidence: Channel is public UUID-scoped like existing live sync; Blind Hunter noted trust model.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-cross-tab-replace-busy.md`
+  summary: Ack/retry for busy start/clear broadcast sends.
+  evidence: `channel.send` is fire-and-forget; silent drop possible on flaky Realtime.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-cross-tab-replace-busy.md`
+  summary: Import domain helpers in verify-menu-live-sync-logic instead of duplicated copies.
+  evidence: Existing verify:* scripts often duplicate pure helpers; drift risk called out in review.
