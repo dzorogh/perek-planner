@@ -122,3 +122,7 @@ All previously open items were closed in the deferred-work sweep. Strikethrough 
 - source_spec: `_bmad-output/implementation-artifacts/spec-menu-sheet-redesign.md`
   summary: Decide fate of leftover `uj1-gate.ts` + `slot_edit_passed_at` column now that shopping is ungated.
   evidence: Gate removed from nav/build-list; verify-uj1 still mirrors pure predicate; column unused by new UX.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-menu-realtime-sync.md`
+  summary: Wrap snack AI mutations (`resuggestSnackAction` / invent snack paths) in `withMenuMutationLock`.
+  evidence: Review noted lock covers slot AI paths only; concurrent snack invent on the same menu can still interleave across instances.

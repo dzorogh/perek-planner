@@ -1,5 +1,6 @@
 "use client";
 
+import { MenuLiveSync } from "@/components/menu/menu-live-sync";
 import { MenuSlotBusyProvider } from "@/components/menu/menu-slot-busy";
 import { SlotDishLine } from "@/components/menu/slot-dish-line";
 import { SnackSlotCard } from "@/components/menu/snack-slot-card";
@@ -257,8 +258,11 @@ export function MenuSheetGrid({
     sheetGridClass = "mt-4 grid items-stretch gap-4 md:grid-cols-2";
   }
 
+  const slotIds = slots.map((s) => s.id);
+
   return (
     <MenuSlotBusyProvider>
+      <MenuLiveSync menuId={menuId} slotIds={slotIds} />
       <div data-component="menu-sheet-grid" className={sheetGridClass}>
         {pairs.map((pair) => (
           <PairSheet

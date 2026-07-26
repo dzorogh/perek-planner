@@ -180,7 +180,7 @@ export function SlotCardActions({
   canClear = false,
   placement = "overlay",
 }: SlotCardActionsProps) {
-  const { recipeBusyLabel, setRecipeBusy } = useMenuSlotBusy();
+  const { recipeBusyLabel, setRecipeBusy, setActionBusy } = useMenuSlotBusy();
   const [refuseOpen, setRefuseOpen] = useState(false);
   const [modifyOpen, setModifyOpen] = useState(false);
   const [suggestState, suggestFormAction, suggestPending] = useActionState<
@@ -222,6 +222,13 @@ export function SlotCardActions({
     modifyPending ||
     refusePending ||
     clearPending;
+
+  useLayoutEffect(() => {
+    const key = `${slotId}:${target}`;
+    setActionBusy(key, localBusy);
+    return () => setActionBusy(key, false);
+  }, [localBusy, setActionBusy, slotId, target]);
+
   const busy = localBusy || Boolean(sharedBusyLabel);
   const localGenerating =
     suggestPending ||

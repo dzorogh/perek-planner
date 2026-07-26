@@ -199,7 +199,7 @@ export function SnackSlotCard({
   portionCount,
   sheetLayout = false,
 }: SnackSlotCardProps) {
-  const { snackBusyLabel, setSnackBusy } = useMenuSlotBusy();
+  const { snackBusyLabel, setSnackBusy, setActionBusy } = useMenuSlotBusy();
   const [refuseOpen, setRefuseOpen] = useState(false);
   const [resuggestState, resuggestAction, resuggestPending] = useActionState<
     SnackActionState,
@@ -225,6 +225,13 @@ export function SnackSlotCard({
   }, [snackLabel, acrossMenuPending, setSnackBusy]);
 
   const localBusy = resuggestPending || suggestPending || refusePending;
+
+  useLayoutEffect(() => {
+    const key = `snack:${menuId}:${dayIndex}`;
+    setActionBusy(key, localBusy);
+    return () => setActionBusy(key, false);
+  }, [dayIndex, localBusy, menuId, setActionBusy]);
+
   const busy = localBusy || Boolean(sharedBusyLabel);
   const localGenerating = localBusy;
   const generating = localGenerating || Boolean(sharedBusyLabel);

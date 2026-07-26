@@ -54,7 +54,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Session refresh: `proxy.ts` → `@/lib/supabase/middleware` (`updateSession`); preserve cookie copy-on-redirect
 - Mutations: server actions in `src/domain/**/**-actions.ts` + `revalidatePath` for touched routes
 - Deps: `app/` + `src/components/` → `src/domain/` → `src/lib/supabase|openrouter` — never OpenRouter from Client Components
-- Browser Supabase client for auth/UI only; data + AI via server client/actions
+- Browser Supabase client for auth/UI and listen-only Realtime (menu live sync); data writes + AI via server client/actions — never mutate menu rows from the browser
 - UI: Soft Workshop / light-only desktop; Russian copy; English glossary ids in domain (`Menu`, `Recipe`, `Snack`, …)
 - Suggestions: invent → persist → assign **persisted ids only**; eligibility = fridge-keep + refusal/dislike hard-suppress
 - Shopping list: dish-grouped SOURCE via `buildShoppingSourceFromMenu(menu)`; client curated cart (add/merge/remove); copy curated lines only; empty cart on visit

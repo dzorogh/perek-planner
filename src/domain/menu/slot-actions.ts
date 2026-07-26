@@ -60,10 +60,18 @@ export async function resuggestSlotAction(
   const { supabase, user, error } = await requireUser();
   if (!user) return { ok: false, error: error! };
 
-  const result = await withMenuMutationLock(menuId, () =>
-    resuggestSlotForUser(supabase, user.id, menuId, slotId, { target }),
-  );
-  if (!result.ok) return result;
+  let result: SlotActionState;
+  try {
+    result = await withMenuMutationLock(supabase, menuId, () =>
+      resuggestSlotForUser(supabase, user.id, menuId, slotId, { target }),
+    );
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Не удалось обновить слот.",
+    };
+  }
+  if (!result?.ok) return result;
 
   revalidatePath("/plan/menu");
   revalidatePath("/plan/shopping-list");
@@ -84,12 +92,20 @@ export async function suggestCompanionAction(
   const { supabase, user, error } = await requireUser();
   if (!user) return { ok: false, error: error! };
 
-  const result = await withMenuMutationLock(menuId, () =>
-    resuggestSlotForUser(supabase, user.id, menuId, slotId, {
-      target: "carb",
-    }),
-  );
-  if (!result.ok) return result;
+  let result: SlotActionState;
+  try {
+    result = await withMenuMutationLock(supabase, menuId, () =>
+      resuggestSlotForUser(supabase, user.id, menuId, slotId, {
+        target: "carb",
+      }),
+    );
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Не удалось обновить слот.",
+    };
+  }
+  if (!result?.ok) return result;
 
   revalidatePath("/plan/menu");
   revalidatePath("/plan/shopping-list");
@@ -111,10 +127,18 @@ export async function resuggestRecipeAcrossMenuAction(
   const { supabase, user, error } = await requireUser();
   if (!user) return { ok: false, error: error! };
 
-  const result = await withMenuMutationLock(menuId, () =>
-    resuggestRecipeAcrossMenu(supabase, user.id, menuId, slotId, { target }),
-  );
-  if (!result.ok) return result;
+  let result: SlotActionState;
+  try {
+    result = await withMenuMutationLock(supabase, menuId, () =>
+      resuggestRecipeAcrossMenu(supabase, user.id, menuId, slotId, { target }),
+    );
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Не удалось обновить слот.",
+    };
+  }
+  if (!result?.ok) return result;
 
   revalidatePath("/plan/menu");
   revalidatePath("/plan/shopping-list");
@@ -137,13 +161,21 @@ export async function modifyRecipeAcrossMenuAction(
   const { supabase, user, error } = await requireUser();
   if (!user) return { ok: false, error: error! };
 
-  const result = await withMenuMutationLock(menuId, () =>
-    modifyRecipeAcrossMenu(supabase, user.id, menuId, slotId, {
-      comment,
-      target,
-    }),
-  );
-  if (!result.ok) return result;
+  let result: SlotActionState;
+  try {
+    result = await withMenuMutationLock(supabase, menuId, () =>
+      modifyRecipeAcrossMenu(supabase, user.id, menuId, slotId, {
+        comment,
+        target,
+      }),
+    );
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Не удалось обновить слот.",
+    };
+  }
+  if (!result?.ok) return result;
 
   revalidatePath("/plan/menu");
   revalidatePath("/plan/shopping-list");
@@ -166,13 +198,21 @@ export async function refuseSlotAction(
   const { supabase, user, error } = await requireUser();
   if (!user) return { ok: false, error: error! };
 
-  const result = await withMenuMutationLock(menuId, () =>
-    refuseAndReplaceRecipeAcrossMenu(supabase, user.id, menuId, slotId, {
-      comment,
-      target,
-    }),
-  );
-  if (!result.ok) return result;
+  let result: SlotActionState;
+  try {
+    result = await withMenuMutationLock(supabase, menuId, () =>
+      refuseAndReplaceRecipeAcrossMenu(supabase, user.id, menuId, slotId, {
+        comment,
+        target,
+      }),
+    );
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Не удалось обновить слот.",
+    };
+  }
+  if (!result?.ok) return result;
 
   revalidatePath("/plan/menu");
   revalidatePath("/plan/shopping-list");
