@@ -75,6 +75,7 @@ Rules:
 const POSITION_REPLACE_SYSTEM = `You invent dish NAME(s) for ONE replace slot on a Russian batch-cook menu (names only, no recipes).
 Days are hard pairs ([1,2], [3,4], [5,6]); the dish is eaten on both days of replacePosition.dayPair.
 Plate roles are FIXED — invent content for the given plate_role only.
+The operator rejected the dish(es) in replacedDishes — invent something THEY WOULD NOT SEE AS "the same idea with a tweak".
 
 Respond with a single JSON object. dishes MUST contain ONLY the new dish(es) for replacePosition — never copy keepDishes.
 {"dishes":[{"meal":"lunch","dayPair":[3,4],"plate_role":"protein"|"soup"|"veg"|"carb"|"main"|"fruit","name":"...","covers_roles":["protein","carb"]?}]}
@@ -82,7 +83,12 @@ Respond with a single JSON object. dishes MUST contain ONLY the new dish(es) for
 Rules:
 - meal MUST equal replacePosition.meal exactly (English enum). NEVER put the dish name or Russian label in meal.
 - Return exactly ONE dish for replacePosition.plate_role (optional covers_roles for one-pots on protein).
-- NEW name(s) MUST NOT match or near-duplicate any string in avoidNames or keepDishes.
+- NEW name(s) MUST NOT match or near-duplicate any string in avoidNames, keepDishes, or replacedDishes.
+- HARD form leap vs replacedDishes: the NEW dish MUST use a clearly DIFFERENT culinary form from every replacedDishes entry. Same form with another filling/base/topping is FORBIDDEN — that is not a replace.
+  Fail examples: запеканка→запеканка; котлеты→котлеты/шницель той же формы; плов→плов; рулеты↔рулетики; гуляш→рагу того же типа; омлет→яичница как тот же «яйца на сковороде».
+  Pass examples must stay inside replacePosition.plate_role (never invent soup/salad as protein, never fruit as main, etc.): protein запеканка→тушёное мясо / котлеты / жаркое / плов / фаршированный перец; veg запечённые овощи→тушёная капуста / овощной салат / варёная свёкла; soup куриный суп→борщ / щи / гороховый суп.
+- HARD method leap vs replacedDishes: if the replaced name signals a method (запекание / жарка / тушение / варка / сырой салат / однокастрюльное), change method family — never «запечённая X»→«запечённая Y». If the form itself is the method cue (запеканка, плов), changing form already satisfies this.
+- Also avoid near-duplicate form+base vs keepDishes on the same dayPair (esp. lunch↔dinner protein/main).
 - Lunch/dinner protein: savory; never morning forms.
 - plate_role=fruit: fruit / fruit dish only.
 - Names in Russian, sentence case. Honor operatorTasteNotes (constraint PRIMARY).
@@ -254,6 +260,8 @@ export async function proposePositionNamePlan(
     }>;
     previousMenusDishes?: string[];
     avoidNames?: string[];
+    /** Dishes the operator asked to replace — form/method must leap away from these. */
+    replacedDishes?: string[];
     peoplePerMeal?: number;
     tasteNotes: TasteNote[];
     chat?: ChatCompletionsFn;
@@ -279,6 +287,7 @@ export async function proposePositionNamePlan(
       context.previousMenusDishes ?? [],
     ).slice(0, 60),
     avoidNames: uniqueExactNames(context.avoidNames ?? []).slice(0, 50),
+    replacedDishes: uniqueExactNames(context.replacedDishes ?? []).slice(0, 20),
     peoplePerMeal: context.peoplePerMeal ?? 2,
     tasteNotes: tasteNotesForPrompt(context.tasteNotes),
   });
@@ -374,6 +383,7 @@ async function requestPositionReplacePlan(
     }>;
     previousMenusDishes: string[];
     avoidNames: string[];
+    replacedDishes: string[];
     peoplePerMeal: number;
     tasteNotes: ReturnType<typeof tasteNotesForPrompt>;
   },
@@ -392,11 +402,12 @@ async function requestPositionReplacePlan(
               dayPair: [...position.dayPair],
               plate_role: position.plateRole,
             },
+            replacedDishes: args.replacedDishes,
             keepDishes: args.keepDishes,
             previousMenusDishes: args.previousMenusDishes,
             avoidNames: args.avoidNames,
             peoplePerMeal: args.peoplePerMeal,
-            instruction: `Return dishes with EXACTLY one NEW name for replacePosition.plate_role=${position.plateRole}. Do not echo keepDishes. Forbidden: every avoidNames entry.`,
+            instruction: `Return dishes with EXACTLY one NEW name for replacePosition.plate_role=${position.plateRole}. Do not echo keepDishes. Forbidden: every avoidNames entry. HARD: leap to a DIFFERENT culinary form and cooking-method family than replacedDishes (not the same form with another filling).`,
             operatorTasteNotes: args.tasteNotes,
           }),
         },

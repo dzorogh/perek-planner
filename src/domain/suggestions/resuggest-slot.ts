@@ -343,14 +343,14 @@ async function resuggestNameContext(
   });
   if (!keepDishes) return null;
   // Excluded ids leave keepDishes — still ban their names so replace ≠ same label.
-  const replacedNames = await loadRecipeNamesByIds(supabase, excludeRecipeIds);
+  const excludedNames = await loadRecipeNamesByIds(supabase, excludeRecipeIds);
   return {
     keepDishes,
     previousMenusDishes,
     avoidNames: [
       ...previousMenusDishes,
       ...keepDishes.map((d) => d.name),
-      ...replacedNames,
+      ...excludedNames,
     ],
   };
 }
@@ -434,6 +434,7 @@ async function inventPositionViaNamePlan(
     keepDishes: MenuPlanDish[];
     avoidNames: string[];
     previousMenusDishes: string[];
+    replacedDishes?: string[];
   },
   options: ResuggestOptions & {
     peoplePerMeal?: number;
@@ -452,6 +453,7 @@ async function inventPositionViaNamePlan(
       keepDishes: ctx.keepDishes,
       previousMenusDishes: ctx.previousMenusDishes,
       avoidNames,
+      replacedDishes: ctx.replacedDishes,
       peoplePerMeal: options.peoplePerMeal,
       tasteNotes,
       chat: options.chat,
@@ -747,11 +749,15 @@ async function resuggestMainForPair(
 
   try {
     const plateRole = plateRoleForTarget(meal, "main");
+    const replacedDishes = await loadRecipeNamesByIds(
+      supabase,
+      recipeIdsForRoleOnPair(pairSlots, existingBySlot, plateRole),
+    );
     const invented = await inventPositionViaNamePlan(
       supabase,
       userId,
       { meal, dayPair, plateRole },
-      ctx,
+      { ...ctx, replacedDishes },
       {
         ...options,
         peoplePerMeal: menuMeta.peoplePerMeal,
@@ -890,6 +896,10 @@ async function resuggestCompanionForPair(
   const inventedIds: string[] = [];
 
   try {
+    const replacedDishes = await loadRecipeNamesByIds(
+      supabase,
+      excludeCompanions,
+    );
     const invented = await inventPositionViaNamePlan(
       supabase,
       userId,
@@ -901,6 +911,7 @@ async function resuggestCompanionForPair(
       {
         ...ctx,
         avoidNames: [...ctx.avoidNames, mainDishName],
+        replacedDishes,
       },
       {
         ...options,
@@ -960,6 +971,30 @@ function excludeRecipeIdsFromPair(
   return excludeIds;
 }
 
+/** Recipe ids currently assigned to one plate role across the day-pair. */
+function recipeIdsForRoleOnPair(
+  pairSlots: SlotRow[],
+  existingBySlot: Map<string, SlotDishAssignment[]>,
+  plateRole: PlateRole,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const s of pairSlots) {
+    for (const d of existingBySlot.get(s.id) ?? []) {
+      if (d.plateRole === plateRole) ids.add(d.recipeId);
+    }
+  }
+  // FK shim only when dishes[] has no row for this primary role yet.
+  if (
+    ids.size === 0 &&
+    (plateRole === "protein" || plateRole === "main")
+  ) {
+    for (const s of pairSlots) {
+      if (s.recipe_id) ids.add(s.recipe_id);
+    }
+  }
+  return ids;
+}
+
 /** Invent / replace a non-primary role (soup, veg, …) on the day-pair. */
 async function resuggestRoleForPair(
   supabase: SupabaseClient,
@@ -1000,11 +1035,15 @@ async function resuggestRoleForPair(
   const inventedIds: string[] = [];
 
   try {
+    const replacedDishes = await loadRecipeNamesByIds(
+      supabase,
+      recipeIdsForRoleOnPair(pairSlots, existingBySlot, plateRole),
+    );
     const invented = await inventPositionViaNamePlan(
       supabase,
       userId,
       { meal, dayPair, plateRole },
-      ctx,
+      { ...ctx, replacedDishes },
       {
         ...options,
         peoplePerMeal: menuMeta.peoplePerMeal,

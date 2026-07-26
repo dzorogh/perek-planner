@@ -126,3 +126,17 @@ All previously open items were closed in the deferred-work sweep. Strikethrough 
 - source_spec: `_bmad-output/implementation-artifacts/spec-menu-realtime-sync.md`
   summary: Wrap snack AI mutations (`resuggestSnackAction` / invent snack paths) in `withMenuMutationLock`.
   evidence: Review noted lock covers slot AI paths only; concurrent snack invent on the same menu can still interleave across instances.
+
+## Deferred from: spec-replace-dish-form-diversity.md (2026-07-26)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-replace-dish-form-diversity.md`
+  summary: Enforce form/method leap in code (reject/retry same culinary form), not only in the replace prompt.
+  evidence: Blind Hunter — `planHitsAvoid` only checks exact names; variety audit still allows up to two same-form proteins, so same-form replace can still ship.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-replace-dish-form-diversity.md`
+  summary: Reuse `cookingMethodKey` on the replace invent path for deterministic method-leap checks.
+  evidence: Classifier exists in `cooking-method-variety.ts` but replace still relies on LLM wording alone.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-replace-dish-form-diversity.md`
+  summary: Add verify/logic coverage for `replacedDishes` threading on main/role/carb replace paths.
+  evidence: No unit/integration tests for the new payload field or role scoping.
