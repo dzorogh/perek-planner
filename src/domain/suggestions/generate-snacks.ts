@@ -62,6 +62,27 @@ Rules:
 - nutrition_per_serving: kcal (integer) and protein_g / fat_g / carbs_g for 1 adult snack portion (not a full meal / not a whole package). Typical snack ~100–350 kcal.
 - OMIT price_rub_per_serving and/or any nutrition field when uncertain — do NOT send zeros as fillers.`;
 
+/** Replace path: leap away from the rejected snack (mirrors dish replacedDishes). */
+const SNACK_REPLACE_SYSTEM = `You invent replacement no-cook Russian grocery snacks (перекусы) for a household meal planner.
+The operator rejected replacedSnacks — invent snacks THEY WOULD NOT SEE AS "the same idea with a tweak".
+
+Respond with a single JSON object:
+{"snacks":[{"name":"...","price_rub_per_serving":N,"nutrition_per_serving":{"kcal":N,"protein_g":N,"fat_g":N,"carbs_g":N}},...]}.
+
+Rules:
+- Return exactly the requested count of DISTINCT snacks (candidates; the app picks one).
+- name: Russian, 1–4 words, sentence case, ready-to-eat / no cooking only.
+- Everyday supermarket labels only — shopping-list style, not fantasy/poetic/marketing names.
+- HARD form leap vs replacedSnacks: each NEW name MUST use a clearly DIFFERENT food form/base from every replacedSnacks entry. Same form with another topping/brand/fat% is FORBIDDEN.
+  Fail: яблоко→яблоко; йогурт→йогурт питьевой; творог→творожок; банан→банан с арахисовой пастой as the same banana idea; хлебцы с сыром→хлебцы с творогом.
+  Pass: яблоко→кефир; йогурт→хумус с морковью; творог→горсть миндаля; банан→сырные кубики / хумус с хлебцами / груша.
+- NEVER echo or near-duplicate avoid, recentlyUsed, or replacedSnacks (including word-order / diminutive swaps).
+- Do NOT only reshuffle a tiny fixed set (yogurt/apple/banana/cottage cheese). Invent fresh everyday labels each call.
+- Never invent cooked dishes. Honor likedSnacks style when present but do not only repeat liked ones.
+- Honor operatorTasteNotes (constraint PRIMARY). price/nutrition rules same as usual; OMIT when uncertain.`;
+
+const SNACK_REPLACE_CANDIDATE_COUNT = 5;
+
 type SnackPreferences = {
   liked: string[];
   disliked: Set<string>;
@@ -128,7 +149,49 @@ async function proposeSnacksViaOpenRouter(
       },
     ],
     responseFormatJson: true,
-    temperature: 0.4,
+    // Higher than default OpenRouter 0.4 — low temp collapses to a tiny yogurt/apple set.
+    temperature: 0.75,
+    maxTokens: 1024,
+  });
+
+  return parseSnacksJson(content, count, avoid);
+}
+
+async function proposeReplacementSnacksViaOpenRouter(
+  count: number,
+  prefs: SnackPreferences,
+  chat: ChatCompletionsFn,
+  tasteNotes: TasteNote[],
+  replacedSnacks: string[],
+  extraAvoid: Set<string>,
+  temperature: number,
+): Promise<SnackDraft[]> {
+  const avoid = new Set([
+    ...prefs.disliked,
+    ...prefs.recent,
+    ...extraAvoid,
+    ...replacedSnacks.map(normalizeSnackLabel),
+  ]);
+
+  const content = await chat({
+    messages: [
+      { role: "system", content: SNACK_REPLACE_SYSTEM },
+      {
+        role: "user",
+        content: JSON.stringify({
+          count,
+          replacedSnacks,
+          avoid: [...avoid],
+          likedSnacks: prefs.liked.slice(0, 20),
+          recentlyUsed: [...prefs.recent],
+          operatorTasteNotes: tasteNotesForPrompt(tasteNotes),
+          instruction:
+            "Return that many DISTINCT replacement snack candidates. HARD: leap to a different food form/base than every replacedSnacks entry — not the same snack with a tweak. Forbidden: every avoid entry. Invent fresh everyday grocery labels; do not reshuffle a tiny catalog. Include price and nutrition when confident.",
+        }),
+      },
+    ],
+    responseFormatJson: true,
+    temperature,
     maxTokens: 1024,
   });
 
@@ -374,10 +437,21 @@ async function generateSnackDrafts(
   return proposeSnacksViaOpenRouter(dayCount, prefs, chat, tasteNotes);
 }
 
+function pickReplacementDraft(
+  candidates: SnackDraft[],
+  replacedKey: string,
+): SnackDraft | null {
+  for (const draft of candidates) {
+    if (normalizeSnackLabel(draft.label) !== replacedKey) return draft;
+  }
+  return null;
+}
+
 async function proposeReplacementSnackDraft(
   supabase: SupabaseClient,
   userId: string,
   menuId: string,
+  replacedLabel: string,
   chat: ChatCompletionsFn,
 ): Promise<
   | { ok: true; draft: SnackDraft }
@@ -399,21 +473,44 @@ async function proposeReplacementSnackDraft(
       extraAvoid.add(normalizeSnackLabel(row.label));
     }
   }
+  const replacedKey = normalizeSnackLabel(replacedLabel);
+  if (replacedKey) extraAvoid.add(replacedKey);
 
   const tasteNotes = await loadTasteNotes(supabase, userId);
   if (!tasteNotes) {
     return { ok: false, error: SUGGESTIONS_RU.tasteNotesFail };
   }
 
+  const replacedSnacks = replacedLabel.trim() ? [replacedLabel.trim()] : [];
+
   try {
-    const proposed = await proposeSnacksViaOpenRouter(
-      1,
+    let proposed = await proposeReplacementSnacksViaOpenRouter(
+      SNACK_REPLACE_CANDIDATE_COUNT,
       prefs,
       chat,
       tasteNotes,
+      replacedSnacks,
       extraAvoid,
+      0.9,
     );
-    const draft = proposed[0] ?? null;
+    let draft = pickReplacementDraft(proposed, replacedKey);
+
+    // Soft prompt can still echo / underfill — one repair with rejected names banned.
+    if (!draft) {
+      const rejected = new Set(extraAvoid);
+      for (const d of proposed) rejected.add(normalizeSnackLabel(d.label));
+      proposed = await proposeReplacementSnacksViaOpenRouter(
+        SNACK_REPLACE_CANDIDATE_COUNT,
+        prefs,
+        chat,
+        tasteNotes,
+        [...replacedSnacks, ...proposed.map((d) => d.label)],
+        rejected,
+        1.0,
+      );
+      draft = pickReplacementDraft(proposed, replacedKey);
+    }
+
     if (!draft) {
       return { ok: false, error: "Не удалось предложить другой перекус." };
     }
@@ -462,14 +559,26 @@ export async function resuggestSnackForMenu(
     return { ok: false, error: "Перекус не найден." };
   }
 
+  const replacedLabel =
+    typeof snack.label === "string" ? snack.label.trim() : "";
   const chat = options.chat ?? openRouterChatCompletions;
   const proposed = await proposeReplacementSnackDraft(
     supabase,
     userId,
     menuId,
+    replacedLabel,
     chat,
   );
   if (!proposed.ok) return proposed;
+
+  // Belt-and-suspenders: never persist an exact echo of the replaced label.
+  if (
+    replacedLabel &&
+    normalizeSnackLabel(proposed.draft.label) ===
+      normalizeSnackLabel(replacedLabel)
+  ) {
+    return { ok: false, error: "Не удалось предложить другой перекус." };
+  }
 
   const { error: updateError } = await supabase
     .from("menu_snacks")

@@ -128,4 +128,28 @@ if (filtered.length !== 0) {
   process.exit(1);
 }
 
+// Replace path: pick first candidate that is not the rejected label.
+function pickReplacementDraft(candidates, replacedKey) {
+  for (const draft of candidates) {
+    if (normalizeSnackLabel(draft.label) !== replacedKey) return draft;
+  }
+  return null;
+}
+const replaceCandidates = parseSnacksJson(
+  JSON.stringify({
+    snacks: ["Йогурт", "Хумус с морковью", "Горсть миндаля"],
+  }),
+  3,
+  new Set(["йогурт"]),
+);
+const picked = pickReplacementDraft(replaceCandidates, "йогурт");
+if (!picked || picked.label !== "Хумус с морковью") {
+  console.error("FAIL replace pick", picked, replaceCandidates);
+  process.exit(1);
+}
+if (pickReplacementDraft(replaceCandidates, "хумус с морковью")?.label !== "Горсть миндаля") {
+  console.error("FAIL replace pick skip first");
+  process.exit(1);
+}
+
 console.log("PASS: snack generate/parse logic");
