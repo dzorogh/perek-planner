@@ -12,7 +12,6 @@ import type { SuggestionCandidate } from "@/domain/suggestions/candidates";
 import type { ProposedAssignment } from "@/domain/suggestions/openrouter-generate";
 import { primaryRecipeIdFromDishes } from "@/domain/suggestions/role-slots";
 import { isHardSuppressed, type SuppressSets } from "@/domain/suggestions/suppress";
-import { isLunchDinnerMeal } from "@/domain/suggestions/meal-fit";
 
 export type AssignResult = {
   assignedCount: number;
@@ -174,13 +173,10 @@ export function adaptDishesToMeal(
     if (!template.has(role) && role === "protein" && template.has("main")) {
       role = "main";
     }
+    // Template already defines breakfast = main+fruit; keep fruit, drop carb/etc.
     if (!template.has(role) || seen.has(role)) continue;
     seen.add(role);
     out.push({ plateRole: role, recipeId: d.recipeId });
-  }
-  // Breakfast-family legacy with only protein already remapped; drop carb noise.
-  if (!isLunchDinnerMeal(meal)) {
-    return out.filter((d) => d.plateRole === "main");
   }
   return out;
 }

@@ -11,26 +11,21 @@ import {
 import type { PlateRole } from "@/domain/menu/meal-templates";
 import {
   DEFAULT_AVAILABLE_EQUIPMENT,
-  dishNameEquipmentConflicts,
   normalizeEquipmentList,
   type EquipmentId,
 } from "@/domain/menu/equipment";
 import { createMenuSkeletonForUser } from "@/domain/menu/create-skeleton";
 import { assignProposalsToSlots } from "@/domain/suggestions/assign";
-import { buildCandidates } from "@/domain/suggestions/candidates";
+import type { SuggestionCandidate } from "@/domain/suggestions/candidates";
 import { SUGGESTIONS_RU } from "@/domain/suggestions/constants";
 import {
   SUGGESTION_FAIL_RU,
   SuggestionError,
 } from "@/domain/suggestions/errors";
 import { loadRecentMenuDishNames } from "@/domain/suggestions/history";
-import { analyzeMenuVariety } from "@/domain/suggestions/analyze-menu-variety";
-import { cookingMethodSpamReplaceTargets } from "@/domain/suggestions/cooking-method-variety";
 import { expandMenuRecipes } from "@/domain/suggestions/expand-menu-recipes";
 import {
-  planKey,
   proposeMenuNamePlan,
-  repairMenuNamePlan,
   type PlannedDish,
 } from "@/domain/suggestions/plan-menu-names";
 import {
@@ -39,10 +34,7 @@ import {
   type SlotPrompt,
 } from "@/domain/suggestions/openrouter-generate";
 import { generateSnacksForMenu } from "@/domain/suggestions/generate-snacks";
-import {
-  looksLikeHeavyAnimalProteinDish,
-  looksLikeNoCookSnack,
-} from "@/domain/suggestions/meal-fit";
+import { looksLikeHeavyAnimalProteinDish } from "@/domain/suggestions/meal-fit";
 import {
   expandDishAssignmentsForMeal,
   isCookableTemplateMeal,
@@ -57,6 +49,7 @@ import {
   OpenRouterError,
   type ChatCompletionsFn,
 } from "@/lib/openrouter/client";
+import { slog, slogError } from "@/lib/server-log";
 
 export type GenerateMenuOk = { ok: true; menuId: string };
 export type GenerateMenuErr = { ok: false; error: string };
@@ -109,16 +102,27 @@ export async function generateBuyableMenuForUser(
       ...DEFAULT_AVAILABLE_EQUIPMENT,
     ];
 
+  const pipelineStarted = Date.now();
+  slog("generate", "skeleton:start", {
+    userId,
+    dayCount,
+    meals: [...meals],
+    includeSnacks,
+    equipment,
+  });
+
   const created = await createMenuSkeletonForUser(supabase, userId, dayCount, {
     peopleCount: options.peopleCount,
     meals: mealsForSkeleton(meals, includeSnacks),
     equipment,
   });
   if (!created.ok) {
+    slogError("generate", "skeleton:fail", { error: created.error });
     return created;
   }
 
   const menuId = created.menuId;
+  slog("generate", "skeleton:ok", { menuId, ms: Date.now() - pipelineStarted });
 
   try {
     await fillMenuSlots(supabase, userId, menuId, dayCount, {
@@ -126,8 +130,20 @@ export async function generateBuyableMenuForUser(
       meals,
       includeSnacks,
     });
+    slog("generate", "ok", { menuId, ms: Date.now() - pipelineStarted });
     return { ok: true, menuId };
   } catch (err) {
+    const detail =
+      err instanceof SuggestionError
+        ? { kind: "suggestion", reason: err.reason, message: err.message }
+        : err instanceof OpenRouterError
+          ? { kind: "openrouter", message: err.message, status: err.causeStatus }
+          : {
+            kind: "unknown",
+            message: err instanceof Error ? err.message : String(err),
+          };
+    slogError("generate", "fill:fail", { menuId, ...detail });
+
     const { error: deleteError } = await supabase
       .from("menus")
       .delete()
@@ -135,8 +151,13 @@ export async function generateBuyableMenuForUser(
       .eq("user_id", userId);
 
     if (deleteError) {
+      slogError("generate", "rollback:fail", {
+        menuId,
+        deleteError: deleteError.message,
+      });
       return { ok: false, error: SUGGESTIONS_RU.rollbackFail };
     }
+    slog("generate", "rollback:ok", { menuId });
 
     if (err instanceof SuggestionError) {
       return { ok: false, error: err.message };
@@ -161,110 +182,48 @@ async function fillMenuSlots(
   const { meals, includeSnacks } = options;
   const slotCount = expectedSlotCount(dayCount, meals);
 
-  const tasks: Promise<void>[] = [];
+  // Snacks are independent of cookable expand — overlap to hide ~10s snack AI.
+  // On any failure the outer generate path deletes the whole menu (cascade).
+  const cookablePromise =
+    slotCount > 0
+      ? fillCookableSlots(
+        supabase,
+        userId,
+        menuId,
+        dayCount,
+        slotCount,
+        options,
+      )
+      : Promise.resolve();
 
-  if (slotCount > 0) {
-    tasks.push(
-      fillCookableSlots(supabase, userId, menuId, dayCount, slotCount, options),
-    );
-  }
-
-  if (includeSnacks) {
-    tasks.push(
-      (async () => {
-        const snacks = await generateSnacksForMenu(
-          supabase,
-          userId,
+  const snacksPromise = includeSnacks
+    ? (async () => {
+      slog("generate", "snacks:start", { menuId, dayCount });
+      const snacksStarted = Date.now();
+      const snacks = await generateSnacksForMenu(
+        supabase,
+        userId,
+        menuId,
+        dayCount,
+        { chat: options.chat },
+      );
+      if (!snacks.ok) {
+        slogError("generate", "snacks:fail", {
           menuId,
-          dayCount,
-          { chat: options.chat },
-        );
-        if (!snacks.ok) {
-          throw new SuggestionError("assign", snacks.error);
-        }
-      })(),
-    );
-  }
+          error: snacks.error,
+          ms: Date.now() - snacksStarted,
+        });
+        throw new SuggestionError("assign", snacks.error);
+      }
+      slog("generate", "snacks:ok", {
+        menuId,
+        labels: snacks.labels,
+        ms: Date.now() - snacksStarted,
+      });
+    })()
+    : Promise.resolve();
 
-  if (tasks.length > 0) {
-    await Promise.all(tasks);
-  }
-}
-
-async function refineMenuNamePlan(
-  initial: PlannedDish[],
-  ctx: {
-    dayCount: number;
-    tasteNotes: Awaited<ReturnType<typeof loadTasteNotes>>;
-    equipment: EquipmentId[];
-    chat?: ChatCompletionsFn;
-  },
-): Promise<PlannedDish[]> {
-  let plan = initial;
-  if (!ctx.tasteNotes) return plan;
-
-  const tryRepair = async (
-    targets: Parameters<typeof repairMenuNamePlan>[1],
-  ) => {
-    if (targets.length === 0) return;
-    const repaired = await repairMenuNamePlan(plan, targets, {
-      dayCount: ctx.dayCount,
-      tasteNotes: ctx.tasteNotes!,
-      availableEquipment: ctx.equipment,
-      chat: ctx.chat,
-    });
-    if (repaired.ok) plan = repaired.plan;
-  };
-
-  // Equipment + cooking-method spam: one repair call (same plan snapshot).
-  const equipmentTargets = plan
-    .filter((d) => dishNameEquipmentConflicts(d.name, ctx.equipment).length > 0)
-    .map((d) => {
-      const missing = dishNameEquipmentConflicts(d.name, ctx.equipment);
-      return {
-        meal: d.meal,
-        dayPair: d.dayPair,
-        plateRole: d.plateRole,
-        reason: `Name implies ${missing.join(",")} but availableEquipment is only [${ctx.equipment.join(",")}]. Invent a clearly different name cookable with that set (no unavailable appliance words).`,
-      };
-    });
-  await tryRepair(
-    dedupeReplaceTargets([
-      ...equipmentTargets,
-      ...cookingMethodSpamReplaceTargets(plan, 2),
-    ]),
-  );
-
-  const audit = await analyzeMenuVariety(
-    plan.map((d) => ({
-      meal: d.meal,
-      dayPair: d.dayPair,
-      plateRole: d.plateRole,
-      name: d.name,
-      recipeId: planKey(d),
-    })),
-    { chat: ctx.chat },
-  );
-  if (audit.ok && audit.replace.length > 0) {
-    await tryRepair(audit.replace);
-  }
-  return plan;
-}
-
-/** Keep first reason when the same meal×dayPair×plateRole appears twice. */
-function dedupeReplaceTargets(
-  targets: Parameters<typeof repairMenuNamePlan>[1],
-): Parameters<typeof repairMenuNamePlan>[1] {
-  const seen = new Set<string>();
-  const out: Parameters<typeof repairMenuNamePlan>[1] = [];
-  for (const t of targets) {
-    const plateRole = t.plateRole ?? "main";
-    const key = `${t.meal}:${t.dayPair[0]}-${t.dayPair[1]}:${plateRole}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(t);
-  }
-  return out;
+  await Promise.all([cookablePromise, snacksPromise]);
 }
 
 async function fillCookableSlots(
@@ -294,7 +253,15 @@ async function fillCookableSlots(
     throw new SuggestionError("query", SUGGESTIONS_RU.tasteNotesFail);
   }
 
-  // 1) Names only — cheap plan for the whole menu.
+  slog("generate", "plan:start", {
+    menuId,
+    dayCount,
+    mealCount: options.meals.length,
+    slotCount,
+    tasteNotes: tasteNotes.length,
+    previousDishNames: previousMenusDishes.length,
+  });
+  const planStarted = Date.now();
   const planned = await proposeMenuNamePlan(options.meals, {
     dayCount,
     previousMenusDishes,
@@ -305,18 +272,25 @@ async function fillCookableSlots(
     chat: options.chat,
   });
   if (!planned.ok) {
+    slogError("generate", "plan:fail", {
+      menuId,
+      reason: planned.reason,
+      ms: Date.now() - planStarted,
+    });
     throw new SuggestionError(planned.reason, SUGGESTION_FAIL_RU[planned.reason]);
   }
-
-  const plan = await refineMenuNamePlan(planned.plan, {
-    dayCount,
-    tasteNotes,
-    equipment,
-    chat: options.chat,
+  slog("generate", "plan:ok", {
+    menuId,
+    dishes: planned.plan.length,
+    ms: Date.now() - planStarted,
   });
 
-  // Expand locked names → full recipes (one batched AI call) + persist.
-  const expanded = await expandMenuRecipes(supabase, plan, {
+  slog("generate", "expand:start", {
+    menuId,
+    dishes: planned.plan.length,
+  });
+  const expandStarted = Date.now();
+  const expanded = await expandMenuRecipes(supabase, planned.plan, {
     menuDayCount: dayCount,
     peoplePerMeal: options.peopleCount,
     tasteNotes,
@@ -324,15 +298,31 @@ async function fillCookableSlots(
     availableEquipment: equipment,
   });
   if (!expanded.ok) {
+    slogError("generate", "expand:fail", {
+      menuId,
+      reason: expanded.reason,
+      ms: Date.now() - expandStarted,
+    });
     throw new SuggestionError(
       expanded.reason,
       SUGGESTION_FAIL_RU[expanded.reason],
     );
   }
+  slog("generate", "expand:ok", {
+    menuId,
+    recipes: expanded.dishes.length,
+    ms: Date.now() - expandStarted,
+  });
 
   const inventedIds = expanded.dishes.map((d) => d.recipeId);
   try {
     const proposals = buildProposalsFromExpanded(expanded.dishes, slotByKey);
+    slog("generate", "assign:start", {
+      menuId,
+      proposals: proposals.length,
+      inventedIds: inventedIds.length,
+    });
+    const assignStarted = Date.now();
     await assignPositionProposals(
       supabase,
       userId,
@@ -341,9 +331,22 @@ async function fillCookableSlots(
       proposals,
       inventedIds,
     );
+    slog("generate", "assign:ok", {
+      menuId,
+      ms: Date.now() - assignStarted,
+    });
   } catch (err) {
+    slogError("generate", "assign:fail", {
+      menuId,
+      inventedIds: inventedIds.length,
+      message: err instanceof Error ? err.message : String(err),
+    });
     if (inventedIds.length > 0) {
       await supabase.from("recipes").delete().in("id", inventedIds);
+      slog("generate", "assign:cleanup-recipes", {
+        menuId,
+        deleted: inventedIds.length,
+      });
     }
     throw err;
   }
@@ -470,41 +473,68 @@ async function assignPositionProposals(
   supabase: SupabaseClient,
   userId: string,
   menuId: string,
-  now: Date,
+  _now: Date,
   proposals: ProposedAssignment[],
   inventedIds: string[],
 ): Promise<void> {
-  const [built, suppress] = await Promise.all([
-    buildCandidates(supabase, userId, menuId, now),
-    loadSuppressSets(supabase, userId),
-  ]);
-  if (!built.ok) {
+  // Invented recipes were just gated at expand — load by id. Do NOT re-run the
+  // full library candidate pipeline (it can drop fresh rows and zero the pool).
+  const [{ data: inventedRows, error: inventedError }, suppress] =
+    await Promise.all([
+      supabase
+        .from("recipes")
+        .select("id, name, fridge_keep_days, plate_role")
+        .in("id", inventedIds),
+      loadSuppressSets(supabase, userId),
+    ]);
+  if (inventedError || !inventedRows?.length) {
     throw new SuggestionError("query", SUGGESTION_FAIL_RU.query);
   }
   if (!suppress) {
     throw new SuggestionError("query", SUGGESTION_FAIL_RU.query);
   }
-  const nameById = new Map(
-    built.candidates
-      .filter((c) => !looksLikeNoCookSnack(c.name))
-      .map((c) => [c.recipeId, c.name] as const),
-  );
-  const sanitized = dropHeavyHeavyCompanions(proposals, nameById);
-  if (sanitized.length === 0) {
-    throw new SuggestionError("parse", SUGGESTION_FAIL_RU.parse);
-  }
 
-  const inventedSet = new Set(inventedIds);
-  const assignPool = built.candidates.filter((c) =>
-    inventedSet.has(c.recipeId),
-  );
+  const assignPool: SuggestionCandidate[] = inventedRows.map((row) => ({
+    recipeId: row.id,
+    name: row.name,
+    fridgeKeepDays: row.fridge_keep_days,
+    longIdle: false,
+    recentlyUsed: false,
+    rating: "none",
+    plateRole:
+      typeof row.plate_role === "string" && row.plate_role.length > 0
+        ? row.plate_role
+        : null,
+  }));
   if (assignPool.length === 0) {
+    slogError("generate", "assign:zero-pool", {
+      menuId,
+      inventedIds: inventedIds.length,
+      inventedRows: inventedRows?.length ?? 0,
+    });
     throw new SuggestionError(
       "zero_eligible",
       SUGGESTION_FAIL_RU.zero_eligible,
     );
   }
 
+  const nameById = new Map(
+    assignPool.map((c) => [c.recipeId, c.name] as const),
+  );
+  const sanitized = dropHeavyHeavyCompanions(proposals, nameById);
+  if (sanitized.length === 0) {
+    slogError("generate", "assign:sanitized-empty", {
+      menuId,
+      proposals: proposals.length,
+    });
+    throw new SuggestionError("parse", SUGGESTION_FAIL_RU.parse);
+  }
+
+  slog("generate", "assign:write", {
+    menuId,
+    proposals: sanitized.length,
+    pool: assignPool.length,
+  });
   const assignResult = await assignProposalsToSlots(
     supabase,
     menuId,
@@ -512,12 +542,17 @@ async function assignPositionProposals(
     assignPool,
     suppress,
   );
-  if (
-    assignResult.assignedCount === 0 ||
-    assignResult.failedSlots.length > 0
-  ) {
+  if (assignResult.assignedCount === 0) {
+    slogError("generate", "assign:zero-assigned", {
+      menuId,
+      proposals: sanitized.length,
+    });
     throw new SuggestionError("assign", SUGGESTION_FAIL_RU.assign);
   }
+  slog("generate", "assign:write-ok", {
+    menuId,
+    assignedCount: assignResult.assignedCount,
+  });
 }
 
 function buildSlotPrompts(

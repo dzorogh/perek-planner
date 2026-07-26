@@ -61,14 +61,20 @@ export function equipmentToCsv(ids: readonly EquipmentId[]): string {
   return ids.join(",");
 }
 
-/** required ⊆ available; both must be non-empty valid lists. */
+/**
+ * required ⊆ available.
+ * Empty required (`[]`) = no appliances needed → fits any non-empty available set.
+ * null/undefined required = unknown → does not fit.
+ */
 export function recipeFitsAvailableEquipment(
   required: readonly string[] | null | undefined,
   available: readonly string[] | null | undefined,
 ): boolean {
-  const req = normalizeEquipmentList(required);
   const avail = normalizeEquipmentList(available);
-  if (!req || !avail) return false;
+  if (!avail) return false;
+  if (Array.isArray(required) && required.length === 0) return true;
+  const req = normalizeEquipmentList(required);
+  if (!req) return false;
   return req.every((id) => avail.includes(id));
 }
 
@@ -109,6 +115,9 @@ export function clampRequiredEquipmentToAvailable(
   required: readonly string[] | null | undefined,
   available: readonly EquipmentId[],
 ): EquipmentId[] {
+  // Explicit empty from AI = no appliances (salads / no-heat sides).
+  if (Array.isArray(required) && required.length === 0) return [];
+
   const avail =
     normalizeEquipmentList(available) ?? [...DEFAULT_AVAILABLE_EQUIPMENT];
   const req = normalizeEquipmentList(required);

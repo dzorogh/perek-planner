@@ -25,7 +25,7 @@ flowchart TB
 | App | Next.js App Router | 16.2.10; `proxy.ts` session |
 | UI | React 19 + Tailwind 4 + shadcn | Soft Workshop, light-only, RU |
 | Data | Supabase JS + SSR cookies | 2.110.7 / 0.12.3 |
-| AI | OpenRouter chat completions | default `google/gemini-2.5-flash-lite` |
+| AI | OpenRouter chat completions | default `deepseek/deepseek-v4-flash` |
 | Verify | Node ESM scripts + Playwright | — |
 
 ## Dependency Direction

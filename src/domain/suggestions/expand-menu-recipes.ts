@@ -70,20 +70,19 @@ export type ExpandModificationContext = {
 };
 
 /**
- * Recipes per OpenRouter call. Size 1 with concurrency 2 made a 4-day menu
- * (~18 dishes) take 9 sequential waves — felt hung (~2+ min on slow providers).
- * Chunks of 3 cut round-trips; keep small enough to avoid truncation.
+ * Recipes per OpenRouter call. Smaller chunks finish faster on low TPS hosts;
+ * with concurrency 8 a 4-day menu (~18 dishes → 9 chunks) is ~2 waves.
  */
-export const EXPAND_CHUNK_SIZE = 3;
+export const EXPAND_CHUNK_SIZE = 2;
 
 /**
- * Max in-flight expand calls. Cap avoids OpenRouter stampede; 4 is enough for
- * a typical menu to finish in ~2 waves after chunking.
+ * Max in-flight expand calls. High enough for one/two waves on a full menu;
+ * still capped so we do not stampede OpenRouter.
  */
-export const EXPAND_CONCURRENCY = 4;
+export const EXPAND_CONCURRENCY = 8;
 
 /** Completion budget for a chunk of recipes (short steps + ingredients). */
-const EXPAND_MAX_TOKENS = 4096;
+const EXPAND_MAX_TOKENS = 2560;
 
 /**
  * Expand locked menu names into full persisted recipes (chunked AI calls).

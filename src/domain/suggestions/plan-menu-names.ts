@@ -160,6 +160,7 @@ export async function proposeMenuNamePlan(
       ],
       responseFormatJson: true,
       temperature: 0.7,
+      maxTokens: 3072,
     });
   } catch (err) {
     if (err instanceof OpenRouterError) {

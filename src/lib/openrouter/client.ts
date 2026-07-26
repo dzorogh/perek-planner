@@ -1,6 +1,7 @@
 import "server-only";
 
 import { recordAiDebugEntry } from "@/lib/openrouter/debug-log";
+import { slog, slogError } from "@/lib/server-log";
 
 /**
  * OpenRouter Chat Completions client (server-only).
@@ -11,20 +12,20 @@ export const OPENROUTER_CHAT_URL =
   "https://openrouter.ai/api/v1/chat/completions";
 
 /**
- * Default for menu invent/snacks — Gemini 2.5 Flash Lite via OpenRouter.
+ * Default for menu invent/snacks — DeepSeek V4 Flash via OpenRouter.
  * Override with OPENROUTER_MODEL.
  */
-export const DEFAULT_OPENROUTER_MODEL = "google/gemini-2.5-flash-lite";
+export const DEFAULT_OPENROUTER_MODEL = "deepseek/deepseek-v4-flash";
 
 /**
- * Hard cap so generate action cannot hang indefinitely.
- * Keep as safety net for multi-step invent/expand.
+ * Hard cap per OpenRouter request. Below the old 90s so a stuck provider
+ * releases the expand pool; above observed healthy p95 (~40s on slow routes).
  */
-export const OPENROUTER_TIMEOUT_MS = 90_000;
+export const OPENROUTER_TIMEOUT_MS = 60_000;
 
 /**
- * Default completion budget. Gemini Flash Lite often pretty-prints JSON and
- * truncates mid-object when the provider default max_tokens is too low.
+ * Default completion budget. Models often pretty-print JSON and truncate
+ * mid-object when the provider default max_tokens is too low.
  */
 export const DEFAULT_OPENROUTER_MAX_TOKENS = 8192;
 
@@ -85,6 +86,13 @@ export async function openRouterChatCompletions(
     messages: request.messages,
     temperature: request.temperature ?? 0.4,
     max_tokens: request.maxTokens ?? DEFAULT_OPENROUTER_MAX_TOKENS,
+    // DeepSeek V4 Flash (and similar) can burn the whole max_tokens budget on
+    // reasoning and return empty content. We only need the JSON answer.
+    reasoning: { enabled: false },
+    // Wall clock for ~1k completion tokens is dominated by tokens/sec, not TTFT.
+    // Price-default routing landed on ~20 tps hosts (45s/chunk); throughput/nitro
+    // prefers ~60–74 tps providers.
+    provider: { sort: "throughput" },
   };
   if (request.responseFormatJson) {
     body.response_format = { type: "json_object" };
@@ -100,6 +108,24 @@ export async function openRouterChatCompletions(
   if (title) headers["X-OpenRouter-Title"] = title;
 
   const started = Date.now();
+  const maxTokens = request.maxTokens ?? DEFAULT_OPENROUTER_MAX_TOKENS;
+  const systemLen =
+    request.messages.find((m) => m.role === "system")?.content.length ?? 0;
+  const userLen = request.messages
+    .filter((m) => m.role === "user")
+    .reduce((n, m) => n + m.content.length, 0);
+  slog("openrouter", "request:start", {
+    model,
+    maxTokens,
+    temperature: request.temperature ?? 0.4,
+    responseFormatJson: Boolean(request.responseFormatJson),
+    messageCount: request.messages.length,
+    systemChars: systemLen,
+    userChars: userLen,
+    timeoutMs: OPENROUTER_TIMEOUT_MS,
+    providerSort: "throughput",
+  });
+
   const debugMessages = request.messages.map((m) => ({
     role: m.role,
     content: m.content,
@@ -120,10 +146,17 @@ export async function openRouterChatCompletions(
     } else if (err instanceof Error && err.name === "AbortError") {
       message = "OpenRouter request aborted";
     }
+    const durationMs = Date.now() - started;
+    slogError("openrouter", "request:fail", {
+      model,
+      durationMs,
+      error: message,
+      errName: err instanceof Error ? err.name : undefined,
+    });
     // Fire-and-forget: never block OpenRouter error path on DB latency.
     void recordAiDebugEntry({
       model,
-      durationMs: Date.now() - started,
+      durationMs,
       ok: false,
       error: message,
       requestMessages: debugMessages,
@@ -134,9 +167,16 @@ export async function openRouterChatCompletions(
 
   if (!response.ok) {
     const message = `OpenRouter HTTP ${response.status}`;
+    const durationMs = Date.now() - started;
+    slogError("openrouter", "request:fail", {
+      model,
+      durationMs,
+      status: response.status,
+      error: message,
+    });
     void recordAiDebugEntry({
       model,
-      durationMs: Date.now() - started,
+      durationMs,
       ok: false,
       error: message,
       requestMessages: debugMessages,
@@ -145,53 +185,138 @@ export async function openRouterChatCompletions(
     throw new OpenRouterError(message, response.status);
   }
 
+  const routedProvider =
+    response.headers.get("x-openrouter-provider") ??
+    response.headers.get("x-provider") ??
+    undefined;
+
   let json: {
+    id?: string;
+    provider?: string;
+    model?: string;
     choices?: Array<{
       finish_reason?: string | null;
       native_finish_reason?: string | null;
       message?: {
         content?: string | null | Array<{ type?: string; text?: string }>;
+        reasoning?: string | null;
       };
     }>;
+    usage?: {
+      completion_tokens?: number;
+      prompt_tokens?: number;
+      completion_tokens_details?: { reasoning_tokens?: number };
+    };
   };
   try {
     json = (await response.json()) as typeof json;
-  } catch {
+  } catch (err) {
+    // Abort during body read surfaces here, not on fetch().
+    const aborted =
+      err instanceof Error &&
+      (err.name === "AbortError" || err.name === "TimeoutError");
+    const message = aborted
+      ? "OpenRouter request timed out"
+      : "OpenRouter returned invalid JSON";
+    const durationMs = Date.now() - started;
+    slogError("openrouter", "request:fail", {
+      model,
+      durationMs,
+      error: message,
+      errName: err instanceof Error ? err.name : undefined,
+    });
     void recordAiDebugEntry({
       model,
-      durationMs: Date.now() - started,
+      durationMs,
       ok: false,
-      error: "OpenRouter returned invalid JSON",
+      error: message,
       requestMessages: debugMessages,
       response: null,
     });
-    throw new OpenRouterError("OpenRouter returned invalid JSON");
+    throw new OpenRouterError(message);
   }
 
   const choice = json.choices?.[0];
   const content = extractAssistantText(choice?.message?.content);
+  const finishReason = choice?.finish_reason ?? choice?.native_finish_reason;
+  const completionTokens = json.usage?.completion_tokens;
+  const promptTokens = json.usage?.prompt_tokens;
+  const reasoningTokens =
+    json.usage?.completion_tokens_details?.reasoning_tokens;
+  const provider = json.provider ?? routedProvider;
+  const tokensPerSec =
+    completionTokens && Date.now() - started > 0
+      ? Math.round((completionTokens * 1000) / (Date.now() - started))
+      : undefined;
   if (!content) {
+    const message =
+      finishReason === "length" || finishReason === "MAX_TOKENS"
+        ? `OpenRouter returned empty content (truncated; reasoning_tokens=${reasoningTokens ?? "?"})`
+        : "OpenRouter returned empty content";
+    const durationMs = Date.now() - started;
+    slogError("openrouter", "request:fail", {
+      model,
+      provider,
+      durationMs,
+      error: message,
+      finishReason,
+      completionTokens,
+      reasoningTokens,
+    });
     void recordAiDebugEntry({
       model,
-      durationMs: Date.now() - started,
+      durationMs,
       ok: false,
-      error: "OpenRouter returned empty content",
+      error: message,
       requestMessages: debugMessages,
-      response: null,
+      response: choice?.message?.reasoning?.slice(0, 2000) ?? null,
     });
-    throw new OpenRouterError("OpenRouter returned empty content");
+    throw new OpenRouterError(message);
   }
 
-  const finishReason = choice?.finish_reason ?? choice?.native_finish_reason;
   const truncated =
     finishReason === "length" || finishReason === "MAX_TOKENS";
+  if (truncated) {
+    // Hard fail: never return partial content for callers to parse/retry.
+    const durationMs = Date.now() - started;
+    slogError("openrouter", "request:fail", {
+      model,
+      durationMs,
+      error: `Output truncated (finish_reason=${finishReason})`,
+      finishReason,
+      contentChars: content.length,
+      completionTokens,
+      reasoningTokens,
+    });
+    void recordAiDebugEntry({
+      model,
+      durationMs,
+      ok: false,
+      error: `Output truncated (finish_reason=${finishReason})`,
+      requestMessages: debugMessages,
+      response: content.slice(0, 4000),
+    });
+    throw new OpenRouterError(
+      `OpenRouter output truncated (finish_reason=${finishReason})`,
+    );
+  }
+
+  const durationMs = Date.now() - started;
+  slog("openrouter", "request:ok", {
+    model,
+    provider,
+    durationMs,
+    finishReason,
+    contentChars: content.length,
+    promptTokens,
+    completionTokens,
+    reasoningTokens,
+    tokensPerSec,
+  });
   void recordAiDebugEntry({
     model,
-    durationMs: Date.now() - started,
-    ok: !truncated,
-    error: truncated
-      ? `Output truncated (finish_reason=${finishReason})`
-      : undefined,
+    durationMs,
+    ok: true,
     requestMessages: debugMessages,
     response: content,
   });

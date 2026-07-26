@@ -11,7 +11,7 @@ export function SlotGeneratingOverlay({ label }: SlotGeneratingOverlayProps) {
   return (
     <div
       data-component="slot-generating"
-      className="absolute inset-0 z-[5] rounded-md bg-empty-slot px-3.5 py-3 pr-8"
+      className="absolute inset-0 z-[15] flex flex-col justify-center rounded-md bg-empty-slot/95 px-3 py-1.5 backdrop-blur-[1px]"
       aria-busy="true"
       aria-live="polite"
     >

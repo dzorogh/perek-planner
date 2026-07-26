@@ -31,6 +31,7 @@ import {
   OpenRouterError,
   type ChatCompletionsFn,
 } from "@/lib/openrouter/client";
+import { slog, slogError } from "@/lib/server-log";
 
 export type GenerateSnacksResult =
   | { ok: true; labels: string[] }
@@ -128,6 +129,7 @@ async function proposeSnacksViaOpenRouter(
     ],
     responseFormatJson: true,
     temperature: 0.4,
+    maxTokens: 1024,
   });
 
   return parseSnacksJson(content, count, avoid);
@@ -260,11 +262,16 @@ export async function generateSnacksForMenu(
   dayCount: number,
   options: { chat?: ChatCompletionsFn } = {},
 ): Promise<GenerateSnacksResult> {
+  const started = Date.now();
+  slog("snacks", "start", { menuId, dayCount });
+
   if (!isValidDayCount(dayCount)) {
+    slogError("snacks", "fail", { reason: "invalid-day-count", dayCount });
     return { ok: false, error: "Некорректная длина меню." };
   }
 
   if (!getOpenRouterApiKey() && !options.chat) {
+    slogError("snacks", "fail", { reason: "no-api-key" });
     return {
       ok: false,
       error: "AI-генерация не настроена. Добавьте OPENROUTER_API_KEY на сервере.",
@@ -276,9 +283,11 @@ export async function generateSnacksForMenu(
     loadTasteNotes(supabase, userId),
   ]);
   if (!prefs) {
+    slogError("snacks", "fail", { reason: "prefs-load", menuId });
     return { ok: false, error: "Не удалось загрузить предпочтения по перекусам." };
   }
   if (!tasteNotes) {
+    slogError("snacks", "fail", { reason: "taste-notes-load", menuId });
     return { ok: false, error: SUGGESTIONS_RU.tasteNotesFail };
   }
   const chat = options.chat ?? openRouterChatCompletions;
@@ -287,9 +296,15 @@ export async function generateSnacksForMenu(
 
   let drafts: SnackDraft[];
   try {
+    slog("snacks", "chat:start", { pairCount });
     drafts = await generateSnackDrafts(pairCount, prefs, chat, tasteNotes);
   } catch (err) {
     if (err instanceof OpenRouterError) {
+      slogError("snacks", "chat:fail", {
+        message: err.message,
+        status: err.causeStatus,
+        ms: Date.now() - started,
+      });
       return {
         ok: false,
         error: "Не удалось сгенерировать перекусы. Попробуйте ещё раз.",
@@ -298,6 +313,12 @@ export async function generateSnacksForMenu(
     throw err;
   }
   if (drafts.length < pairCount) {
+    slogError("snacks", "fail", {
+      reason: "underfill",
+      got: drafts.length,
+      need: pairCount,
+      ms: Date.now() - started,
+    });
     return {
       ok: false,
       error: "Не удалось придумать достаточно перекусов с учётом предпочтений.",
@@ -319,6 +340,11 @@ export async function generateSnacksForMenu(
   const { error: insertError } = await supabase.from("menu_snacks").insert(rows);
 
   if (insertError) {
+    slogError("snacks", "fail", {
+      reason: "insert",
+      message: insertError.message,
+      ms: Date.now() - started,
+    });
     return { ok: false, error: "Не удалось сохранить перекусы." };
   }
 
@@ -327,11 +353,16 @@ export async function generateSnacksForMenu(
       "@/domain/menu/sync-snack-dishes"
     );
     await syncSnackDishesFromRows(supabase, menuId, dayCount, rows);
-  } catch {
+  } catch (err) {
+    slogError("snacks", "sync-dishes:warn", {
+      message: err instanceof Error ? err.message : String(err),
+    });
     // Dual-write must not fail snack generation.
   }
 
-  return { ok: true, labels: pairDrafts.map((d) => d.label) };
+  const labels = pairDrafts.map((d) => d.label);
+  slog("snacks", "ok", { menuId, labels, ms: Date.now() - started });
+  return { ok: true, labels };
 }
 
 async function generateSnackDrafts(
@@ -340,34 +371,7 @@ async function generateSnackDrafts(
   chat: ChatCompletionsFn,
   tasteNotes: TasteNote[],
 ): Promise<SnackDraft[]> {
-  let drafts: SnackDraft[] = [];
-  drafts = await proposeSnacksViaOpenRouter(
-    dayCount,
-    prefs,
-    chat,
-    tasteNotes,
-  );
-
-  // One retry if the model returned too few after filtering avoid/dislike.
-  if (drafts.length < dayCount) {
-    const exclude = new Set(prefs.disliked);
-    for (const d of drafts) exclude.add(normalizeSnackLabel(d.label));
-    for (const r of prefs.recent) exclude.add(r);
-    try {
-      const more = await proposeSnacksViaOpenRouter(
-        dayCount - drafts.length,
-        prefs,
-        chat,
-        tasteNotes,
-        exclude,
-      );
-      drafts = [...drafts, ...more];
-    } catch (err) {
-      if (!(err instanceof OpenRouterError)) throw err;
-    }
-  }
-
-  return drafts;
+  return proposeSnacksViaOpenRouter(dayCount, prefs, chat, tasteNotes);
 }
 
 async function proposeReplacementSnackDraft(

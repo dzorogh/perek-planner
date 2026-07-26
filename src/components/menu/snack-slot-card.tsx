@@ -65,6 +65,7 @@ function SnackSlotActions({
   onSuggest,
   onResuggest,
   onRefuseSubmit,
+  inline = false,
 }: {
   snack: MenuSnackView | null;
   busy: boolean;
@@ -82,19 +83,19 @@ function SnackSlotActions({
   onSuggest: () => void;
   onResuggest: () => void;
   onRefuseSubmit: (comment: string) => void;
+  inline?: boolean;
 }): ReactNode {
   const empty = !snack;
-  return (
-    <div data-component="slot-actions" data-target="snack" className="contents">
-      {generating ? <SlotGeneratingOverlay label={generatingLabel} /> : null}
-      <div className="absolute right-2 top-2 z-10">
+  const menu = (
+    <>
+      <div className={inline ? "relative z-10" : "absolute right-2 top-2 z-10"}>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
               type="button"
               variant="ghost"
               size="icon"
-              className="h-7 w-7 shrink-0 text-muted-foreground hover:text-primary"
+              className="h-7 w-7 shrink-0 rounded-full text-muted-foreground hover:bg-background hover:text-primary"
               disabled={busy}
               aria-label="Действия со слотом"
               aria-busy={busy}
@@ -139,7 +140,13 @@ function SnackSlotActions({
       </div>
 
       {!generating ? (
-        <div className="relative z-[6] mt-1 space-y-0.5 pr-10">
+        <div
+          className={
+            inline
+              ? "relative z-[6] mt-1 max-w-[12rem] space-y-0.5 text-right"
+              : "relative z-[6] mt-1 space-y-0.5 pr-10"
+          }
+        >
           <ActionError state={resuggestState} />
           <ActionError state={suggestState} />
           <ActionError state={refuseState} />
@@ -158,6 +165,28 @@ function SnackSlotActions({
           onSubmit={onRefuseSubmit}
         />
       ) : null}
+    </>
+  );
+
+  if (inline) {
+    return (
+      <>
+        {generating ? <SlotGeneratingOverlay label={generatingLabel} /> : null}
+        <div
+          data-component="slot-actions"
+          data-target="snack"
+          className="relative z-10 flex shrink-0 flex-col items-end"
+        >
+          {menu}
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <div data-component="slot-actions" data-target="snack" className="contents">
+      {generating ? <SlotGeneratingOverlay label={generatingLabel} /> : null}
+      {menu}
     </div>
   );
 }
@@ -248,6 +277,7 @@ export function SnackSlotCard({
             refuseState={refuseState}
             refuseOpen={refuseOpen}
             setRefuseOpen={setRefuseOpen}
+            inline={sheetLayout}
             onSuggest={() =>
               runAction(suggestAction, {
                 menuId,

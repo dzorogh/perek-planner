@@ -1,5 +1,7 @@
 "use client";
 
+import type { ReactNode } from "react";
+
 import {
   Dialog,
   DialogContent,
@@ -36,6 +38,8 @@ type RecipeTextPanelProps = {
   /** Distinct days this recipe appears; used in the yield chips. */
   dayCount?: number;
   triggerClassName?: string;
+  /** Custom trigger (DialogTrigger asChild). Defaults to recipe name button. */
+  children?: ReactNode;
 };
 
 export function RecipeTextPanel({
@@ -46,6 +50,7 @@ export function RecipeTextPanel({
   totalServings = 1,
   dayCount = 1,
   triggerClassName,
+  children,
 }: RecipeTextPanelProps) {
   const hasBody = bodyText.trim().length > 0;
   const steps = hasBody ? splitRecipeSteps(bodyText) : [];
@@ -59,16 +64,18 @@ export function RecipeTextPanel({
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <button
-          type="button"
-          data-component="recipe-text-trigger"
-          className={
-            triggerClassName ??
-            "text-left text-sm font-medium text-primary underline-offset-4 hover:underline"
-          }
-        >
-          {recipeName}
-        </button>
+        {children ?? (
+          <button
+            type="button"
+            data-component="recipe-text-trigger"
+            className={
+              triggerClassName ??
+              "text-left text-sm font-medium text-primary underline-offset-4 hover:underline"
+            }
+          >
+            {recipeName}
+          </button>
+        )}
       </DialogTrigger>
       <DialogContent
         data-component="recipe-text-panel"

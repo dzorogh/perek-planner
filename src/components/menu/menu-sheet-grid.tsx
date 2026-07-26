@@ -166,8 +166,20 @@ function PairSheet({
               день
             </span>
           </div>
-          <span className="self-center text-primary/40" aria-hidden>
-            ———
+          <span
+            className="mx-3.5 inline-flex self-center text-primary/45"
+            aria-hidden
+          >
+            <svg width="28" height="10" viewBox="0 0 28 10" fill="none">
+              <path
+                d="M1 5h26"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+              <circle cx="1" cy="5" r="1.6" fill="currentColor" />
+              <circle cx="27" cy="5" r="1.6" fill="currentColor" />
+            </svg>
           </span>
           <div className="flex flex-col gap-0.5">
             <span className="text-[28px] font-bold leading-none tracking-tight text-accent">

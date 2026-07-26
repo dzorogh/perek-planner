@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Меню — редизайн v2 — Keplo</title>
+<style>
+  /*
+    Menu redesign v2 — built from scratch (2026-07-26)
+    Soft Workshop / Lavender Workshop tokens from DESIGN.md
+    Decisions (memlog): read-only settings chips; no equipment edit;
+    Harvard roles (no Oils/Water); Fruits only on breakfast;
+    day-pair columns (visual span, no «Дни N–M» on cards);
+    meta «N × price ₽ · kcal» plain, pinned bottom, N=days×people;
+    overflow: Заменить · Изменить · Не предлагать;
+    no «Блюда в меню»; no bottom list CTA; Список always in wizard.
+  */
+  :root {
+    --bg: #EEF2FF;
+    --surface: #FFFFFF;
+    --fg: #1E293B;
+    --muted: #64748B;
+    --primary: #4338CA;
+    --accent: #312E81;
+    --border: #E0E7FF;
+    --empty: #F8FAFC;
+    --slot-label: #94A3B8;
+    --pair-a: #EEF2FF;
+    --pair-b: #F1F5F9;
+    --r-sm: 10px;
+    --r-md: 12px;
+    --r-lg: 14px;
+    --role-breakfast: #6366F1;
+    --role-fruit: #E11D48;
+    --role-soup: #94A3B8;
+    --role-protein: #EA580C;
+    --role-veg: #16A34A;
+    --role-grain: #A16207;
+    --role-snack: #818CF8;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.45;
+    padding: 28px 32px 64px;
+  }
+
+  .browser {
+    max-width: 1180px;
+    margin: 0 auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 20px 48px rgba(49, 46, 129, 0.1);
+  }
+  .chrome {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 14px;
+    background: linear-gradient(180deg, var(--empty), var(--bg));
+    border-bottom: 1px solid var(--border);
+  }
+  .dots { display: flex; gap: 6px; }
+  .dots i { width: 10px; height: 10px; border-radius: 50%; display: block; }
+  .dots i:nth-child(1) { background: #FCA5A5; }
+  .dots i:nth-child(2) { background: #FDE047; }
+  .dots i:nth-child(3) { background: #86EFAC; }
+  .url {
+    flex: 1; font-size: 12px; color: var(--muted);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 999px; padding: 6px 12px;
+  }
+
+  /* ——— App chrome ——— */
+  .app-header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 20px; padding: 14px 28px;
+    border-bottom: 1px solid var(--border);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; }
+  .mark { width: 32px; height: 32px; display: block; }
+  .wordmark { font-size: 17px; font-weight: 700; color: var(--accent); letter-spacing: -0.03em; }
+  .header-actions { display: flex; align-items: center; gap: 18px; }
+  .nav-link { font-size: 13px; color: var(--muted); text-decoration: none; }
+  .btn-create {
+    font-size: 13px; font-weight: 600; color: #fff;
+    background: var(--primary); padding: 7px 14px; border-radius: var(--r-sm);
+    text-decoration: none;
+  }
+  .btn-out {
+    font-size: 13px; color: var(--muted); background: #F1F5F9;
+    padding: 7px 12px; border-radius: var(--r-sm); border: none; font-family: inherit;
+  }
+
+  .wizard {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 28px;
+    background: var(--empty);
+    border-bottom: 1px solid var(--border);
+  }
+  .wizard-label {
+    font-size: 11px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.04em; margin-right: 4px;
+  }
+  .pills {
+    display: flex; gap: 4px;
+    background: var(--bg); padding: 3px; border-radius: 999px;
+  }
+  .pill {
+    padding: 5px 13px; font-size: 13px; border-radius: 999px;
+    color: var(--muted); text-decoration: none;
+  }
+  .pill.active {
+    background: var(--surface); color: var(--primary); font-weight: 600;
+    box-shadow: 0 1px 2px rgba(67, 56, 202, 0.15);
+  }
+  .pill.ready { color: var(--primary); }
+
+  /* ——— Page ——— */
+  .content { padding: 20px 28px 32px; background: var(--bg); }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    padding: 22px 24px 28px;
+  }
+  h1 {
+    font-size: 24px; font-weight: 700; letter-spacing: -0.02em;
+  }
+  .lede {
+    margin-top: 6px; font-size: 13px; color: var(--muted);
+  }
+
+  .chips {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    margin-top: 14px;
+  }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 13px; font-weight: 500; color: var(--accent);
+  }
+  .chip-k {
+    font-size: 11px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.03em;
+  }
+  .chip-tech {
+    display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    padding: 4px 6px 4px 10px;
+    background: var(--empty);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+  }
+  .chip-tech .chip-k { margin-right: 2px; }
+  .tech {
+    padding: 3px 9px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 12px; font-weight: 500;
+  }
+
+  /* ——— Day-pair board ——— */
+  .board { margin-top: 22px; }
+
+  .day-axis {
+    display: grid;
+    grid-template-columns: 104px 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 4px;
+  }
+  .pair-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    padding: 10px 12px;
+    border-radius: 14px 14px 0 0;
+  }
+  .pair-head span {
+    flex: 1;
+    text-align: center;
+    font-size: 13px; font-weight: 600; color: var(--accent);
+    position: relative;
+  }
+  .pair-head span:first-child::after {
+    content: "";
+    position: absolute;
+    right: -8px; top: 50%;
+    width: 16px; height: 3px;
+    margin-top: -1px;
+    border-radius: 999px;
+    opacity: 0.35;
+  }
+  .pair-a { background: var(--pair-a); }
+  .pair-b { background: var(--pair-b); }
+  .pair-a span:first-child::after { background: var(--primary); }
+  .pair-b span:first-child::after { background: var(--muted); }
+
+  .meal {
+    padding: 16px 0;
+    border-bottom: 1px solid #F1F5F9;
+  }
+  .meal:last-of-type { border-bottom: none; }
+  .meal-title {
+    font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--slot-label);
+    margin-bottom: 10px;
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: 104px 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 8px;
+    align-items: stretch;
+  }
+  .row:last-child { margin-bottom: 0; }
+
+  .role {
+    display: flex; align-items: flex-start;
+    gap: 6px;
+    padding-top: 14px;
+    font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    color: #475569;
+    line-height: 1.25;
+  }
+  .role i {
+    width: 8px; height: 8px; border-radius: 50%;
+    flex-shrink: 0; margin-top: 2px;
+  }
+
+  .slot {
+    border-radius: 14px;
+    padding: 8px;
+  }
+  .slot.pair-a { background: var(--pair-a); }
+  .slot.pair-b { background: var(--pair-b); }
+
+  .card {
+    --role: var(--primary);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-height: 100px;
+    padding: 12px 14px 12px 16px;
+    background:
+      linear-gradient(#fff, #fff),
+      linear-gradient(
+        90deg,
+        transparent 0,
+        transparent calc(50% - 0.5px),
+        rgba(67, 56, 202, 0.1) calc(50% - 0.5px),
+        rgba(67, 56, 202, 0.1) calc(50% + 0.5px),
+        transparent calc(50% + 0.5px),
+        transparent 100%
+      );
+    background-blend-mode: normal;
+    background-color: #fff;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    box-shadow: 0 1px 0 rgba(49, 46, 129, 0.04);
+  }
+  .card::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 12px; bottom: 12px;
+    width: 3px;
+    border-radius: 999px;
+    background: var(--role);
+  }
+  /* Dual footing — one dish resting on two days */
+  .card::after {
+    content: "";
+    position: absolute;
+    left: 16px; right: 16px; bottom: 0;
+    height: 3px;
+    border-radius: 999px;
+    background: linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--role) 45%, transparent),
+      color-mix(in srgb, var(--role) 12%, transparent) 46%,
+      color-mix(in srgb, var(--role) 12%, transparent) 54%,
+      color-mix(in srgb, var(--role) 45%, transparent)
+    );
+  }
+
+  .card[data-role="breakfast"] { --role: var(--role-breakfast); }
+  .card[data-role="fruit"] { --role: var(--role-fruit); }
+  .card[data-role="soup"] { --role: var(--role-soup); }
+  .card[data-role="protein"] { --role: var(--role-protein); }
+  .card[data-role="veg"] { --role: var(--role-veg); }
+  .card[data-role="grain"] { --role: var(--role-grain); }
+  .card[data-role="snack"] { --role: var(--role-snack); }
+
+  .role[data-role="breakfast"] i { background: var(--role-breakfast); }
+  .role[data-role="fruit"] i { background: var(--role-fruit); }
+  .role[data-role="soup"] i { background: var(--role-soup); }
+  .role[data-role="protein"] i { background: var(--role-protein); }
+  .role[data-role="veg"] i { background: var(--role-veg); }
+  .role[data-role="grain"] i { background: var(--role-grain); }
+  .role[data-role="snack"] i { background: var(--role-snack); }
+
+  .dish {
+    font-size: 14px; font-weight: 600; line-height: 1.35;
+    padding-right: 28px;
+  }
+  .dish a {
+    color: inherit;
+    text-decoration: underline;
+    text-decoration-color: var(--border);
+    text-underline-offset: 2px;
+  }
+  .meta {
+    margin-top: auto;
+    padding-top: 10px;
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--muted);
+  }
+  .more {
+    position: absolute; top: 6px; right: 6px;
+    width: 28px; height: 28px;
+    display: flex; align-items: center; justify-content: center;
+    border: none; background: transparent;
+    color: var(--muted); font-size: 16px;
+    border-radius: 8px; font-family: inherit;
+  }
+  .card.is-open {
+    outline: 1px solid var(--border);
+    box-shadow: 0 4px 16px rgba(49, 46, 129, 0.08);
+  }
+  .card.is-open .more {
+    background: var(--bg); color: var(--primary);
+  }
+  .menu {
+    position: absolute; right: 8px; top: 38px; z-index: 3;
+    width: 200px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    box-shadow: 0 12px 32px rgba(49, 46, 129, 0.14);
+    padding: 6px;
+  }
+  .menu button {
+    display: block; width: 100%; text-align: left;
+    padding: 8px 12px; border: none; background: none;
+    font: inherit; font-size: 13px; color: var(--fg);
+    border-radius: 8px;
+  }
+  .menu button.danger { color: #854D0E; }
+
+  .totals {
+    margin-top: 22px;
+    padding: 16px 18px;
+    background: var(--empty);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+  }
+  .totals-row {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 16px;
+  }
+  .totals h2 { font-size: 15px; font-weight: 700; color: var(--accent); }
+  .totals .sum { font-size: 15px; font-weight: 600; }
+  .totals .macros { margin-top: 4px; font-size: 12px; color: var(--muted); }
+
+  .mock-banner {
+    margin: 0;
+    padding: 8px 28px;
+    background: #312E81;
+    color: #EEF2FF;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .mock-banner code {
+    font-weight: 500;
+    opacity: 0.85;
+  }
+</style>
+</head>
+<body>
+
+<div class="browser">
+  <div class="chrome">
+    <div class="dots"><i></i><i></i><i></i></div>
+    <div class="url">localhost:3100/plan/menu · редизайн v2</div>
+  </div>
+
+  <p class="mock-banner">MOCK v2 · новый файл · <code>key-menu-redesign-v2-2026-07-26.html</code></p>
+
+  <header class="app-header">
+    <a class="brand" href="#">
+      <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <rect width="32" height="32" rx="9" fill="#4338CA"/>
+        <rect x="7" y="9" width="5" height="14" rx="1.5" fill="#EEF2FF"/>
+        <rect x="13.5" y="9" width="5" height="14" rx="1.5" fill="#C7D2FE"/>
+        <rect x="20" y="9" width="5" height="14" rx="1.5" fill="#EEF2FF"/>
+      </svg>
+      <span class="wordmark">Keplo</span>
+    </a>
+    <div class="header-actions">
+      <a class="btn-create" href="#">Создать меню</a>
+      <a class="nav-link" href="#">История</a>
+      <a class="nav-link" href="#">Настройки</a>
+      <button class="btn-out" type="button">Выйти</button>
+    </div>
+  </header>
+
+  <div class="wizard">
+    <span class="wizard-label">План</span>
+    <nav class="pills" aria-label="Шаги планирования">
+      <span class="pill active">Состав</span>
+      <a class="pill ready" href="#">Список</a>
+    </nav>
+  </div>
+
+  <div class="content">
+    <div class="panel">
+      <h1>Меню</h1>
+      <p class="lede">Проверьте блюда и при необходимости замените. Список — в шагах выше.</p>
+
+      <div class="chips" aria-label="Параметры меню (только просмотр)">
+        <span class="chip"><span class="chip-k">Дни</span> 4</span>
+        <span class="chip"><span class="chip-k">На приём</span> 2 чел.</span>
+        <span class="chip"><span class="chip-k">Приёмы</span> Завтрак · Обед · Ужин · Перекус</span>
+        <span class="chip-tech">
+          <span class="chip-k">Техника</span>
+          <span class="tech">Плита</span>
+          <span class="tech">Духовка</span>
+          <span class="tech">Аэрогриль</span>
+          <span class="tech">Мультиварка</span>
+          <span class="tech">Скороварка</span>
+          <span class="tech">Микроволновка</span>
+        </span>
+      </div>
+
+      <div class="board">
+        <div class="day-axis" aria-hidden="true">
+          <div></div>
+          <div class="pair-head pair-a">
+            <span>День 1</span>
+            <span>День 2</span>
+          </div>
+          <div class="pair-head pair-b">
+            <span>День 3</span>
+            <span>День 4</span>
+          </div>
+        </div>
+
+        <!-- Завтрак: Завтрак + Фрукты -->
+        <section class="meal" aria-label="Завтрак">
+          <div class="meal-title">Завтрак</div>
+
+          <div class="row">
+            <div class="role" data-role="breakfast"><i></i>Завтрак</div>
+            <div class="slot pair-a">
+              <div class="card" data-role="breakfast">
+                <div class="dish"><a href="#">Запеканка творожная с изюмом</a></div>
+                <div class="meta">4 × 70 ₽ · 350 ккал</div>
+                <button class="more" type="button" aria-label="Действия: Завтрак">⋯</button>
+              </div>
+            </div>
+            <div class="slot pair-b">
+              <div class="card" data-role="breakfast">
+                <div class="dish"><a href="#">Ленивые вареники со сметаной</a></div>
+                <div class="meta">4 × 90 ₽ · 300 ккал</div>
+                <button class="more" type="button" aria-label="Действия: Завтрак">⋯</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="role" data-role="fruit"><i></i>Фрукты</div>
+            <div class="slot pair-a">
+              <div class="card" data-role="fruit">
+                <div class="dish"><a href="#">Яблоко и йогурт</a></div>
+                <div class="meta">4 × 45 ₽ · 90 ккал</div>
+                <button class="more" type="button" aria-label="Действия: Фрукты">⋯</button>
+              </div>
+            </div>
+            <div class="slot pair-b">
+              <div class="card" data-role="fruit">
+                <div class="dish"><a href="#">Банан</a></div>
+                <div class="meta">4 × 20 ₽ · 60 ккал</div>
+                <button class="more" type="button" aria-label="Действия: Фрукты">⋯</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Обед: Суп + тарелка -->
+        <section class="meal" aria-label="Обед">
+          <div class="meal-title">Обед</div>
+
+          <div class="row">
+            <div class="role" data-role="soup"><i></i>Суп</div>
+            <div class="slot pair-a">
+              <div class="card" data-role="soup">
+                <div class="dish"><a href="#">Солянка мясная сборная</a></div>
+                <div class="meta">4 × 150 ₽ · 200 ккал</div>
+                <button class="more" type="button" aria-label="Действия: Суп">⋯</button>
+              </div>
+            </div>
+            <div class="slot pair-b">
+              <div class="card" data-role="soup">
+                <div class="dish"><a href="#">Харчо с говядиной</a></div>
+                <div class="meta">4 × 180 ₽ · 250 ккал</div>
+                <button class="more" type="button" aria-label="Действия: Суп">⋯</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="role" data-role="protein"><i></i>Полезный белок</div>
+            <div class="slot pair-a">
+              <div class="card is-open" data-role="protein">
+                <div class="dish"><a href="#">Бефстроганов из говядины</a></div>
+                <div class="meta">4 × 250 ₽ · 300 ккал</div>
+                <button class="more" type="button" aria-label="Действия: Полезный белок" aria-expanded="true">⋯</button>
+                <div class="menu" role="menu">
+                  <button type="button" role="menuitem">Заменить</button>
+                  <button type="button" role="menuitem">Изменить</button>
+                  <button type="button" role="menuitem" class="danger">Не предлагать</button>
+                </div>
+              </div>
+            </div>
+            <div class="slot pair-b">
+              <div class="card" data-role="protein">
+                <div class="dish"><a href="#">Котлеты рыбные паровые</a></div>
+                <div class="meta">4 × 150 ₽ · 180 ккал</div>
+                <button class="more" type="button" aria-label="Действия: Полезный белок">⋯</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="role" data-role="veg"><i></i>Овощи</div>
+            <div class="slot pair-a">
+              <div class="card" data-role="veg">
+                <div class="dish"><a href="#">Капуста тушеная с грибами</a></div>
+                <div class="meta">4 × 80 ₽ · 100 ккал</div>
+                <button class="more" type="button" aria-label="Действия: Овощи">⋯</button>
+              </div>
+            </div>
+            <div class="slot pair-b">
+              <div class="card" data-role="veg">
+                <div class="dish"><a href="#">Салат из свеклы с чесноком</a></div>
+                <div class="meta">4 × 60 ₽ · 150 ккал</div>
+                <button class="more" type="button" aria-label="Действия: Овощи">⋯</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="role" data-role="grain"><i></i>Цельные злаки</div>
+            <div class="slot pair-a">
+              <div class="card" data-role="grain">
+                <div class="dish"><a href="#">Пюре картофельное</a></div>
+                <div class="meta">4 × 50 ₽ · 200 ккал</div>
+                <button class="more" type="button" aria-label="Действия: Цельные злаки">⋯</button>
+              </div>
+            </div>
+            <div class="slot pair-b">
+              <div class="card" data-role="grain">
+                <div class="dish"><a href="#">Спагетти с сыром</a></div>
+                <div class="meta">4 × 70 ₽ · 350 ккал</div>
+                <button class="more" type="button" aria-label="Действия: Цельные злаки">⋯</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Ужин: тарелка -->
+        <section class="meal" aria-label="Ужин">
+          <div class="meal-title">Ужин</div>
+
+          <div class="row">
+            <div class="role" data-role="protein"><i></i>Полезный белок</div>
+            <div class="slot pair-a">
+              <div class="card" data-role="protein">
+                <div class="dish"><a href="#">Куриные грудки, запеченные с травами</a></div>
+                <div class="meta">4 × 180 ₽ · 200 ккал</div>
+                <button class="more" type="button" aria-label="Действия: Полезный белок">⋯</button>
+              </div>
+            </div>
+            <div class="slot pair-b">
+              <div class="card" data-role="protein">
+                <div class="dish"><a href="#">Свинина, тушеная с овощами</a></div>
+                <div class="meta">4 × 100 ₽ · 100 ккал</div>
+                <button class="more" type="button" aria-label="Действия: Полезный белок">⋯</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="role" data-role="veg"><i></i>Овощи</div>
+            <div class="slot pair-a">
+              <div class="card" data-role="veg">
+                <div class="dish"><a href="#">Баклажаны, тушеные с томатами</a></div>
+                <div class="meta">4 × 100 ₽ · 120 ккал</div>
+                <button class="more" type="button" aria-label="Действия: Овощи">⋯</button>
+              </div>
+            </div>
+            <div class="slot pair-b">
+              <div class="card" data-role="veg">
+                <div class="dish"><a href="#">Цветная капуста, жареная в кляре</a></div>
+                <div class="meta">4 × 90 ₽ · 200 ккал</div>
+                <button class="more" type="button" aria-label="Действия: Овощи">⋯</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="role" data-role="grain"><i></i>Цельные злаки</div>
+            <div class="slot pair-a">
+              <div class="card" data-role="grain">
+                <div class="dish"><a href="#">Рис белый отварной</a></div>
+                <div class="meta">4 × 30 ₽ · 250 ккал</div>
+                <button class="more" type="button" aria-label="Действия: Цельные злаки">⋯</button>
+              </div>
+            </div>
+            <div class="slot pair-b">
+              <div class="card" data-role="grain">
+                <div class="dish"><a href="#">Кукурузная каша</a></div>
+                <div class="meta">4 × 40 ₽ · 220 ккал</div>
+                <button class="more" type="button" aria-label="Действия: Цельные злаки">⋯</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Перекус -->
+        <section class="meal" aria-label="Перекус">
+          <div class="meal-title">Перекус</div>
+          <div class="row">
+            <div class="role" data-role="snack"><i></i>Перекус</div>
+            <div class="slot pair-a">
+              <div class="card" data-role="snack">
+                <div class="dish"><a href="#">Банан с арахисовой пастой</a></div>
+                <div class="meta">4 × 90 ₽ · 280 ккал</div>
+                <button class="more" type="button" aria-label="Действия: Перекус">⋯</button>
+              </div>
+            </div>
+            <div class="slot pair-b">
+              <div class="card" data-role="snack">
+                <div class="dish"><a href="#">Морковь с хумусом</a></div>
+                <div class="meta">4 × 120 ₽ · 150 ккал</div>
+                <button class="more" type="button" aria-label="Действия: Перекус">⋯</button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="totals" aria-label="Итого по меню">
+        <div class="totals-row">
+          <h2>Итого по меню</h2>
+          <div class="sum">8 000 ₽ · 16 320 ккал</div>
+        </div>
+        <div class="macros">Б 940 · Ж 740 · У 1536</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

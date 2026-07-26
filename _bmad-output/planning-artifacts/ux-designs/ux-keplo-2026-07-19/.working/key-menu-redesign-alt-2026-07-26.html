@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Меню — ALT cook-batch — Keplo</title>
+<style>
+  /*
+    MOCK ALT · Cook-batch timeline (direction B)
+    Soft Workshop / Lavender Workshop
+    Vertical day-pair chapters; meals stacked; span = chapter width
+  */
+  :root {
+    --bg: #EEF2FF;
+    --surface: #FFFFFF;
+    --fg: #1E293B;
+    --muted: #64748B;
+    --primary: #4338CA;
+    --accent: #312E81;
+    --border: #E0E7FF;
+    --empty: #F8FAFC;
+    --slot-label: #94A3B8;
+    --r: 12px;
+    --r-lg: 16px;
+    --fruit: #E11D48;
+    --veg: #16A34A;
+    --protein: #EA580C;
+    --grains: #A16207;
+    --soup: #64748B;
+    --indigo: #6366F1;
+    --snack: #818CF8;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.45;
+    padding: 24px 28px 56px;
+  }
+
+  /* —— Desktop browser chrome —— */
+  .browser {
+    max-width: 920px;
+    margin: 0 auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    overflow: hidden;
+    box-shadow: 0 18px 40px rgba(49, 46, 129, 0.09);
+  }
+  .chrome {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: linear-gradient(180deg, #F8FAFC, #EEF2FF);
+    border-bottom: 1px solid var(--border);
+  }
+  .dots { display: flex; gap: 6px; }
+  .dots span {
+    width: 10px; height: 10px; border-radius: 50%;
+    display: block;
+  }
+  .dots span:nth-child(1) { background: #FCA5A5; }
+  .dots span:nth-child(2) { background: #FDE047; }
+  .dots span:nth-child(3) { background: #86EFAC; }
+  .url {
+    flex: 1;
+    font-size: 12px;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 14px;
+  }
+
+  .mock-banner {
+    background: var(--accent);
+    color: #E0E7FF;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-align: center;
+    padding: 7px 12px;
+    font-weight: 600;
+  }
+
+  /* —— App header —— */
+  .app-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 24px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .brand {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: -0.02em;
+  }
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 11px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 12px;
+    color: var(--fg);
+    cursor: default;
+    user-select: none;
+  }
+  .chip em {
+    font-style: normal;
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .chip strong {
+    font-weight: 600;
+    color: var(--accent);
+  }
+
+  /* —— Wizard —— */
+  .wizard {
+    display: flex;
+    gap: 8px;
+    padding: 14px 24px 0;
+  }
+  .pill {
+    padding: 7px 16px;
+    border-radius: 999px;
+    font-size: 13px;
+    border: 1px solid var(--border);
+    background: var(--empty);
+    color: var(--muted);
+    text-decoration: none;
+  }
+  .pill.active {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+    font-weight: 600;
+  }
+  .pill.link {
+    color: var(--primary);
+    background: var(--surface);
+    cursor: pointer;
+  }
+
+  .page-title {
+    padding: 18px 24px 6px;
+  }
+  .page-title h1 {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: -0.02em;
+  }
+  .page-title p {
+    margin-top: 4px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  /* —— Totals strip —— */
+  .totals {
+    margin: 12px 24px 0;
+    padding: 12px 16px;
+    background: linear-gradient(90deg, #EEF2FF, #F8FAFC);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .totals .label {
+    font-size: 12px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .totals .value {
+    font-size: 15px;
+    color: var(--fg);
+  }
+  .totals .value b { font-weight: 700; color: var(--accent); }
+
+  /* —— Timeline rail + chapters —— */
+  .board {
+    padding: 20px 24px 32px;
+    position: relative;
+  }
+
+  .rail {
+    position: absolute;
+    left: 39px;
+    top: 36px;
+    bottom: 48px;
+    width: 3px;
+    background: linear-gradient(180deg, var(--primary), var(--border));
+    border-radius: 2px;
+    opacity: 0.55;
+  }
+
+  .chapter {
+    position: relative;
+    margin-bottom: 28px;
+    padding-left: 36px;
+  }
+  .chapter:last-child { margin-bottom: 0; }
+
+  .chapter-node {
+    position: absolute;
+    left: 8px;
+    top: 18px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--primary);
+    border: 3px solid var(--surface);
+    box-shadow: 0 0 0 2px var(--border);
+    z-index: 1;
+  }
+
+  .chapter-shell {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    overflow: hidden;
+  }
+
+  /* Chapter header = day-pair identity (not on cards) */
+  .chapter-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 18px;
+    background: linear-gradient(180deg, #EEF2FF 0%, #FFFFFF 100%);
+    border-bottom: 1px solid var(--border);
+  }
+  .chapter-head h2 {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .chapter-head .batch-hint {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  /* Full-bleed batch band under header — visual “one cook batch” footing */
+  .batch-band {
+    height: 4px;
+    background: repeating-linear-gradient(
+      90deg,
+      var(--primary) 0 28px,
+      #A5B4FC 28px 40px
+    );
+  }
+
+  .meals {
+    padding: 14px 16px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .meal-block { }
+
+  .meal-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--slot-label);
+    margin-bottom: 8px;
+    padding-left: 2px;
+  }
+
+  /* Soup sits as a slate bar above the plate cluster */
+  .soup-bar {
+    margin-bottom: 8px;
+  }
+
+  /* Mini Harvard plate cluster for lunch/dinner */
+  .plate {
+    display: grid;
+    grid-template-columns: 1.1fr 1fr 1fr;
+    gap: 8px;
+    padding: 10px;
+    background: var(--empty);
+    border: 1px dashed var(--border);
+    border-radius: var(--r);
+    position: relative;
+  }
+  .plate::before {
+    content: "";
+    position: absolute;
+    inset: 4px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    pointer-events: none;
+    opacity: 0.35;
+    background:
+      radial-gradient(circle at 30% 55%, rgba(234, 88, 12, 0.06), transparent 42%),
+      radial-gradient(circle at 70% 35%, rgba(22, 163, 74, 0.07), transparent 40%),
+      radial-gradient(circle at 55% 80%, rgba(161, 98, 7, 0.06), transparent 38%);
+  }
+
+  .breakfast-row,
+  .snack-row {
+    display: grid;
+    gap: 8px;
+  }
+  .breakfast-row { grid-template-columns: 1.4fr 1fr; }
+
+  /* —— Dish cards —— */
+  .card {
+    position: relative;
+    z-index: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px 28px;
+    min-height: 72px;
+    display: flex;
+    flex-direction: column;
+    /* Seam: left color rail = plate role; full chapter width = span */
+    border-left-width: 4px;
+    box-shadow: 0 1px 0 rgba(30, 41, 59, 0.04);
+  }
+  .card.role-breakfast { border-left-color: var(--indigo); }
+  .card.role-fruit { border-left-color: var(--fruit); }
+  .card.role-soup { border-left-color: var(--soup); }
+  .card.role-protein { border-left-color: var(--protein); }
+  .card.role-veg { border-left-color: var(--veg); }
+  .card.role-grains { border-left-color: var(--grains); }
+  .card.role-snack { border-left-color: var(--snack); }
+
+  .card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .role-tag {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .role-tag.breakfast { color: var(--indigo); }
+  .role-tag.fruit { color: var(--fruit); }
+  .role-tag.soup { color: var(--soup); }
+  .role-tag.protein { color: var(--protein); }
+  .role-tag.veg { color: var(--veg); }
+  .role-tag.grains { color: var(--grains); }
+  .role-tag.snack { color: var(--snack); }
+
+  .dish-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fg);
+    line-height: 1.3;
+  }
+
+  .overflow-btn {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--empty);
+    color: var(--muted);
+    font-size: 16px;
+    line-height: 1;
+    display: grid;
+    place-items: center;
+    cursor: default;
+  }
+
+  /* Meta pinned to bottom — plain, no bold, no parentheses */
+  .meta {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 8px;
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--muted);
+  }
+
+  /* Open overflow menu on Бефстроганов */
+  .card.has-menu { z-index: 5; }
+  .menu {
+    position: absolute;
+    top: 38px;
+    right: 8px;
+    min-width: 168px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 12px 28px rgba(49, 46, 129, 0.14);
+    padding: 4px;
+    z-index: 6;
+  }
+  .menu div {
+    padding: 8px 12px;
+    font-size: 13px;
+    color: var(--fg);
+    border-radius: 8px;
+  }
+  .menu div:hover { background: var(--bg); }
+  .menu div.danger { color: #B91C1C; }
+
+  /* Chapter footing seam — reinforces batch width without day text on cards */
+  .chapter-foot {
+    height: 6px;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+  }
+
+  .legend {
+    margin-top: 20px;
+    padding: 12px 14px;
+    background: var(--empty);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .legend i {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    margin-right: 5px;
+    vertical-align: middle;
+  }
+</style>
+</head>
+<body>
+
+<div class="browser">
+  <div class="chrome">
+    <div class="dots" aria-hidden="true"><span></span><span></span><span></span></div>
+    <div class="url">keplo.app/menu/week-24</div>
+  </div>
+
+  <div class="mock-banner">MOCK ALT · key-menu-redesign-alt-2026-07-26.html</div>
+
+  <header class="app-bar">
+    <div class="brand">Keplo</div>
+    <div class="chips" aria-label="Параметры меню (только просмотр)">
+      <span class="chip"><em>Дни</em> <strong>4</strong></span>
+      <span class="chip"><em>Люди</em> <strong>2</strong></span>
+      <span class="chip"><em>Приёмы</em> <strong>Завтрак · Обед · Ужин · Перекус</strong></span>
+      <span class="chip"><em>Техника</em> <strong>Плита · Духовка · Мультиварка</strong></span>
+    </div>
+  </header>
+
+  <nav class="wizard" aria-label="Шаги">
+    <span class="pill active">Состав</span>
+    <a class="pill link" href="#">Список</a>
+  </nav>
+
+  <div class="page-title">
+    <h1>Меню на неделю</h1>
+    <p>Партии готовки по парам дней — одно блюдо покрывает всю главу</p>
+  </div>
+
+  <div class="totals">
+    <div>
+      <div class="label">Итого по меню</div>
+      <div class="value"><b>6 480 ₽</b> · ~18 400 ккал на человека</div>
+    </div>
+    <div class="value" style="font-size:13px;color:var(--muted)">4 дня · 2 чел.</div>
+  </div>
+
+  <div class="board">
+    <div class="rail" aria-hidden="true"></div>
+
+    <!-- ========== CHAPTER: days 1–2 ========== -->
+    <section class="chapter" aria-labelledby="ch1">
+      <div class="chapter-node" aria-hidden="true"></div>
+      <div class="chapter-shell">
+        <header class="chapter-head">
+          <h2 id="ch1">Дни 1–2</h2>
+          <span class="batch-hint">одна партия готовки</span>
+        </header>
+        <div class="batch-band" aria-hidden="true"></div>
+
+        <div class="meals">
+
+          <div class="meal-block">
+            <div class="meal-label">Завтрак</div>
+            <div class="breakfast-row">
+              <article class="card role-breakfast">
+                <div class="card-top">
+                  <div>
+                    <div class="role-tag breakfast">Завтрак</div>
+                    <div class="dish-name">Запеканка творожная с изюмом</div>
+                  </div>
+                  <div class="overflow-btn" aria-label="Действия">⋯</div>
+                </div>
+                <div class="meta">4 × 90 ₽ · 280 ккал</div>
+              </article>
+              <article class="card role-fruit">
+                <div class="card-top">
+                  <div>
+                    <div class="role-tag fruit">Фрукты</div>
+                    <div class="dish-name">Яблоко и йогурт</div>
+                  </div>
+                  <div class="overflow-btn" aria-label="Действия">⋯</div>
+                </div>
+                <div class="meta">4 × 55 ₽ · 120 ккал</div>
+              </article>
+            </div>
+          </div>
+
+          <div class="meal-block">
+            <div class="meal-label">Обед</div>
+            <div class="soup-bar">
+              <article class="card role-soup">
+                <div class="card-top">
+                  <div>
+                    <div class="role-tag soup">Суп</div>
+                    <div class="dish-name">Солянка</div>
+                  </div>
+                  <div class="overflow-btn" aria-label="Действия">⋯</div>
+                </div>
+                <div class="meta">4 × 140 ₽ · 220 ккал</div>
+              </article>
+            </div>
+            <div class="plate" aria-label="Тарелка обеда">
+              <article class="card role-protein has-menu">
+                <div class="card-top">
+                  <div>
+                    <div class="role-tag protein">Полезный белок</div>
+                    <div class="dish-name">Бефстроганов</div>
+                  </div>
+                  <div class="overflow-btn" aria-label="Действия" style="background:#EEF2FF;border-color:#C7D2FE;color:var(--primary)">⋯</div>
+                </div>
+                <div class="meta">4 × 180 ₽ · 310 ккал</div>
+                <div class="menu" role="menu">
+                  <div>Заменить</div>
+                  <div>Изменить</div>
+                  <div class="danger">Не предлагать</div>
+                </div>
+              </article>
+              <article class="card role-veg">
+                <div class="card-top">
+                  <div>
+                    <div class="role-tag veg">Овощи</div>
+                    <div class="dish-name">Капуста тушеная</div>
+                  </div>
+                  <div class="overflow-btn" aria-label="Действия">⋯</div>
+                </div>
+                <div class="meta">4 × 70 ₽ · 90 ккал</div>
+              </article>
+              <article class="card role-grains">
+                <div class="card-top">
+                  <div>
+                    <div class="role-tag grains">Цельные злаки</div>
+                    <div class="dish-name">Пюре</div>
+                  </div>
+                  <div class="overflow-btn" aria-label="Действия">⋯</div>
+                </div>
+                <div class="meta">4 × 60 ₽ · 160 ккал</div>
+              </article>
+            </div>
+          </div>
+
+          <div class="meal-block">
+            <div class="meal-label">Ужин</div>
+            <div class="plate" aria-label="Тарелка ужина">
+              <article class="card role-protein">
+                <div class="card-top">
+                  <div>
+                    <div class="role-tag protein">Полезный белок</div>
+                    <div class="dish-name">Куриные грудки</div>
+                  </div>
+                  <div class="overflow-btn" aria-label="Действия">⋯</div>
+                </div>
+                <div class="meta">4 × 160 ₽ · 250 ккал</div>
+              </article>
+              <article class="card role-veg">
+                <div class="card-top">
+                  <div>
+                    <div class="role-tag veg">Овощи</div>
+                    <div class="dish-name">Баклажаны</div>
+                  </div>
+                  <div class="overflow-btn" aria-label="Действия">⋯</div>
+                </div>
+                <div class="meta">4 × 85 ₽ · 110 ккал</div>
+              </article>
+              <article class="card role-grains">
+                <div class="card-top">
+                  <div>
+                    <div class="role-tag grains">Цельные злаки</div>
+                    <div class="dish-name">Рис</div>
+                  </div>
+                  <div class="overflow-btn" aria-label="Действия">⋯</div>
+                </div>
+                <div class="meta">4 × 50 ₽ · 180 ккал</div>
+              </article>
+            </div>
+          </div>
+
+          <div class="meal-block">
+            <div class="meal-label">Перекус</div>
+            <div class="snack-row">
+              <article class="card role-snack">
+                <div class="card-top">
+                  <div>
+                    <div class="role-tag snack">Перекус</div>
+                    <div class="dish-name">Банан с арахисовой пастой</div>
+                  </div>
+                  <div class="overflow-btn" aria-label="Действия">⋯</div>
+                </div>
+                <div class="meta">4 × 65 ₽ · 200 ккал</div>
+              </article>
+            </div>
+          </div>
+
+        </div>
+        <div class="chapter-foot" aria-hidden="true"></div>
+      </div>
+    </section>
+
+    <!-- ========== CHAPTER: days 3–4 ========== -->
+    <section class="chapter" aria-labelledby="ch2">
+      <div class="chapter-node" aria-hidden="true"></div>
+      <div class="chapter-shell">
+        <header class="chapter-head">
+          <h2 id="ch2">Дни 3–4</h2>
+          <span class="batch-hint">одна партия готовки</span>
+        </header>
+        <div class="batch-band" aria-hidden="true" style="background:repeating-linear-gradient(90deg,#312E81 0 28px,#C7D2FE 28px 40px)"></div>
+
+        <div class="meals">
+
+          <div class="meal-block">
+            <div class="meal-label">Завтрак</div>
+            <div class="breakfast-row">
+              <article class="card role-breakfast">
+                <div class="card-top">
+                  <div>
+                    <div class="role-tag breakfast">Завтрак</div>
+                    <div class="dish-name">Ленивые вареники со сметаной</div>
+                  </div>
+                  <div class="overflow-btn" aria-label="Действия">⋯</div>
+                </div>
+                <div class="meta">4 × 95 ₽ · 300 ккал</div>
+              </article>
+              <article class="card role-fruit">
+                <div class="card-top">
+                  <div>
+                    <div class="role-tag fruit">Фрукты</div>
+                    <div class="dish-name">Банан</div>
+                  </div>
+                  <div class="overflow-btn" aria-label="Действия">⋯</div>
+                </div>
+                <div class="meta">4 × 40 ₽ · 95 ккал</div>
+              </article>
+            </div>
+          </div>
+
+          <div class="meal-block">
+            <div class="meal-label">Обед</div>
+            <div class="soup-bar">
+              <article class="card role-soup">
+                <div class="card-top">
+                  <div>
+                    <div class="role-tag soup">Суп</div>
+                    <div class="dish-name">Харчо</div>
+                  </div>
+                  <div class="overflow-btn" aria-label="Действия">⋯</div>
+                </div>
+                <div class="meta">4 × 130 ₽ · 210 ккал</div>
+              </article>
+            </div>
+            <div class="plate" aria-label="Тарелка обеда">
+              <article class="card role-protein">
+                <div class="card-top">
+                  <div>
+                    <div class="role-tag protein">Полезный белок</div>
+                    <div class="dish-name">Котлеты рыбные</div>
+                  </div>
+                  <div class="overflow-btn" aria-label="Действия">⋯</div>
+                </div>
+                <div class="meta">4 × 170 ₽ · 280 ккал</div>
+              </article>
+              <article class="card role-veg">
+                <div class="card-top">
+                  <div>
+                    <div class="role-tag veg">Овощи</div>
+                    <div class="dish-name">Салат из свеклы</div>
+                  </div>
+                  <div class="overflow-btn" aria-label="Действия">⋯</div>
+                </div>
+                <div class="meta">4 × 75 ₽ · 100 ккал</div>
+              </article>
+              <article class="card role-grains">
+                <div class="card-top">
+                  <div>
+                    <div class="role-tag grains">Цельные злаки</div>
+                    <div class="dish-name">Спагетти</div>
+                  </div>
+                  <div class="overflow-btn" aria-label="Действия">⋯</div>
+                </div>
+                <div class="meta">4 × 55 ₽ · 190 ккал</div>
+              </article>
+            </div>
+          </div>
+
+          <div class="meal-block">
+            <div class="meal-label">Ужин</div>
+            <div class="plate" aria-label="Тарелка ужина">
+              <article class="card role-protein">
+                <div class="card-top">
+                  <div>
+                    <div class="role-tag protein">Полезный белок</div>
+                    <div class="dish-name">Свинина тушеная</div>
+                  </div>
+                  <div class="overflow-btn" aria-label="Действия">⋯</div>
+                </div>
+                <div class="meta">4 × 175 ₽ · 320 ккал</div>
+              </article>
+              <article class="card role-veg">
+                <div class="card-top">
+                  <div>
+                    <div class="role-tag veg">Овощи</div>
+                    <div class="dish-name">Цветная капуста</div>
+                  </div>
+                  <div class="overflow-btn" aria-label="Действия">⋯</div>
+                </div>
+                <div class="meta">4 × 80 ₽ · 85 ккал</div>
+              </article>
+              <article class="card role-grains">
+                <div class="card-top">
+                  <div>
+                    <div class="role-tag grains">Цельные злаки</div>
+                    <div class="dish-name">Кукурузная каша</div>
+                  </div>
+                  <div class="overflow-btn" aria-label="Действия">⋯</div>
+                </div>
+                <div class="meta">4 × 45 ₽ · 170 ккал</div>
+              </article>
+            </div>
+          </div>
+
+          <div class="meal-block">
+            <div class="meal-label">Перекус</div>
+            <div class="snack-row">
+              <article class="card role-snack">
+                <div class="card-top">
+                  <div>
+                    <div class="role-tag snack">Перекус</div>
+                    <div class="dish-name">Морковь с хумусом</div>
+                  </div>
+                  <div class="overflow-btn" aria-label="Действия">⋯</div>
+                </div>
+                <div class="meta">4 × 70 ₽ · 150 ккал</div>
+              </article>
+            </div>
+          </div>
+
+        </div>
+        <div class="chapter-foot" aria-hidden="true"></div>
+      </div>
+    </section>
+
+    <div class="legend" aria-hidden="true">
+      <span><i style="background:#6366F1"></i>Завтрак / Перекус</span>
+      <span><i style="background:#E11D48"></i>Фрукты</span>
+      <span><i style="background:#64748B"></i>Суп</span>
+      <span><i style="background:#EA580C"></i>Белок</span>
+      <span><i style="background:#16A34A"></i>Овощи</span>
+      <span><i style="background:#A16207"></i>Злаки</span>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

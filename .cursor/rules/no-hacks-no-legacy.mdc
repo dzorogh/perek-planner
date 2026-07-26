@@ -1,0 +1,26 @@
+---
+description: Never ship hacks or leave legacy code unless the user explicitly asks
+alwaysApply: true
+---
+
+# No hacks, no leftover legacy
+
+## Rules
+
+- **Never use hacks** — no sentinel values, fake defaults, or “just to pass the gate” workarounds that misrepresent domain truth (e.g. inventing `stove` when the dish needs no equipment).
+- **Fix the real invariant** — if a constraint is wrong (DB check, parser, eligibility), change the constraint; do not paper over it.
+- **Never leave legacy** unless the user explicitly asks to keep compatibility shims, deprecated aliases, or dual paths.
+- When replacing behavior: delete the old path in the same change (call sites, prompts, tests, comments). Do not keep “temporary” dual code.
+- If a proper fix needs a migration, schema change, or API break — do that (via project migration rules). Do not choose a hack because it is smaller.
+
+## Failure mode (forbidden)
+
+1. Parser/DB rejects empty `required_equipment`.
+2. Agent maps empty → `["stove"]` so generation “works”.
+3. Salad is stored as needing a stove.
+
+That is a hack. Correct: empty means no appliances; allow and honor it.
+
+## When unsure
+
+Ask before adding compatibility layers. Default is delete and fix cleanly.

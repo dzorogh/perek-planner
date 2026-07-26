@@ -19,7 +19,7 @@ Documented in `.env.example`:
 | `NEXT_PUBLIC_SUPABASE_URL` | Browser + server | Project URL |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Browser + server | Anon/publishable key |
 | `OPENROUTER_API_KEY` | Server only | Never `NEXT_PUBLIC_*` |
-| `OPENROUTER_MODEL` | Server optional | Default `google/gemini-2.5-flash-lite` |
+| `OPENROUTER_MODEL` | Server optional | Default `deepseek/deepseek-v4-flash` |
 | `OPENROUTER_HTTP_REFERER` / `OPENROUTER_APP_TITLE` | Optional headers | Ranking |
 | `KEPLO_DEV_BYPASS_AUTH` | **Never production** | Local shell inspection only |
 | `KEPLO_ENV` | Optional | Set `production` on Dokploy so bypass stays off even if `NODE_ENV` is mis-set |

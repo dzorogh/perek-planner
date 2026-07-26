@@ -42,6 +42,8 @@ type SlotCardActionsProps = {
   target?: SlotDishTarget;
   /** Show «Убрать» for clearable secondary roles (MVP: carb). */
   canClear?: boolean;
+  /** Sheet rows: keep ⋯ in-flow (avoid absolute/`contents` grid pollution). */
+  placement?: "overlay" | "inline";
 };
 
 function ActionError({ state }: { state: SlotActionState }) {
@@ -176,6 +178,7 @@ export function SlotCardActions({
   recipeId = null,
   target = "main",
   canClear = false,
+  placement = "overlay",
 }: SlotCardActionsProps) {
   const { recipeBusyLabel, setRecipeBusy } = useMenuSlotBusy();
   const [refuseOpen, setRefuseOpen] = useState(false);
@@ -251,17 +254,20 @@ export function SlotCardActions({
     });
   }
 
-  return (
-    <div data-component="slot-actions" data-target={target} className="contents">
-      {generating ? <SlotGeneratingOverlay label={overlayLabel} /> : null}
-      <div className="absolute right-2 top-2 z-10">
+  const inline = placement === "inline";
+
+  // Inline: overlay is a fragment sibling of the ⋯ column so `absolute inset-0`
+  // covers the whole `relative` slot-dish-line row, not just the actions cell.
+  const actionsChrome = (
+    <>
+      <div className={inline ? "relative z-10" : "absolute right-2 top-2 z-10"}>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
               type="button"
               variant="ghost"
               size="icon"
-              className="h-7 w-7 shrink-0 text-muted-foreground hover:text-primary"
+              className="h-7 w-7 shrink-0 rounded-full text-muted-foreground hover:bg-background hover:text-primary"
               disabled={busy}
               aria-label={`Действия: ${plateRoleLabelRu(target)}`}
               aria-busy={busy}
@@ -287,7 +293,13 @@ export function SlotCardActions({
       </div>
 
       {!generating ? (
-        <div className="relative z-[6] mt-1 space-y-0.5 pr-10">
+        <div
+          className={
+            inline
+              ? "relative z-[6] mt-1 max-w-[12rem] space-y-0.5 text-right"
+              : "relative z-[6] mt-1 space-y-0.5 pr-10"
+          }
+        >
           <ActionError state={suggestState} />
           <ActionError state={resuggestState} />
           <ActionError state={modifyState} />
@@ -295,7 +307,11 @@ export function SlotCardActions({
           <ActionError state={clearState} />
         </div>
       ) : null}
+    </>
+  );
 
+  const dialogs = (
+    <>
       <CommentDialog
         open={modifyOpen}
         onOpenChange={setModifyOpen}
@@ -327,6 +343,34 @@ export function SlotCardActions({
           runAction(refuseFormAction, { comment });
         }}
       />
+    </>
+  );
+
+  if (inline) {
+    return (
+      <>
+        {generating ? <SlotGeneratingOverlay label={overlayLabel} /> : null}
+        <div
+          data-component="slot-actions"
+          data-target={target}
+          className="relative z-10 flex shrink-0 flex-col items-end"
+        >
+          {actionsChrome}
+        </div>
+        {dialogs}
+      </>
+    );
+  }
+
+  return (
+    <div
+      data-component="slot-actions"
+      data-target={target}
+      className="contents"
+    >
+      {generating ? <SlotGeneratingOverlay label={overlayLabel} /> : null}
+      {actionsChrome}
+      {dialogs}
     </div>
   );
 }

@@ -45,9 +45,11 @@ function parseEquipmentCsv(raw) {
 }
 
 function recipeFitsAvailableEquipment(required, available) {
-  const req = normalizeEquipmentList(required);
   const avail = normalizeEquipmentList(available);
-  if (!req || !avail) return false;
+  if (!avail) return false;
+  if (Array.isArray(required) && required.length === 0) return true;
+  const req = normalizeEquipmentList(required);
+  if (!req) return false;
   return req.every((id) => avail.includes(id));
 }
 
@@ -75,6 +77,7 @@ function dishNameEquipmentConflicts(name, available) {
 }
 
 function clampRequiredEquipmentToAvailable(required, available) {
+  if (Array.isArray(required) && required.length === 0) return [];
   const avail = normalizeEquipmentList(available) ?? [
     ...DEFAULT_AVAILABLE_EQUIPMENT,
   ];
@@ -145,8 +148,12 @@ check(
   !recipeFitsAvailableEquipment(["microwave"], ["stove", "oven"]),
 );
 check(
-  "fit fail empty required",
-  !recipeFitsAvailableEquipment([], ["stove"]),
+  "fit ok empty required (no appliances)",
+  recipeFitsAvailableEquipment([], ["stove"]),
+);
+check(
+  "clamp keeps empty required",
+  clampRequiredEquipmentToAvailable([], ["stove", "oven"]).length === 0,
 );
 check(
   "fit fail unknown required",

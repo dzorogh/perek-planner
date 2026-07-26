@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Меню — редизайн (span + Harvard) — Keplo</title>
+<style>
+  /*
+    Menu redesign 2026-07-26 — Soft Workshop / Lavender Workshop
+    Spine refs (to update at Finalize): EXPERIENCE Menu surface, slot-dish-line,
+    meal-lane; DESIGN colors + plate-role accents; header settings chips.
+    Decisions: read-only settings chips; no equipment edit; Harvard role colors;
+    spanning cards for repeated days; metrics "N × unit₽ · unit kcal" plain weight, no parentheses; no "Блюда в меню";
+    no bottom list CTA; Список always in wizard; Fruits only on breakfast;
+    no Oils/Water slots; Основное → Завтрак.
+  */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #EEF2FF;
+    color: #1E293B;
+    line-height: 1.45;
+    padding: 28px 32px 56px;
+  }
+  .browser {
+    max-width: 1180px;
+    margin: 0 auto;
+    background: #FFFFFF;
+    border: 1px solid #E0E7FF;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 20px 48px rgba(49, 46, 129, 0.1);
+  }
+  .browser-chrome {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 14px;
+    background: linear-gradient(180deg, #F8FAFC, #EEF2FF);
+    border-bottom: 1px solid #E0E7FF;
+  }
+  .dots { display: flex; gap: 6px; }
+  .dots i { width: 10px; height: 10px; border-radius: 50%; display: block; }
+  .dots i:nth-child(1) { background: #FCA5A5; }
+  .dots i:nth-child(2) { background: #FDE047; }
+  .dots i:nth-child(3) { background: #86EFAC; }
+  .url {
+    flex: 1; font-size: 12px; color: #64748B;
+    background: #FFFFFF; border: 1px solid #E0E7FF;
+    border-radius: 999px; padding: 6px 12px;
+  }
+
+  .app-header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 20px; padding: 14px 28px;
+    border-bottom: 1px solid #E0E7FF;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    text-decoration: none; color: inherit;
+  }
+  .mark { width: 32px; height: 32px; flex-shrink: 0; display: block; }
+  .wordmark {
+    font-size: 17px; font-weight: 700; color: #312E81;
+    letter-spacing: -0.03em;
+  }
+  .header-actions {
+    display: flex; align-items: center; gap: 18px;
+  }
+  .nav-link { font-size: 13px; color: #64748B; text-decoration: none; }
+  .btn-create {
+    font-size: 13px; font-weight: 600; color: #FFFFFF;
+    background: #4338CA; padding: 7px 14px; border-radius: 10px;
+    text-decoration: none;
+  }
+  .btn-out {
+    font-size: 13px; color: #64748B; background: #F1F5F9;
+    padding: 7px 12px; border-radius: 10px; border: none;
+  }
+
+  .wizard-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 28px;
+    background: #F8FAFC;
+    border-bottom: 1px solid #E0E7FF;
+  }
+  .wizard-label {
+    font-size: 11px; font-weight: 600; color: #64748B;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    margin-right: 4px;
+  }
+  .pill-nav {
+    display: flex; gap: 4px;
+    background: #EEF2FF; padding: 3px; border-radius: 999px;
+  }
+  .pill {
+    padding: 5px 13px; font-size: 13px; border-radius: 999px; color: #64748B;
+    text-decoration: none;
+  }
+  .pill.active {
+    background: #FFFFFF; color: #4338CA; font-weight: 600;
+    box-shadow: 0 1px 2px rgba(67, 56, 202, 0.15);
+  }
+  .pill.available {
+    color: #4338CA;
+  }
+
+  .content { padding: 20px 28px 32px; background: #EEF2FF; }
+  .work {
+    background: #FFFFFF;
+    border: 1px solid #E0E7FF;
+    border-radius: 14px;
+    padding: 22px 24px 28px;
+  }
+
+  .page-head { margin-bottom: 18px; }
+  .page-head h1 {
+    font-size: 24px; font-weight: 700; letter-spacing: -0.02em;
+  }
+  .page-head .hint {
+    font-size: 13px; color: #64748B; margin-top: 6px;
+  }
+
+  /* Read-only settings snapshot */
+  .settings-chips {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    margin-top: 14px;
+  }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px;
+    background: #EEF2FF;
+    border: 1px solid #E0E7FF;
+    border-radius: 999px;
+    font-size: 13px; font-weight: 500; color: #312E81;
+  }
+  .chip .chip-k {
+    font-size: 11px; font-weight: 600; color: #64748B;
+    text-transform: uppercase; letter-spacing: 0.03em;
+  }
+  .chip-group {
+    display: inline-flex; flex-wrap: wrap; gap: 6px;
+    padding: 4px 6px 4px 10px;
+    background: #F8FAFC;
+    border: 1px solid #E0E7FF;
+    border-radius: 999px;
+    align-items: center;
+  }
+  .chip-group .chip-k { margin-right: 2px; }
+  .chip-mini {
+    padding: 3px 9px;
+    background: #FFFFFF;
+    border: 1px solid #E0E7FF;
+    border-radius: 999px;
+    font-size: 12px; font-weight: 500; color: #1E293B;
+  }
+
+  /* Day pairs: visual bands, not per-card "Дни 1–2" labels */
+  .day-axis {
+    display: grid;
+    grid-template-columns: 92px 1fr 1fr;
+    gap: 12px;
+    margin: 22px 0 8px;
+  }
+  .day-axis .gutter { min-height: 1px; }
+  .pair-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    gap: 8px;
+    padding: 10px 12px 14px;
+    border-radius: 14px 14px 0 0;
+    position: relative;
+  }
+  .pair-head-a {
+    background: #EEF2FF;
+    color: #4338CA;
+  }
+  .pair-head-b {
+    background: #F1F5F9;
+    color: #475569;
+  }
+  .pair-head span {
+    flex: 1;
+    font-size: 13px; font-weight: 600;
+    text-align: center;
+    color: #312E81;
+    position: relative;
+    z-index: 1;
+  }
+  /* Connector between the two day labels in a pair */
+  .pair-head span:first-child::after {
+    content: "";
+    position: absolute;
+    right: -10px; top: 50%;
+    width: 20px; height: 3px;
+    margin-top: -1px;
+    border-radius: 999px;
+    background: currentColor;
+    opacity: 0.25;
+  }
+  .pair-head-a span:first-child::after { background: #4338CA; }
+  .pair-head-b span:first-child::after { background: #64748B; }
+
+  .lane {
+    padding: 14px 0;
+    border-bottom: 1px solid #F1F5F9;
+  }
+  .lane:last-of-type { border-bottom: none; }
+  .lane-head {
+    font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    color: #94A3B8;
+    margin-bottom: 10px;
+  }
+
+  .role-row {
+    display: grid;
+    grid-template-columns: 92px 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 8px;
+    align-items: stretch;
+  }
+  .role-row:last-child { margin-bottom: 0; }
+
+  .pair-slot {
+    border-radius: 14px;
+    padding: 8px;
+    min-height: 100%;
+  }
+  .pair-slot-a {
+    background: #EEF2FF;
+  }
+  .pair-slot-b {
+    background: #F1F5F9;
+  }
+  /* Soft dual “day pads” under the card — reads as one dish across two days */
+  .pair-slot .card {
+    background:
+      linear-gradient(180deg, #FFFFFF 0%, #FFFFFF 72%, rgba(255,255,255,0.92) 100%),
+      repeating-linear-gradient(
+        90deg,
+        transparent 0,
+        transparent calc(50% - 0.5px),
+        rgba(67, 56, 202, 0.08) calc(50% - 0.5px),
+        rgba(67, 56, 202, 0.08) calc(50% + 0.5px),
+        transparent calc(50% + 0.5px),
+        transparent 100%
+      );
+    box-shadow:
+      0 1px 0 rgba(49, 46, 129, 0.04),
+      inset 0 0 0 1px rgba(255,255,255,0.8);
+  }
+  .pair-slot .card::after {
+    content: "";
+    position: absolute;
+    left: 14px; right: 14px; bottom: 0;
+    height: 4px;
+    border-radius: 999px;
+    background: linear-gradient(
+      90deg,
+      rgba(67, 56, 202, 0.22) 0%,
+      rgba(67, 56, 202, 0.08) 45%,
+      rgba(67, 56, 202, 0.08) 55%,
+      rgba(67, 56, 202, 0.22) 100%
+    );
+    pointer-events: none;
+  }
+  .pair-slot-b .card::after {
+    background: linear-gradient(
+      90deg,
+      rgba(71, 85, 105, 0.2) 0%,
+      rgba(71, 85, 105, 0.07) 45%,
+      rgba(71, 85, 105, 0.07) 55%,
+      rgba(71, 85, 105, 0.2) 100%
+    );
+  }
+
+  .role-rail {
+    display: flex; align-items: flex-start;
+    padding-top: 12px;
+  }
+  .role-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    color: #475569;
+    line-height: 1.25;
+  }
+  .role-dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  }
+
+  /* Harvard-inspired role accents (Oils/Water omitted) */
+  .role-breakfast .role-dot { background: #6366F1; }
+  .role-fruit .role-dot { background: #E11D48; }
+  .role-soup .role-dot { background: #64748B; }
+  .role-protein .role-dot { background: #EA580C; }
+  .role-veg .role-dot { background: #16A34A; }
+  .role-grain .role-dot { background: #A16207; }
+  .role-snack .role-dot { background: #6366F1; }
+
+  .card {
+    display: flex;
+    flex-direction: column;
+    background: #FFFFFF;
+    border: 1px solid #E0E7FF;
+    border-radius: 12px;
+    padding: 10px 12px 12px;
+    min-height: 96px;
+    position: relative;
+    box-shadow: 0 1px 0 rgba(49, 46, 129, 0.04);
+  }
+  .card::before {
+    content: "";
+    position: absolute; left: 0; top: 10px; bottom: 10px;
+    width: 3px; border-radius: 999px;
+  }
+  .role-breakfast .card::before { background: #6366F1; }
+  .role-fruit .card::before { background: #E11D48; }
+  .role-soup .card::before { background: #94A3B8; }
+  .role-protein .card::before { background: #EA580C; }
+  .role-veg .card::before { background: #16A34A; }
+  .role-grain .card::before { background: #A16207; }
+  .role-snack .card::before { background: #818CF8; }
+
+  .card .dish {
+    font-size: 14px; font-weight: 600; color: #1E293B;
+    line-height: 1.35; padding-right: 28px;
+  }
+  .card .dish a {
+    color: inherit; text-decoration: underline;
+    text-decoration-color: #E0E7FF; text-underline-offset: 2px;
+  }
+  .card .meta {
+    margin-top: auto;
+    padding-top: 8px;
+    font-size: 12px; color: #64748B;
+  }
+  .card .more {
+    position: absolute; top: 6px; right: 6px;
+    width: 28px; height: 28px;
+    display: flex; align-items: center; justify-content: center;
+    color: #64748B; font-size: 16px; border-radius: 8px;
+    border: none; background: transparent; font-family: inherit;
+    cursor: default;
+  }
+  .card.open {
+    outline: 1px solid #E0E7FF;
+    box-shadow: 0 4px 16px rgba(49, 46, 129, 0.08);
+  }
+  .card.open .more { background: #EEF2FF; color: #4338CA; }
+  .menu-pop {
+    position: absolute; right: 8px; top: 38px; z-index: 2;
+    width: 210px;
+    background: #FFFFFF;
+    border: 1px solid #E0E7FF;
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(49, 46, 129, 0.14);
+    padding: 6px;
+  }
+  .menu-pop button {
+    display: block; width: 100%; text-align: left;
+    padding: 8px 12px; border: none; background: none;
+    font-family: inherit; font-size: 13px; color: #1E293B;
+    border-radius: 8px; cursor: default;
+  }
+  .menu-pop button.danger { color: #854D0E; }
+
+  .totals {
+    margin-top: 22px;
+    padding: 16px 18px;
+    background: #F8FAFC;
+    border: 1px solid #E0E7FF;
+    border-radius: 12px;
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 16px; flex-wrap: wrap;
+  }
+  .totals h2 {
+    font-size: 15px; font-weight: 700; color: #312E81;
+  }
+  .totals .sum {
+    font-size: 15px; font-weight: 600; color: #1E293B;
+  }
+  .totals .macros {
+    font-size: 12px; color: #64748B; width: 100%; margin-top: 4px;
+  }
+
+  .anno {
+    margin-top: 18px;
+    padding: 12px 14px;
+    background: #FEF9C3;
+    border: 1px solid #FDE047;
+    border-radius: 12px;
+    font-size: 12px; color: #854D0E;
+  }
+  .anno strong { font-weight: 700; }
+</style>
+</head>
+<body>
+
+<div class="browser">
+  <div class="browser-chrome">
+    <div class="dots"><i></i><i></i><i></i></div>
+    <div class="url">localhost:3100/plan/menu · редизайн</div>
+  </div>
+
+  <header class="app-header">
+    <a class="brand" href="#">
+      <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <rect width="32" height="32" rx="9" fill="#4338CA"/>
+        <rect x="7" y="9" width="5" height="14" rx="1.5" fill="#EEF2FF"/>
+        <rect x="13.5" y="9" width="5" height="14" rx="1.5" fill="#C7D2FE"/>
+        <rect x="20" y="9" width="5" height="14" rx="1.5" fill="#EEF2FF"/>
+      </svg>
+      <span class="wordmark">Keplo</span>
+    </a>
+    <div class="header-actions">
+      <a class="btn-create" href="#">Создать меню</a>
+      <a class="nav-link" href="#">История</a>
+      <a class="nav-link" href="#">Настройки</a>
+      <button class="btn-out" type="button">Выйти</button>
+    </div>
+  </header>
+
+  <div class="wizard-bar">
+    <span class="wizard-label">План</span>
+    <nav class="pill-nav" aria-label="Шаги планирования">
+      <span class="pill active">Состав</span>
+      <a class="pill available" href="#">Список</a>
+    </nav>
+  </div>
+
+  <div class="content">
+    <div class="work">
+      <div class="page-head">
+        <h1>Меню</h1>
+        <p class="hint">Проверьте блюда и при необходимости замените. Список доступен в шагах выше.</p>
+
+        <div class="settings-chips" aria-label="Параметры меню (только просмотр)">
+          <span class="chip"><span class="chip-k">Дни</span> 4</span>
+          <span class="chip"><span class="chip-k">На приём</span> 2 чел.</span>
+          <span class="chip"><span class="chip-k">Приёмы</span> Завтрак · Обед · Ужин · Перекус</span>
+          <span class="chip-group">
+            <span class="chip-k">Техника</span>
+            <span class="chip-mini">Плита</span>
+            <span class="chip-mini">Духовка</span>
+            <span class="chip-mini">Аэрогриль</span>
+            <span class="chip-mini">Мультиварка</span>
+            <span class="chip-mini">Скороварка</span>
+            <span class="chip-mini">Микроволновка</span>
+          </span>
+        </div>
+      </div>
+
+      <div class="day-axis" aria-hidden="true">
+        <div class="gutter"></div>
+        <div class="pair-head pair-head-a">
+          <span>День 1</span>
+          <span>День 2</span>
+        </div>
+        <div class="pair-head pair-head-b">
+          <span>День 3</span>
+          <span>День 4</span>
+        </div>
+      </div>
+
+      <!-- ЗАВТРАК: Завтрак + Фрукты -->
+      <section class="lane" aria-label="Завтрак">
+        <div class="lane-head">Завтрак</div>
+
+        <div class="role-row role-breakfast">
+          <div class="role-rail"><span class="role-badge"><i class="role-dot"></i>Завтрак</span></div>
+          <div class="pair-slot pair-slot-a">
+            <div class="card">
+            <div class="dish"><a href="#">Запеканка творожная с изюмом</a></div>
+            <div class="meta">4 × 70 ₽ · 350 ккал</div>
+            <button class="more" type="button" aria-label="Действия: Завтрак">⋯</button>
+          </div>
+          </div>
+          <div class="pair-slot pair-slot-b">
+            <div class="card">
+            <div class="dish"><a href="#">Ленивые вареники со сметаной</a></div>
+            <div class="meta">4 × 90 ₽ · 300 ккал</div>
+            <button class="more" type="button" aria-label="Действия: Завтрак">⋯</button>
+          </div>
+          </div>
+        </div>
+
+        <div class="role-row role-fruit">
+          <div class="role-rail"><span class="role-badge"><i class="role-dot"></i>Фрукты</span></div>
+          <div class="pair-slot pair-slot-a">
+            <div class="card">
+            <div class="dish"><a href="#">Яблоко и йогурт</a></div>
+            <div class="meta">4 × 45 ₽ · 90 ккал</div>
+            <button class="more" type="button" aria-label="Действия: Фрукты">⋯</button>
+          </div>
+          </div>
+          <div class="pair-slot pair-slot-b">
+            <div class="card">
+            <div class="dish"><a href="#">Банан</a></div>
+            <div class="meta">4 × 20 ₽ · 60 ккал</div>
+            <button class="more" type="button" aria-label="Действия: Фрукты">⋯</button>
+          </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ОБЕД: Суп вне тарелки + Harvard -->
+      <section class="lane" aria-label="Обед">
+        <div class="lane-head">Обед</div>
+
+        <div class="role-row role-soup">
+          <div class="role-rail"><span class="role-badge"><i class="role-dot"></i>Суп</span></div>
+          <div class="pair-slot pair-slot-a">
+            <div class="card">
+            <div class="dish"><a href="#">Солянка мясная сборная</a></div>
+            <div class="meta">4 × 150 ₽ · 200 ккал</div>
+            <button class="more" type="button" aria-label="Действия: Суп">⋯</button>
+          </div>
+          </div>
+          <div class="pair-slot pair-slot-b">
+            <div class="card">
+            <div class="dish"><a href="#">Харчо с говядиной</a></div>
+            <div class="meta">4 × 180 ₽ · 250 ккал</div>
+            <button class="more" type="button" aria-label="Действия: Суп">⋯</button>
+          </div>
+          </div>
+        </div>
+
+        <div class="role-row role-protein">
+          <div class="role-rail"><span class="role-badge"><i class="role-dot"></i>Полезный белок</span></div>
+          <div class="pair-slot pair-slot-a">
+            <div class="card open">
+            <div class="dish"><a href="#">Бефстроганов из говядины</a></div>
+            <div class="meta">4 × 250 ₽ · 300 ккал</div>
+            <button class="more" type="button" aria-label="Действия: Полезный белок" aria-expanded="true">⋯</button>
+            <div class="menu-pop" role="menu">
+              <button type="button" role="menuitem">Заменить</button>
+              <button type="button" role="menuitem">Изменить</button>
+              <button type="button" role="menuitem" class="danger">Не предлагать</button>
+            </div>
+          </div>
+          </div>
+          <div class="pair-slot pair-slot-b">
+            <div class="card">
+            <div class="dish"><a href="#">Котлеты рыбные паровые</a></div>
+            <div class="meta">4 × 150 ₽ · 180 ккал</div>
+            <button class="more" type="button" aria-label="Действия: Полезный белок">⋯</button>
+          </div>
+          </div>
+        </div>
+
+        <div class="role-row role-veg">
+          <div class="role-rail"><span class="role-badge"><i class="role-dot"></i>Овощи</span></div>
+          <div class="pair-slot pair-slot-a">
+            <div class="card">
+            <div class="dish"><a href="#">Капуста тушеная с грибами</a></div>
+            <div class="meta">4 × 80 ₽ · 100 ккал</div>
+            <button class="more" type="button" aria-label="Действия: Овощи">⋯</button>
+          </div>
+          </div>
+          <div class="pair-slot pair-slot-b">
+            <div class="card">
+            <div class="dish"><a href="#">Салат из свеклы с чесноком</a></div>
+            <div class="meta">4 × 60 ₽ · 150 ккал</div>
+            <button class="more" type="button" aria-label="Действия: Овощи">⋯</button>
+          </div>
+          </div>
+        </div>
+
+        <div class="role-row role-grain">
+          <div class="role-rail"><span class="role-badge"><i class="role-dot"></i>Цельные злаки</span></div>
+          <div class="pair-slot pair-slot-a">
+            <div class="card">
+            <div class="dish"><a href="#">Пюре картофельное</a></div>
+            <div class="meta">4 × 50 ₽ · 200 ккал</div>
+            <button class="more" type="button" aria-label="Действия: Цельные злаки">⋯</button>
+          </div>
+          </div>
+          <div class="pair-slot pair-slot-b">
+            <div class="card">
+            <div class="dish"><a href="#">Спагетти с сыром</a></div>
+            <div class="meta">4 × 70 ₽ · 350 ккал</div>
+            <button class="more" type="button" aria-label="Действия: Цельные злаки">⋯</button>
+          </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- УЖИН: Harvard only -->
+      <section class="lane" aria-label="Ужин">
+        <div class="lane-head">Ужин</div>
+
+        <div class="role-row role-protein">
+          <div class="role-rail"><span class="role-badge"><i class="role-dot"></i>Полезный белок</span></div>
+          <div class="pair-slot pair-slot-a">
+            <div class="card">
+            <div class="dish"><a href="#">Куриные грудки, запеченные с травами</a></div>
+            <div class="meta">4 × 180 ₽ · 200 ккал</div>
+            <button class="more" type="button" aria-label="Действия: Полезный белок">⋯</button>
+          </div>
+          </div>
+          <div class="pair-slot pair-slot-b">
+            <div class="card">
+            <div class="dish"><a href="#">Свинина, тушеная с овощами</a></div>
+            <div class="meta">4 × 100 ₽ · 100 ккал</div>
+            <button class="more" type="button" aria-label="Действия: Полезный белок">⋯</button>
+          </div>
+          </div>
+        </div>
+
+        <div class="role-row role-veg">
+          <div class="role-rail"><span class="role-badge"><i class="role-dot"></i>Овощи</span></div>
+          <div class="pair-slot pair-slot-a">
+            <div class="card">
+            <div class="dish"><a href="#">Баклажаны, тушеные с томатами</a></div>
+            <div class="meta">4 × 100 ₽ · 120 ккал</div>
+            <button class="more" type="button" aria-label="Действия: Овощи">⋯</button>
+          </div>
+          </div>
+          <div class="pair-slot pair-slot-b">
+            <div class="card">
+            <div class="dish"><a href="#">Цветная капуста, жареная в кляре</a></div>
+            <div class="meta">4 × 90 ₽ · 200 ккал</div>
+            <button class="more" type="button" aria-label="Действия: Овощи">⋯</button>
+          </div>
+          </div>
+        </div>
+
+        <div class="role-row role-grain">
+          <div class="role-rail"><span class="role-badge"><i class="role-dot"></i>Цельные злаки</span></div>
+          <div class="pair-slot pair-slot-a">
+            <div class="card">
+            <div class="dish"><a href="#">Рис белый отварной</a></div>
+            <div class="meta">4 × 30 ₽ · 250 ккал</div>
+            <button class="more" type="button" aria-label="Действия: Цельные злаки">⋯</button>
+          </div>
+          </div>
+          <div class="pair-slot pair-slot-b">
+            <div class="card">
+            <div class="dish"><a href="#">Кукурузная каша</a></div>
+            <div class="meta">4 × 40 ₽ · 220 ккал</div>
+            <button class="more" type="button" aria-label="Действия: Цельные злаки">⋯</button>
+          </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ПЕРЕКУС -->
+      <section class="lane" aria-label="Перекус">
+        <div class="lane-head">Перекус</div>
+        <div class="role-row role-snack">
+          <div class="role-rail"><span class="role-badge"><i class="role-dot"></i>Перекус</span></div>
+          <div class="pair-slot pair-slot-a">
+            <div class="card">
+            <div class="dish"><a href="#">Банан с арахисовой пастой</a></div>
+            <div class="meta">4 × 90 ₽ · 280 ккал</div>
+            <button class="more" type="button" aria-label="Действия: Перекус">⋯</button>
+          </div>
+          </div>
+          <div class="pair-slot pair-slot-b">
+            <div class="card">
+            <div class="dish"><a href="#">Морковь с хумусом</a></div>
+            <div class="meta">4 × 120 ₽ · 150 ккал</div>
+            <button class="more" type="button" aria-label="Действия: Перекус">⋯</button>
+          </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="totals" aria-label="Итого по меню">
+        <h2>Итого по меню</h2>
+        <div class="sum">8 000 ₽ · 16 320 ккал</div>
+        <div class="macros">Б 940 · Ж 740 · У 1536</div>
+      </div>
+
+      <p class="anno">
+        <strong>Мок:</strong> настройки только чипы (не редактируются) · техника без чекбоксов ·
+        масла/вода не слоты · фрукты только на завтраке ·
+        пролёт на 2 дня = парные колонки + фон (без текста «Дни N–M» на карточке) ·
+        метрики <code>N × цена ₽ · ккал</code>; N = порции = дни×люди ·
+        блок «Блюда в меню» и кнопка «К списку» убраны · «Список» в wizard.
+      </p>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

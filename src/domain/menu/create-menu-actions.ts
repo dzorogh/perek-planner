@@ -11,6 +11,7 @@ import {
 import { parseEquipmentCsv } from "@/domain/menu/equipment";
 import { upsertAvailableEquipment } from "@/domain/settings/available-equipment";
 import { generateBuyableMenuForUser } from "@/domain/suggestions/generate-menu";
+import { slog, slogError } from "@/lib/server-log";
 import { createClient } from "@/lib/supabase/server";
 
 export type CreateMenuSkeletonActionState =
@@ -79,6 +80,17 @@ export async function createMenuSkeletonAction(
   // Best-effort profile default; menu snapshot is written in skeleton create.
   await upsertAvailableEquipment(supabase, user.id, equipment);
 
+  const started = Date.now();
+  slog("create-menu", "start", {
+    userId: user.id,
+    dayCount,
+    peopleCount,
+    meals,
+    includeSnacks,
+    equipment,
+    idempotencyKey: idempotencyKey || null,
+  });
+
   const result = await generateBuyableMenuForUser(
     supabase,
     user.id,
@@ -86,8 +98,16 @@ export async function createMenuSkeletonAction(
     { peopleCount, meals, includeSnacks, equipment },
   );
   if (!result.ok) {
+    slogError("create-menu", "fail", {
+      ms: Date.now() - started,
+      error: result.error,
+    });
     return { ok: false, error: result.error };
   }
+  slog("create-menu", "ok", {
+    ms: Date.now() - started,
+    menuId: result.menuId,
+  });
 
   if (idempotencyKey) {
     recentCreates.set(`${user.id}:${idempotencyKey}`, {
