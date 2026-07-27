@@ -79,7 +79,6 @@ export async function proposeAssignmentsViaOpenRouter(
     longIdle: c.longIdle,
     recentlyUsed: c.recentlyUsed,
     freshlyInvented: freshlyInventedIds.has(c.recipeId),
-    rating: c.rating,
     plateRole: c.plateRole,
   }));
 

@@ -26,7 +26,11 @@ import {
   type RecipePerServingValue,
 } from "@/domain/recipes/scale-totals";
 
-export type MenuSlotDishView = {
+/** Per-menu cook feedback rating on a Menu dish. */
+export type MenuDishRating = "like" | "dislike";
+
+/** Universal menu line: cookable recipe or no-cook snack. */
+export type MenuDishView = {
   id: string;
   plateRole: PlateRole;
   sortOrder: number;
@@ -38,15 +42,16 @@ export type MenuSlotDishView = {
   /** Multi-role one-pot coverage from recipes.covers_roles. */
   coversRoles: PlateRole[] | null;
   snackLabel: string | null;
+  prepared: boolean;
+  rating: MenuDishRating | null;
 };
 
 export type MenuSlotView = {
   id: string;
   dayIndex: number;
   meal: MealSlot;
-  /** Role-labeled dishes (Story 6.1). */
-  dishes: MenuSlotDishView[];
-  /** Optional primary shim: protein/main from dishes (or recipe_id). */
+  dishes: MenuDishView[];
+  /** Optional primary: protein/main from dishes (or recipe_id). */
   recipeId: string | null;
   recipeName: string | null;
   recipeBodyText: string | null;
@@ -55,11 +60,14 @@ export type MenuSlotView = {
   servings: number;
 };
 
+/** Snack lane projection of a Menu dish (plate_role=snack). */
 export type MenuSnackView = {
   id: string;
   dayIndex: number;
   label: string;
   value: RecipePerServingValue;
+  prepared: boolean;
+  rating: MenuDishRating | null;
 };
 
 export type MenuSkeletonView = {
@@ -95,11 +103,16 @@ function perServingOrEmpty(recipe: RecipeJoin): RecipePerServingValue {
 }
 
 function dishOrJoinValue(
-  dish: MenuSlotDishView | null,
+  dish: MenuDishView | null,
   join: RecipeJoin,
 ): RecipePerServingValue {
   if (dish) return dish.recipeValue;
   return perServingOrEmpty(join);
+}
+
+function parseDishRating(raw: unknown): MenuDishRating | null {
+  if (raw === "like" || raw === "dislike") return raw;
+  return null;
 }
 
 /** Load an owned Menu with slots, dishes, recipe names, and snacks. */
@@ -126,37 +139,28 @@ export async function loadMenuSkeleton(
       ...DEFAULT_AVAILABLE_EQUIPMENT,
     ];
 
-  const [slotsRes, snacksRes] = await Promise.all([
-    supabase
-      .from("menu_slots")
-      .select(
-        `id, day_index, meal, recipe_id, servings,
-         recipes!menu_slots_recipe_id_fkey(${RECIPE_WITH_INGREDIENTS_SELECT}),
-         menu_slot_dishes(
-           id, plate_role, sort_order, recipe_id, snack_label,
-           recipes(covers_roles, ${RECIPE_WITH_INGREDIENTS_SELECT})
-         )`,
-      )
-      .eq("menu_id", menuId)
-      .order("day_index", { ascending: true }),
-    supabase
-      .from("menu_snacks")
-      .select(
-        "id, day_index, label, price_cents_per_serving, calories_kcal_per_serving, protein_g_per_serving, fat_g_per_serving, carbs_g_per_serving",
-      )
-      .eq("menu_id", menuId)
-      .order("day_index", { ascending: true }),
-  ]);
+  const slotsRes = await supabase
+    .from("menu_slots")
+    .select(
+      `id, day_index, meal, recipe_id, servings,
+       recipes!menu_slots_recipe_id_fkey(${RECIPE_WITH_INGREDIENTS_SELECT}),
+       menu_dishes(
+         id, plate_role, sort_order, recipe_id, snack_label,
+         prepared, rating,
+         price_cents_per_serving, calories_kcal_per_serving,
+         protein_g_per_serving, fat_g_per_serving, carbs_g_per_serving,
+         recipes(covers_roles, ${RECIPE_WITH_INGREDIENTS_SELECT})
+       )`,
+    )
+    .eq("menu_id", menuId)
+    .order("day_index", { ascending: true });
 
   if (slotsRes.error) {
     return { menu: null, error: "Не удалось загрузить слоты меню." };
   }
-  if (snacksRes.error) {
-    return { menu: null, error: "Не удалось загрузить Snacks." };
-  }
 
   const cookable: MenuSlotView[] = [];
-  const snacksFromDishes: MenuSnackView[] = [];
+  const snacks: MenuSnackView[] = [];
 
   for (const row of slotsRes.data ?? []) {
     const slot = mapMenuSlot(row, menu.day_count);
@@ -166,11 +170,13 @@ export async function loadMenuSkeleton(
     if (slot.meal === "snack") {
       const snackDish = slot.dishes.find((d) => d.plateRole === "snack");
       if (snackDish?.snackLabel) {
-        snacksFromDishes.push({
+        snacks.push({
           id: snackDish.id,
           dayIndex: slot.dayIndex,
           label: snackDish.snackLabel,
-          value: { ...EMPTY_PER_SERVING },
+          value: snackDish.recipeValue,
+          prepared: snackDish.prepared,
+          rating: snackDish.rating,
         });
       }
       continue;
@@ -188,15 +194,7 @@ export async function loadMenuSkeleton(
     return (mealOrder.get(a.meal) ?? 0) - (mealOrder.get(b.meal) ?? 0);
   });
 
-  const snacksFromTable: MenuSnackView[] = (snacksRes.data ?? []).map((row) => ({
-    id: row.id,
-    dayIndex: row.day_index,
-    label: row.label,
-    value: mapPerServingValue(row),
-  }));
-
-  // Merge by day: dish label wins; nutrition from menu_snacks when present.
-  const snacks = mergeSnacksByDay(snacksFromDishes, snacksFromTable);
+  snacks.sort((a, b) => a.dayIndex - b.dayIndex);
 
   return {
     menu: {
@@ -218,7 +216,7 @@ function mapMenuSlot(
     recipe_id: string | null;
     servings: unknown;
     recipes: unknown;
-    menu_slot_dishes?: unknown;
+    menu_dishes?: unknown;
   },
   dayCount: number,
 ): MenuSlotView | null {
@@ -231,7 +229,7 @@ function mapMenuSlot(
     return null;
   }
 
-  const dishes = mapDishes(row.menu_slot_dishes);
+  const dishes = mapDishes(row.menu_dishes);
   const recipe = unwrapRecipe(row.recipes as RecipeJoinInput);
   const primary = pickPrimaryDish(dishes);
 
@@ -251,33 +249,7 @@ function mapMenuSlot(
   };
 }
 
-/** Per-day merge: dish label preferred; keep menu_snacks nutrition when available. */
-function mergeSnacksByDay(
-  fromDishes: ReadonlyArray<MenuSnackView>,
-  fromTable: ReadonlyArray<MenuSnackView>,
-): MenuSnackView[] {
-  const byDay = new Map<number, MenuSnackView>();
-  for (const s of fromTable) {
-    byDay.set(s.dayIndex, s);
-  }
-  for (const s of fromDishes) {
-    const existing = byDay.get(s.dayIndex);
-    if (!existing) {
-      byDay.set(s.dayIndex, s);
-      continue;
-    }
-    byDay.set(s.dayIndex, {
-      // Keep menu_snacks.id — snack actions query that table, not dish row ids.
-      id: existing.id,
-      dayIndex: s.dayIndex,
-      label: s.label,
-      value: existing.value,
-    });
-  }
-  return [...byDay.values()].sort((a, b) => a.dayIndex - b.dayIndex);
-}
-
-function pickPrimaryDish(dishes: MenuSlotDishView[]): MenuSlotDishView | null {
+function pickPrimaryDish(dishes: MenuDishView[]): MenuDishView | null {
   return (
     dishes.find((d) => d.plateRole === "protein" || d.plateRole === "main") ??
     dishes.find((d) => d.recipeId) ??
@@ -291,6 +263,13 @@ type DishRowRaw = {
   sort_order?: unknown;
   recipe_id?: unknown;
   snack_label?: unknown;
+  prepared?: unknown;
+  rating?: unknown;
+  price_cents_per_serving?: unknown;
+  calories_kcal_per_serving?: unknown;
+  protein_g_per_serving?: unknown;
+  fat_g_per_serving?: unknown;
+  carbs_g_per_serving?: unknown;
   recipes?: unknown;
 };
 
@@ -304,12 +283,16 @@ function parseCoversRolesFromRecipe(raw: unknown): PlateRole[] | null {
   return out.length > 0 ? out : null;
 }
 
-function mapOneDish(r: DishRowRaw): MenuSlotDishView | null {
+function mapOneDish(r: DishRowRaw): MenuDishView | null {
   if (typeof r.id !== "string") return null;
   if (typeof r.plate_role !== "string" || !isPlateRole(r.plate_role)) {
     return null;
   }
   const recipe = unwrapRecipe(r.recipes as RecipeJoinInput);
+  const snackLabel = typeof r.snack_label === "string" ? r.snack_label : null;
+  const recipeValue = snackLabel
+    ? mapPerServingValue(r)
+    : perServingOrEmpty(recipe);
   return {
     id: r.id,
     plateRole: r.plate_role,
@@ -318,15 +301,17 @@ function mapOneDish(r: DishRowRaw): MenuSlotDishView | null {
     recipeName: recipe?.name ?? null,
     recipeBodyText: recipe?.body_text ?? null,
     recipeIngredients: mapIngredientRows(recipe?.critical_ingredients),
-    recipeValue: perServingOrEmpty(recipe),
+    recipeValue,
     coversRoles: parseCoversRolesFromRecipe(recipe?.covers_roles),
-    snackLabel: typeof r.snack_label === "string" ? r.snack_label : null,
+    snackLabel,
+    prepared: r.prepared === true,
+    rating: parseDishRating(r.rating),
   };
 }
 
-function mapDishes(raw: unknown): MenuSlotDishView[] {
+function mapDishes(raw: unknown): MenuDishView[] {
   if (!Array.isArray(raw)) return [];
-  const out: MenuSlotDishView[] = [];
+  const out: MenuDishView[] = [];
   for (const row of raw) {
     if (!row || typeof row !== "object") continue;
     const dish = mapOneDish(row as DishRowRaw);

@@ -424,7 +424,7 @@ async function loadSlotKeyMap(
   slotCount: number,
 ): Promise<Map<string, SlotPrompt>> {
   // Skeleton may also create meal=snack rows for the Перекус lane; cookable fill
-  // only uses non-snack slots (snacks are written via menu_snacks).
+  // only uses non-snack slots (snacks are written as menu_dishes on snack slots).
   const { data: slotRows, error: slotsError } = await supabase
     .from("menu_slots")
     .select("id, day_index, meal")
@@ -500,7 +500,6 @@ async function assignPositionProposals(
     fridgeKeepDays: row.fridge_keep_days,
     longIdle: false,
     recentlyUsed: false,
-    rating: "none",
     plateRole:
       typeof row.plate_role === "string" && row.plate_role.length > 0
         ? row.plate_role

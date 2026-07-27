@@ -158,17 +158,14 @@ export async function loadHistory(
 
   const menuIds = menus.map((m) => m.id);
 
-  const [slotsRes, snacksRes, ratingsRes, snackRatingsRes] = await Promise.all([
+  const [slotsRes, ratingsRes, snackRatingsRes] = await Promise.all([
     supabase
       .from("menu_slots")
       .select(
-        `id, menu_id, recipe_id, day_index, servings,
-         recipes!menu_slots_recipe_id_fkey(${RECIPE_HISTORY_WITH_INGREDIENTS_SELECT})`,
+        `id, menu_id, recipe_id, day_index, servings, meal,
+         recipes!menu_slots_recipe_id_fkey(${RECIPE_HISTORY_WITH_INGREDIENTS_SELECT}),
+         menu_dishes(snack_label)`,
       )
-      .in("menu_id", menuIds),
-    supabase
-      .from("menu_snacks")
-      .select("menu_id, label")
       .in("menu_id", menuIds),
     supabase
       .from("recipe_ratings")
@@ -180,7 +177,7 @@ export async function loadHistory(
       .eq("user_id", userId),
   ]);
 
-  if (slotsRes.error || snacksRes.error) {
+  if (slotsRes.error) {
     return { menus: [], error: "Не удалось загрузить историю." };
   }
 
@@ -196,7 +193,7 @@ export async function loadHistory(
   const dishesRes =
     slotIds.length > 0
       ? await supabase
-        .from("menu_slot_dishes")
+        .from("menu_dishes")
         .select(
           `menu_slot_id, recipe_id, snack_label,
          recipes(${RECIPE_HISTORY_WITH_INGREDIENTS_SELECT})`,
@@ -349,26 +346,33 @@ export async function loadHistory(
   const snacksByMenu = new Map<string, HistorySnackRow[]>();
   const seenSnack = new Map<string, Set<string>>();
 
-  (snacksRes.data ?? []).forEach((row) => {
-    const label = typeof row.label === "string" ? row.label.trim() : "";
-    if (!label || !row.menu_id) return;
-    const key = label.toLocaleLowerCase("ru");
-    let seen = seenSnack.get(row.menu_id);
-    if (!seen) {
-      seen = new Set();
-      seenSnack.set(row.menu_id, seen);
+  for (const row of slotsRes.data ?? []) {
+    if (row.meal !== "snack" || !row.menu_id) continue;
+    const dishes = (
+      row as { menu_dishes?: Array<{ snack_label?: unknown }> | null }
+    ).menu_dishes;
+    for (const d of dishes ?? []) {
+      const label =
+        typeof d.snack_label === "string" ? d.snack_label.trim() : "";
+      if (!label) continue;
+      const key = label.toLocaleLowerCase("ru");
+      let seen = seenSnack.get(row.menu_id);
+      if (!seen) {
+        seen = new Set();
+        seenSnack.set(row.menu_id, seen);
+      }
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const r = snackRating.get(key);
+      const list = snacksByMenu.get(row.menu_id) ?? [];
+      list.push({
+        label,
+        rating: r?.rating ?? null,
+        reason: r?.reason ?? null,
+      });
+      snacksByMenu.set(row.menu_id, list);
     }
-    if (seen.has(key)) return;
-    seen.add(key);
-    const r = snackRating.get(key);
-    const list = snacksByMenu.get(row.menu_id) ?? [];
-    list.push({
-      label,
-      rating: r?.rating ?? null,
-      reason: r?.reason ?? null,
-    });
-    snacksByMenu.set(row.menu_id, list);
-  });
+  }
 
   return {
     menus: menus.map((m) => ({

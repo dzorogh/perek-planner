@@ -4,7 +4,6 @@
  */
 
 const LONG_IDLE_DAYS = 14;
-const RATING_WEIGHT = { like: 3, medium: 2, none: 1, dislike: 0 };
 
 function isLongIdle(lastAssignedAt, now, idleDays = LONG_IDLE_DAYS) {
   if (!lastAssignedAt) return true;
@@ -12,21 +11,15 @@ function isLongIdle(lastAssignedAt, now, idleDays = LONG_IDLE_DAYS) {
   return now.getTime() - lastAssignedAt.getTime() >= ms;
 }
 
+/** Hard-suppress = recipe_refusals only (ratings unused). */
 function isHardSuppressed(recipeId, sets) {
-  return sets.refusedIds.has(recipeId) || sets.dislikedIds.has(recipeId);
-}
-
-function ratingWeight(rating) {
-  return RATING_WEIGHT[rating];
+  return sets.refusedIds.has(recipeId);
 }
 
 function rankCandidates(candidates) {
   return [...candidates].sort((a, b) => {
     if (a.recentlyUsed !== b.recentlyUsed) return a.recentlyUsed ? 1 : -1;
     if (a.longIdle !== b.longIdle) return a.longIdle ? -1 : 1;
-    const wa = RATING_WEIGHT[a.rating];
-    const wb = RATING_WEIGHT[b.rating];
-    if (wa !== wb) return wb - wa;
     return a.name.localeCompare(b.name, "ru");
   });
 }
@@ -181,28 +174,24 @@ check("not long-idle 7d ago", !isLongIdle(d7, now));
 
 const sets = {
   refusedIds: new Set(["r1"]),
-  dislikedIds: new Set(["r2"]),
 };
 check("refuse hard-suppress", isHardSuppressed("r1", sets));
-check("dislike hard-suppress", isHardSuppressed("r2", sets));
+check("dislike rating does not hard-suppress", !isHardSuppressed("r2", sets));
 check("ok not suppressed", !isHardSuppressed("r3", sets));
 
-check("like > medium weight", ratingWeight("like") > ratingWeight("medium"));
-check("medium > none weight", ratingWeight("medium") > ratingWeight("none"));
-
 const ranked = rankCandidates([
-  { recipeId: "a", name: "А", longIdle: false, recentlyUsed: false, rating: "like" },
-  { recipeId: "b", name: "Б", longIdle: true, recentlyUsed: false, rating: "medium" },
-  { recipeId: "c", name: "В", longIdle: true, recentlyUsed: false, rating: "like" },
+  { recipeId: "a", name: "А", longIdle: false, recentlyUsed: false },
+  { recipeId: "b", name: "Б", longIdle: true, recentlyUsed: false },
+  { recipeId: "c", name: "В", longIdle: true, recentlyUsed: false },
 ]);
 check(
-  "rank long-idle like first",
-  ranked[0].recipeId === "c" && ranked[1].recipeId === "b",
+  "rank long-idle then name (ratings unused)",
+  ranked[0].recipeId === "b" && ranked[1].recipeId === "c",
 );
 
 const rankedFresh = rankCandidates([
-  { recipeId: "old", name: "Старое", longIdle: true, recentlyUsed: true, rating: "like" },
-  { recipeId: "new", name: "Новое", longIdle: false, recentlyUsed: false, rating: "none" },
+  { recipeId: "old", name: "Старое", longIdle: true, recentlyUsed: true },
+  { recipeId: "new", name: "Новое", longIdle: false, recentlyUsed: false },
 ]);
 check(
   "rank prefers not-recently-used over long-idle recent",

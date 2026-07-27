@@ -8,7 +8,7 @@ import {
 /**
  * Last Menu assignment date per recipe for this user (cook-recency proxy).
  * Uses menus.created_at when the recipe appeared on a slot.
- * Prefer menu_slot_dishes; fall back to menu_slots.recipe_id.
+ * Prefer menu_dishes; fall back to menu_slots.recipe_id.
  * Fail-closed: null on query error (caller must not treat as “all long-idle”).
  */
 export async function loadLastAssignedAt(
@@ -21,7 +21,7 @@ export async function loadLastAssignedAt(
     .from("menu_slots")
     .select(
       `recipe_id, menus!inner(user_id, created_at),
-       menu_slot_dishes(recipe_id)`,
+       menu_dishes(recipe_id)`,
     )
     .eq("menus.user_id", userId);
 
@@ -39,7 +39,7 @@ function updateLastAssignedAt(
   row: {
     recipe_id: unknown;
     menus: unknown;
-    menu_slot_dishes?: Array<{ recipe_id?: unknown }> | null;
+    menu_dishes?: Array<{ recipe_id?: unknown }> | null;
   },
 ): void {
   const menu = unwrapMenu(row.menus);
@@ -47,7 +47,7 @@ function updateLastAssignedAt(
   if (!at || Number.isNaN(at.getTime())) return;
 
   const ids = new Set<string>();
-  for (const d of row.menu_slot_dishes ?? []) {
+  for (const d of row.menu_dishes ?? []) {
     if (typeof d.recipe_id === "string" && d.recipe_id) ids.add(d.recipe_id);
   }
   if (ids.size === 0 && typeof row.recipe_id === "string" && row.recipe_id) {
@@ -71,7 +71,7 @@ function unwrapMenu(
 
 /**
  * Recipe ids that appeared on the user's most recent menus (cross-menu cooldown).
- * Prefer menu_slot_dishes; fall back to menu_slots.recipe_id.
+ * Prefer menu_dishes; fall back to menu_slots.recipe_id.
  * `excludeMenuId` skips the menu currently being filled (usually empty slots).
  * Fail-closed: null on query error.
  */
@@ -106,7 +106,7 @@ export async function loadRecentMenuRecipeIds(
 
   const { data: slots, error: slotsError } = await supabase
     .from("menu_slots")
-    .select("id, recipe_id, menu_slot_dishes(recipe_id)")
+    .select("id, recipe_id, menu_dishes(recipe_id)")
     .in("menu_id", recentMenuIds);
 
   if (slotsError || !slots) {
@@ -115,7 +115,7 @@ export async function loadRecentMenuRecipeIds(
 
   const ids = new Set<string>();
   for (const row of slots) {
-    const dishIds = (row.menu_slot_dishes ?? [])
+    const dishIds = (row.menu_dishes ?? [])
       .map((d: { recipe_id?: unknown }) => d.recipe_id)
       .filter((id: unknown): id is string => typeof id === "string" && !!id);
     if (dishIds.length > 0) {
@@ -131,7 +131,7 @@ export async function loadRecentMenuRecipeIds(
 
 /**
  * Dish names from the user's most recent menus (for AI invent/assign context).
- * Prefer menu_slot_dishes; fall back to primary recipe join.
+ * Prefer menu_dishes; fall back to primary recipe join.
  * Fail-closed: null on query error.
  */
 export async function loadRecentMenuDishNames(
@@ -169,7 +169,7 @@ export async function loadRecentMenuDishNames(
     .select(
       `recipe_id,
        recipes!menu_slots_recipe_id_fkey(name),
-       menu_slot_dishes(recipe_id, recipes(name))`,
+       menu_dishes(recipe_id, recipes(name))`,
     )
     .in("menu_id", recentMenuIds);
 
@@ -193,11 +193,11 @@ export async function loadRecentMenuDishNames(
   for (const row of slots) {
     const dishes = (
       row as {
-        menu_slot_dishes?: Array<{
+        menu_dishes?: Array<{
           recipes?: { name: string } | { name: string }[] | null;
         }> | null;
       }
-    ).menu_slot_dishes;
+    ).menu_dishes;
     if (dishes && dishes.length > 0) {
       for (const d of dishes) push(d.recipes);
       continue;
@@ -241,19 +241,25 @@ export async function loadRecentSnackLabels(
     return new Set();
   }
 
-  const { data: snacks, error: snacksError } = await supabase
-    .from("menu_snacks")
-    .select("label")
-    .in("menu_id", recentMenuIds);
+  const { data: slots, error: slotsError } = await supabase
+    .from("menu_slots")
+    .select("menu_dishes(snack_label)")
+    .in("menu_id", recentMenuIds)
+    .eq("meal", "snack");
 
-  if (snacksError || !snacks) {
+  if (slotsError || !slots) {
     return null;
   }
 
   const labels = new Set<string>();
-  for (const row of snacks) {
-    if (typeof row.label === "string" && row.label.trim()) {
-      labels.add(row.label.trim().toLocaleLowerCase("ru"));
+  for (const row of slots) {
+    const dishes = (
+      row as { menu_dishes?: Array<{ snack_label?: unknown }> | null }
+    ).menu_dishes;
+    for (const d of dishes ?? []) {
+      if (typeof d.snack_label === "string" && d.snack_label.trim()) {
+        labels.add(d.snack_label.trim().toLocaleLowerCase("ru"));
+      }
     }
   }
   return labels;

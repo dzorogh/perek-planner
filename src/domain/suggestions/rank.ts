@@ -1,8 +1,3 @@
-import {
-  RATING_WEIGHT,
-  type RecipeRatingValue,
-} from "@/domain/suggestions/constants";
-
 export type RankableCandidate = {
   recipeId: string;
   name: string;
@@ -10,14 +5,13 @@ export type RankableCandidate = {
   longIdle: boolean;
   /** Appeared on one of the user's most recent menus — demote for cross-menu variety. */
   recentlyUsed: boolean;
-  rating: RecipeRatingValue | "none";
   /** From invent persist; null/undefined = legacy/seed (treat as main-capable). */
   plateRole?: string | null;
 };
 
 /**
- * Sort candidates: not-recently-used first, then long-idle, then rating, then name.
- * Deterministic for tests and stable LLM input order.
+ * Sort candidates: not-recently-used first, then long-idle, then name.
+ * Ratings do not influence rank.
  */
 export function rankCandidates(candidates: RankableCandidate[]): RankableCandidate[] {
   return [...candidates].sort((a, b) => {
@@ -27,16 +21,8 @@ export function rankCandidates(candidates: RankableCandidate[]): RankableCandida
     if (a.longIdle !== b.longIdle) {
       return a.longIdle ? -1 : 1;
     }
-    const wa = RATING_WEIGHT[a.rating];
-    const wb = RATING_WEIGHT[b.rating];
-    if (wa !== wb) return wb - wa;
     return a.name.localeCompare(b.name, "ru");
   });
-}
-
-/** Pure weight helper for verify scripts. */
-export function ratingWeight(rating: RecipeRatingValue | "none"): number {
-  return RATING_WEIGHT[rating];
 }
 
 /**

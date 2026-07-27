@@ -7,7 +7,7 @@ import {
   isTemplateMeal,
   rolesForMeal,
 } from "@/domain/menu/meal-templates";
-import { replaceSlotDishes } from "@/domain/menu/slot-dishes";
+import { replaceSlotDishes } from "@/domain/menu/menu-dishes";
 import type { SuggestionCandidate } from "@/domain/suggestions/candidates";
 import type { ProposedAssignment } from "@/domain/suggestions/openrouter-generate";
 import { primaryRecipeIdFromDishes } from "@/domain/suggestions/role-slots";
@@ -27,7 +27,7 @@ export async function assignProposalsToSlots(
   menuId: string,
   proposals: ProposedAssignment[],
   candidates: SuggestionCandidate[],
-  suppress: Pick<SuppressSets, "refusedIds" | "dislikedIds">,
+  suppress: Pick<SuppressSets, "refusedIds">,
 ): Promise<AssignResult> {
   const rankedIds = candidates.map((c) => c.recipeId);
   const fridgeById = new Map(
@@ -67,7 +67,7 @@ async function assignProposal(
   proposal: ProposedAssignment,
   rankedIds: string[],
   fridgeById: Map<string, number>,
-  suppress: Pick<SuppressSets, "refusedIds" | "dislikedIds">,
+  suppress: Pick<SuppressSets, "refusedIds">,
   dayCount: number,
   selectedFridge: number[],
 ): Promise<boolean> {
@@ -118,7 +118,7 @@ async function tryFallbackPrimary(
   proposal: ProposedAssignment,
   rankedIds: string[],
   fridgeById: Map<string, number>,
-  suppress: Pick<SuppressSets, "refusedIds" | "dislikedIds">,
+  suppress: Pick<SuppressSets, "refusedIds">,
   dayCount: number,
   selectedFridge: number[],
 ): Promise<boolean> {
@@ -184,7 +184,7 @@ export function adaptDishesToMeal(
 function usableFridge(
   recipeId: string,
   fridgeById: ReadonlyMap<string, number>,
-  suppress: Pick<SuppressSets, "refusedIds" | "dislikedIds">,
+  suppress: Pick<SuppressSets, "refusedIds">,
   dayCount: number,
   selectedFridge: number[],
 ): number | null {

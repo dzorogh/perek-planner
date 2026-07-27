@@ -7,7 +7,6 @@ import {
   normalizeFeedbackComment,
   type HistoryRatingValue,
 } from "@/domain/history/constants";
-import { recordTasteBanFromFeedback } from "@/domain/settings/taste-preferences";
 import { createClient } from "@/lib/supabase/server";
 
 export type RatingActionState =
@@ -68,20 +67,7 @@ export async function upsertRecipeRatingAction(
     return { ok: false, error: "Не удалось сохранить оценку." };
   }
 
-  if (reason) {
-    const { data: recipeRow } = await supabase
-      .from("recipes")
-      .select("name")
-      .eq("id", recipeId)
-      .maybeSingle();
-    await recordTasteBanFromFeedback(supabase, user.id, {
-      subject: recipeRow?.name ?? null,
-      comment: reason,
-    });
-  }
-
   revalidatePath("/history");
-  revalidatePath("/settings");
   return { ok: true };
 }
 
@@ -130,14 +116,6 @@ export async function upsertSnackRatingAction(
     return { ok: false, error: "Не удалось сохранить оценку." };
   }
 
-  if (reason) {
-    await recordTasteBanFromFeedback(supabase, user.id, {
-      subject: label,
-      comment: reason,
-    });
-  }
-
   revalidatePath("/history");
-  revalidatePath("/settings");
   return { ok: true };
 }

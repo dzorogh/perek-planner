@@ -99,7 +99,7 @@ async function resolveRecipeIdForTarget(
   const meal = slot.meal as MealSlot;
   const role = plateRoleForTarget(meal, target);
   const { data } = await supabase
-    .from("menu_slot_dishes")
+    .from("menu_dishes")
     .select("recipe_id")
     .eq("menu_slot_id", slot.id)
     .eq("plate_role", role)
@@ -152,7 +152,7 @@ async function loadMenuPlanDishes(
     .select(
       `id, day_index, meal, recipe_id,
        recipes!menu_slots_recipe_id_fkey(name),
-       menu_slot_dishes(plate_role, recipe_id, recipes(name))`,
+       menu_dishes(plate_role, recipe_id, recipes(name))`,
     )
     .eq("menu_id", menuId);
 
@@ -187,7 +187,7 @@ async function loadMenuPlanDishes(
 
   for (const row of data as Array<
     MenuSlotNameRow & {
-      menu_slot_dishes?: Array<{
+      menu_dishes?: Array<{
         plate_role?: string;
         recipe_id?: string | null;
         recipes?: { name: string } | { name: string }[] | null;
@@ -195,7 +195,7 @@ async function loadMenuPlanDishes(
     }
   >) {
     const meal = row.meal as MealSlot;
-    const dishes = row.menu_slot_dishes ?? [];
+    const dishes = row.menu_dishes ?? [];
     if (dishes.length === 0) {
       const primaryRole: PlateRole = isLunchDinnerMeal(meal) ? "protein" : "main";
       push(row.meal, row.day_index, primaryRole, row.recipe_id, row.recipes);
@@ -224,7 +224,7 @@ async function loadExistingDishAssignments(
   const bySlot = new Map<string, SlotDishAssignment[]>();
   if (slotIds.length === 0) return bySlot;
   const { data } = await supabase
-    .from("menu_slot_dishes")
+    .from("menu_dishes")
     .select("menu_slot_id, plate_role, recipe_id")
     .in("menu_slot_id", slotIds)
     .not("recipe_id", "is", null);
@@ -1156,7 +1156,7 @@ export async function clearDishRoleForSlot(
 
   const slotIds = pairSlots.map((s) => s.id);
   const { data: roleDishes } = await supabase
-    .from("menu_slot_dishes")
+    .from("menu_dishes")
     .select("menu_slot_id, recipe_id")
     .in("menu_slot_id", slotIds)
     .eq("plate_role", plateRole)
@@ -1173,7 +1173,7 @@ export async function clearDishRoleForSlot(
   }
 
   const { error: dishError } = await supabase
-    .from("menu_slot_dishes")
+    .from("menu_dishes")
     .delete()
     .in("menu_slot_id", slotIds)
     .eq("plate_role", plateRole);
@@ -1197,7 +1197,7 @@ export async function clearDishRoleForSlot(
   return { ok: true };
 }
 
-/** @deprecated alias — clears carb dish via menu_slot_dishes. */
+/** @deprecated alias — clears carb dish via menu_dishes. */
 export async function clearCompanionForSlot(
   supabase: SupabaseClient,
   menuId: string,
@@ -2166,7 +2166,7 @@ async function collectPairReplaceJobs(
     slotIds.length === 0
       ? { data: [] as DishRoleHit[] }
       : await supabase
-        .from("menu_slot_dishes")
+        .from("menu_dishes")
         .select("menu_slot_id, plate_role")
         .in("menu_slot_id", slotIds)
         .eq("recipe_id", recipeId);

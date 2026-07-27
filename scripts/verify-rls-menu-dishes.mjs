@@ -1,6 +1,6 @@
 /**
- * Anon RLS deny for menu_snacks (Story 2.5).
- * Usage: node --env-file=.env.local scripts/verify-rls-menu-snacks.mjs
+ * Anon RLS deny for menu_dishes.
+ * Usage: node --env-file=.env.local scripts/verify-rls-menu-dishes.mjs
  */
 
 import { createClient } from "@supabase/supabase-js";
@@ -18,7 +18,7 @@ if (!url || !anon) {
 const supabase = createClient(url, anon);
 await assertAnonDenied(
   supabase,
-  "menu_snacks",
-  "Apply supabase/migrations/20260720080000_menu_snacks.sql first.",
+  "menu_dishes",
+  "Apply supabase/migrations/20260728010000_menu_dishes_cook_feedback.sql first.",
 );
-console.log("All menu_snacks RLS anon checks passed");
+console.log("All menu_dishes RLS anon checks passed");

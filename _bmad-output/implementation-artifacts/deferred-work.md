@@ -174,3 +174,29 @@ All previously open items were closed in the deferred-work sweep. Strikethrough 
 - source_spec: `_bmad-output/implementation-artifacts/spec-shopping-list-persist-realtime.md`
   summary: Anon RLS verify does not assert denormalized `user_id` SELECT/UPDATE policies.
   evidence: `verify-rls-shopping-lists.mjs` checks anon deny + absence of lines only.
+
+## Deferred from: code review of spec-menu-cook-feedback.md (2026-07-28)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-menu-cook-feedback.md`
+  summary: Import production suppress/rank helpers in verify-suggestions-logic instead of duplicated copies.
+  evidence: Pre-existing verify:* pattern; Blind Hunter noted drift risk after ratings removed from AI.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-menu-cook-feedback.md`
+  summary: Add dedicated verify coverage for cook-feedback toggle/clear and planning-lock helpers.
+  evidence: Spec verification covers suppress-only; cook-feedback paths are manual/UI today.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-menu-cook-feedback.md`
+  summary: Further collapse snack vs recipe overflow UI into one Menu dish component (beyond shared CookFeedbackMenuItems).
+  evidence: Dual SlotCardActions / SnackSlotCard wiring remains; shared feedback items already unify the cook-feedback section.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-menu-cook-feedback.md`
+  summary: Narrow Realtime menu_dishes subscription with server-side filter when practical.
+  evidence: Current listen-all + client slotIds filter matches prior menu live-sync pattern.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-menu-cook-feedback.md`
+  summary: Optimistic concurrency on prepared/rating toggles under multi-tab contention.
+  evidence: Edge Case Hunter; single-operator product makes races rare.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-menu-cook-feedback.md`
+  summary: Atomic replace for paired snack days (rollback if second day upsert fails).
+  evidence: Edge Case Hunter on generate-snacks pair path; pre-existing multi-step replace.

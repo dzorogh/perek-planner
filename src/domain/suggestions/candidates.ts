@@ -82,7 +82,6 @@ export async function buildCandidates(
       continue;
     }
 
-    const rating = suppress.ratings.get(recipe.id) ?? "none";
     const plateRole =
       typeof recipe.plate_role === "string" && recipe.plate_role.length > 0
         ? recipe.plate_role
@@ -93,7 +92,6 @@ export async function buildCandidates(
       fridgeKeepDays: recipe.fridge_keep_days,
       longIdle: isLongIdle(lastAssigned.get(recipe.id), now),
       recentlyUsed: recentIds.has(recipe.id),
-      rating,
       plateRole,
     });
   }

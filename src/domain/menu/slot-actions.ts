@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { revalidatePlanForMenu } from "@/domain/menu/revalidate-plan";
 import { withMenuMutationLock } from "@/domain/menu/menu-mutation-lock";
 import { isPlateRole } from "@/domain/menu/meal-templates";
+import { assertDishPlanningUnlocked } from "@/domain/menu/planning-lock";
 import {
   clearCompanionForSlot,
   modifyRecipeAcrossMenu,
@@ -126,6 +127,13 @@ export async function resuggestRecipeAcrossMenuAction(
   const { supabase, user, error } = await requireUser();
   if (!user) return { ok: false, error: error! };
 
+  const unlocked = await assertDishPlanningUnlocked(
+    supabase,
+    slotId,
+    target === "companion" ? "carb" : target,
+  );
+  if (!unlocked.ok) return unlocked;
+
   let result: SlotActionState;
   try {
     result = await withMenuMutationLock(supabase, menuId, () =>
@@ -158,6 +166,13 @@ export async function modifyRecipeAcrossMenuAction(
 
   const { supabase, user, error } = await requireUser();
   if (!user) return { ok: false, error: error! };
+
+  const unlocked = await assertDishPlanningUnlocked(
+    supabase,
+    slotId,
+    target === "companion" ? "carb" : target,
+  );
+  if (!unlocked.ok) return unlocked;
 
   let result: SlotActionState;
   try {
@@ -229,6 +244,9 @@ export async function clearCompanionAction(
 
   const { supabase, user, error } = await requireUser();
   if (!user) return { ok: false, error: error! };
+
+  const unlocked = await assertDishPlanningUnlocked(supabase, slotId, "carb");
+  if (!unlocked.ok) return unlocked;
 
   const result = await clearCompanionForSlot(supabase, menuId, slotId);
   if (!result.ok) return result;

@@ -11,6 +11,10 @@ import {
 
 import { CommentDialog } from "@/components/feedback/comment-dialog";
 import { clearBodyPointerEvents } from "@/components/menu/clear-body-pointer-events";
+import {
+  CookFeedbackMenuItems,
+  planningLocked,
+} from "@/components/menu/cook-feedback-menu";
 import { useMenuSlotBusy } from "@/components/menu/menu-slot-busy";
 import { SlotDishLine } from "@/components/menu/slot-dish-line";
 import { SlotGeneratingOverlay } from "@/components/menu/slot-generating-overlay";
@@ -21,13 +25,19 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { MenuSnackView } from "@/domain/menu/load-menu";
+import {
+  setDishRatingAction,
+  togglePreparedAction,
+  type CookFeedbackActionState,
+} from "@/domain/menu/cook-feedback-actions";
+import type { MenuDishView, MenuSnackView } from "@/domain/menu/load-menu";
 import {
   refuseSnackAction,
   resuggestSnackAction,
   suggestSnackForDayAction,
   type SnackActionState,
 } from "@/domain/menu/snack-actions";
+import { EMPTY_PER_SERVING } from "@/domain/recipes/scale-totals";
 import { formatSnackLabel } from "@/domain/suggestions/snack-pool";
 
 type SnackSlotCardProps = {
@@ -40,13 +50,34 @@ type SnackSlotCardProps = {
   sheetLayout?: boolean;
 };
 
-function ActionError({ state }: { state: SnackActionState }) {
+function ActionError({
+  state,
+}: {
+  state: SnackActionState | CookFeedbackActionState;
+}) {
   if (!state || state.ok) return null;
   return (
     <p className="mt-1 text-xs text-warning-fg" role="alert">
       {state.error}
     </p>
   );
+}
+
+function snackAsDish(snack: MenuSnackView): MenuDishView {
+  return {
+    id: snack.id,
+    plateRole: "snack",
+    sortOrder: 0,
+    recipeId: null,
+    recipeName: null,
+    recipeBodyText: null,
+    recipeIngredients: [],
+    recipeValue: snack.value ?? { ...EMPTY_PER_SERVING },
+    coversRoles: null,
+    snackLabel: snack.label,
+    prepared: snack.prepared,
+    rating: snack.rating,
+  };
 }
 
 function SnackSlotActions({
@@ -61,11 +92,15 @@ function SnackSlotActions({
   suggestState,
   resuggestState,
   refuseState,
+  preparedState,
+  ratingState,
   refuseOpen,
   setRefuseOpen,
   onSuggest,
   onResuggest,
   onRefuseSubmit,
+  onTogglePrepared,
+  onRate,
   inline = false,
 }: {
   snack: MenuSnackView | null;
@@ -79,14 +114,21 @@ function SnackSlotActions({
   suggestState: SnackActionState;
   resuggestState: SnackActionState;
   refuseState: SnackActionState;
+  preparedState: CookFeedbackActionState;
+  ratingState: CookFeedbackActionState;
   refuseOpen: boolean;
   setRefuseOpen: (open: boolean) => void;
   onSuggest: () => void;
   onResuggest: () => void;
   onRefuseSubmit: (comment: string) => void;
+  onTogglePrepared: () => void;
+  onRate: (rating: "like" | "dislike") => void;
   inline?: boolean;
 }): ReactNode {
   const empty = !snack;
+  const locked = snack
+    ? planningLocked(snack.prepared, snack.rating)
+    : false;
   const [menuOpen, setMenuOpen] = useState(false);
 
   useLayoutEffect(() => {
@@ -134,6 +176,7 @@ function SnackSlotActions({
           <DropdownMenuContent
             align="end"
             className="min-w-[13rem] rounded-md border-border"
+            data-component="menu-dish-actions"
           >
             {empty ? (
               <DropdownMenuItem
@@ -148,18 +191,20 @@ function SnackSlotActions({
               </DropdownMenuItem>
             ) : (
               <>
-                <DropdownMenuItem
-                  disabled={busy}
-                  className="focus:bg-background focus:text-primary"
-                  onSelect={() => {
-                    closeMenu();
-                    onResuggest();
-                  }}
-                >
-                  {resuggestPending || sharedBusyLabel
-                    ? "Заменяем…"
-                    : "Заменить"}
-                </DropdownMenuItem>
+                {!locked ? (
+                  <DropdownMenuItem
+                    disabled={busy}
+                    className="focus:bg-background focus:text-primary"
+                    onSelect={() => {
+                      closeMenu();
+                      onResuggest();
+                    }}
+                  >
+                    {resuggestPending || sharedBusyLabel
+                      ? "Заменяем…"
+                      : "Заменить"}
+                  </DropdownMenuItem>
+                ) : null}
                 <DropdownMenuItem
                   disabled={busy}
                   className="text-warning-fg focus:bg-background focus:text-warning-fg"
@@ -167,6 +212,19 @@ function SnackSlotActions({
                 >
                   Не предлагать
                 </DropdownMenuItem>
+                <CookFeedbackMenuItems
+                  prepared={snack.prepared}
+                  rating={snack.rating}
+                  busy={busy}
+                  onTogglePrepared={() => {
+                    closeMenu();
+                    onTogglePrepared();
+                  }}
+                  onRate={(value) => {
+                    closeMenu();
+                    onRate(value);
+                  }}
+                />
               </>
             )}
           </DropdownMenuContent>
@@ -184,6 +242,8 @@ function SnackSlotActions({
           <ActionError state={resuggestState} />
           <ActionError state={suggestState} />
           <ActionError state={refuseState} />
+          <ActionError state={preparedState} />
+          <ActionError state={ratingState} />
         </div>
       ) : null}
 
@@ -253,6 +313,14 @@ export function SnackSlotCard({
     SnackActionState,
     FormData
   >(refuseSnackAction, null);
+  const [preparedState, preparedAction, preparedPending] = useActionState<
+    CookFeedbackActionState,
+    FormData
+  >(togglePreparedAction, null);
+  const [ratingState, ratingAction, ratingPending] = useActionState<
+    CookFeedbackActionState,
+    FormData
+  >(setDishRatingAction, null);
 
   const snackLabel = snack?.label ?? "";
   const acrossMenuPending = resuggestPending || refusePending;
@@ -264,7 +332,12 @@ export function SnackSlotCard({
     return () => setSnackBusy(snackLabel, null);
   }, [snackLabel, acrossMenuPending, setSnackBusy]);
 
-  const localBusy = resuggestPending || suggestPending || refusePending;
+  const localBusy =
+    resuggestPending ||
+    suggestPending ||
+    refusePending ||
+    preparedPending ||
+    ratingPending;
 
   useLayoutEffect(() => {
     const key = `snack:${menuId}:${dayIndex}`;
@@ -273,7 +346,8 @@ export function SnackSlotCard({
   }, [dayIndex, localBusy, menuId, setActionBusy]);
 
   const busy = localBusy || Boolean(sharedBusyLabel);
-  const localGenerating = localBusy;
+  const localGenerating =
+    resuggestPending || suggestPending || refusePending;
   const generating = localGenerating || Boolean(sharedBusyLabel);
   const generatingLabel = suggestPending
     ? "Подбираем…"
@@ -298,6 +372,7 @@ export function SnackSlotCard({
         menuId={menuId}
         slotId={snack?.id ?? `snack-day-${dayIndex}`}
         plateRole="snack"
+        dish={snack ? snackAsDish(snack) : null}
         plainName={snack ? formatSnackLabel(snack.label) : null}
         plainValue={snack?.value ?? null}
         slotServings={servings}
@@ -322,6 +397,8 @@ export function SnackSlotCard({
             suggestState={suggestState}
             resuggestState={resuggestState}
             refuseState={refuseState}
+            preparedState={preparedState}
+            ratingState={ratingState}
             refuseOpen={refuseOpen}
             setRefuseOpen={setRefuseOpen}
             inline={sheetLayout}
@@ -345,6 +422,19 @@ export function SnackSlotCard({
                 comment,
               });
             }}
+            onTogglePrepared={() =>
+              runAction(preparedAction, {
+                menuId,
+                dishId: snack!.id,
+              })
+            }
+            onRate={(value) =>
+              runAction(ratingAction, {
+                menuId,
+                dishId: snack!.id,
+                rating: value,
+              })
+            }
           />
         }
       />

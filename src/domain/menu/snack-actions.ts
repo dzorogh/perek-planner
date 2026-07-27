@@ -2,6 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 
+import {
+  ensureSnackSlots,
+  upsertSnackDish,
+} from "@/domain/menu/menu-dishes";
+import { assertDishPlanningUnlockedById } from "@/domain/menu/planning-lock";
 import { revalidatePlanForMenu } from "@/domain/menu/revalidate-plan";
 import {
   refuseAndReplaceSnackAcrossMenu,
@@ -31,6 +36,27 @@ async function requireUser() {
   return { supabase, user, error: null };
 }
 
+async function snackDishOnMenu(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  menuId: string,
+  dishId: string,
+): Promise<{ id: string; dayIndex: number } | null> {
+  const { data, error } = await supabase
+    .from("menu_dishes")
+    .select("id, menu_slots!inner(id, menu_id, day_index, meal)")
+    .eq("id", dishId)
+    .eq("plate_role", "snack")
+    .eq("menu_slots.menu_id", menuId)
+    .eq("menu_slots.meal", "snack")
+    .maybeSingle();
+  if (error || !data) return null;
+  const slot = Array.isArray(data.menu_slots)
+    ? data.menu_slots[0]
+    : data.menu_slots;
+  if (!slot || typeof slot.day_index !== "number") return null;
+  return { id: data.id, dayIndex: slot.day_index };
+}
+
 /** Replace snack with another suggestion (primary edit path). */
 export async function resuggestSnackAction(
   _prev: SnackActionState,
@@ -44,6 +70,9 @@ export async function resuggestSnackAction(
 
   const { supabase, user, error } = await requireUser();
   if (!user) return { ok: false, error: error! };
+
+  const unlocked = await assertDishPlanningUnlockedById(supabase, snackId);
+  if (!unlocked.ok) return unlocked;
 
   const result = await resuggestSnackForMenu(
     supabase,
@@ -107,37 +136,30 @@ export async function updateSnackLabelAction(
   const { supabase, user, error } = await requireUser();
   if (!user) return { ok: false, error: error! };
 
-  const { data: disliked } = await supabase
-    .from("snack_ratings")
-    .select("label")
-    .eq("user_id", user.id)
-    .eq("rating", "dislike")
-    .ilike("label", label)
-    .maybeSingle();
-
-  if (disliked) {
-    return { ok: false, error: "Этот Snack отмечен как dislike." };
+  const dish = await snackDishOnMenu(supabase, menuId, snackId);
+  if (!dish) {
+    return { ok: false, error: "Snack не найден." };
   }
 
+  const unlocked = await assertDishPlanningUnlockedById(supabase, snackId);
+  if (!unlocked.ok) return unlocked;
+
   const { data, error: updateError } = await supabase
-    .from("menu_snacks")
+    .from("menu_dishes")
     .update({
-      label,
+      snack_label: label,
       // Manual rename invalidates AI estimates for this snack.
       price_cents_per_serving: null,
       calories_kcal_per_serving: null,
       protein_g_per_serving: null,
       fat_g_per_serving: null,
       carbs_g_per_serving: null,
+      updated_at: new Date().toISOString(),
     })
     .eq("id", snackId)
-    .eq("menu_id", menuId)
     .select("id");
 
   if (updateError) {
-    if (updateError.code === "23505") {
-      return { ok: false, error: "Этот Snack уже есть в меню." };
-    }
     return { ok: false, error: "Не удалось сохранить Snack." };
   }
   if (!data?.length) {
@@ -161,15 +183,19 @@ export async function clearSnackAction(
   const { supabase, user, error } = await requireUser();
   if (!user) return { ok: false, error: error! };
 
-  // Keep the day slot: blank via placeholder is worse — delete and allow regenerating
-  // via resuggest by recreating. Simpler: set a soft empty? Schema requires nonempty.
-  // Clear = remove row; day will show empty with "Предложить" recreate.
+  const dish = await snackDishOnMenu(supabase, menuId, snackId);
+  if (!dish) {
+    return { ok: false, error: "Не удалось очистить Snack." };
+  }
+
+  const unlocked = await assertDishPlanningUnlockedById(supabase, snackId);
+  if (!unlocked.ok) return unlocked;
+
   const { data, error: deleteError } = await supabase
-    .from("menu_snacks")
+    .from("menu_dishes")
     .delete()
     .eq("id", snackId)
-    .eq("menu_id", menuId)
-    .select("id, day_index");
+    .select("id");
 
   if (deleteError || !data?.length) {
     return { ok: false, error: "Не удалось очистить Snack." };
@@ -195,7 +221,7 @@ export async function suggestSnackForDayAction(
 
   const { data: menu, error: menuError } = await supabase
     .from("menus")
-    .select("day_count")
+    .select("day_count, default_servings_per_meal")
     .eq("id", menuId)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -206,43 +232,57 @@ export async function suggestSnackForDayAction(
     return { ok: false, error: "Некорректный день." };
   }
 
+  const servings =
+    typeof menu.default_servings_per_meal === "number"
+      ? menu.default_servings_per_meal
+      : 2;
+  const slots = await ensureSnackSlots(
+    supabase,
+    menuId,
+    menu.day_count,
+    servings,
+  );
+  const slotId = slots.get(dayIndex);
+  if (!slotId) {
+    return { ok: false, error: "Не удалось предложить Snack." };
+  }
+
   const { data: existing } = await supabase
-    .from("menu_snacks")
+    .from("menu_dishes")
     .select("id")
-    .eq("menu_id", menuId)
-    .eq("day_index", dayIndex)
+    .eq("menu_slot_id", slotId)
+    .eq("plate_role", "snack")
     .maybeSingle();
 
-  if (existing) {
-    const result = await resuggestSnackForMenu(
-      supabase,
-      user.id,
-      menuId,
-      existing.id,
-    );
-    if (!result.ok) return result;
-  } else {
-    // Insert a temporary row then resuggest, or generate one label and insert
-    const { data: inserted, error: insertError } = await supabase
-      .from("menu_snacks")
-      .insert({ menu_id: menuId, day_index: dayIndex, label: "перекус" })
-      .select("id")
-      .single();
-
-    if (insertError || !inserted) {
+  let dishId = existing?.id ?? null;
+  if (!dishId) {
+    const inserted = await upsertSnackDish(supabase, slotId, "перекус");
+    if (!inserted) {
       return { ok: false, error: "Не удалось предложить Snack." };
     }
-
-    const result = await resuggestSnackForMenu(
-      supabase,
-      user.id,
-      menuId,
-      inserted.id,
-    );
-    if (!result.ok) {
-      await supabase.from("menu_snacks").delete().eq("id", inserted.id);
-      return result;
+    const { data: row } = await supabase
+      .from("menu_dishes")
+      .select("id")
+      .eq("menu_slot_id", slotId)
+      .eq("plate_role", "snack")
+      .maybeSingle();
+    dishId = row?.id ?? null;
+    if (!dishId) {
+      return { ok: false, error: "Не удалось предложить Snack." };
     }
+  }
+
+  const result = await resuggestSnackForMenu(
+    supabase,
+    user.id,
+    menuId,
+    dishId,
+  );
+  if (!result.ok) {
+    if (!existing?.id) {
+      await supabase.from("menu_dishes").delete().eq("id", dishId);
+    }
+    return result;
   }
 
   revalidatePlanForMenu(menuId);

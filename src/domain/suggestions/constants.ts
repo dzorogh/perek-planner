@@ -10,16 +10,6 @@ export const RECENT_MENUS_COOLDOWN = 3;
 /** Snack labels from this many most-recent menus are avoided on the next generation. */
 export const RECENT_SNACK_MENUS_COOLDOWN = 4;
 
-export type RecipeRatingValue = "dislike" | "medium" | "like";
-
-/** Higher = prefer when ranking long-idle / general candidates. */
-export const RATING_WEIGHT: Record<RecipeRatingValue | "none", number> = {
-  like: 3,
-  medium: 2,
-  none: 1,
-  dislike: 0,
-};
-
 export const SUGGESTIONS_RU = {
   noKey: "AI-генерация не настроена. Добавьте OPENROUTER_API_KEY на сервере.",
   openRouterFail:

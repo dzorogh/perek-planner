@@ -2,10 +2,11 @@
 
 import type { ReactNode } from "react";
 
+import { CookFeedbackCues } from "@/components/menu/cook-feedback-menu";
 import { SlotCardActions } from "@/components/menu/slot-card-actions";
 import { RecipeTextPanel } from "@/components/recipes/recipe-text-panel";
 import { RecipeValueLine } from "@/components/recipes/recipe-value-line";
-import type { MenuSlotDishView } from "@/domain/menu/load-menu";
+import type { MenuDishView } from "@/domain/menu/load-menu";
 import type { PlateRole } from "@/domain/menu/meal-templates";
 import { dishLineRoleLabel } from "@/domain/menu/plate-role-labels";
 import type { RecipeBatchScale } from "@/domain/recipes/batch-scale";
@@ -18,7 +19,7 @@ type SlotDishLineProps = {
   /** Meal key — scopes `main` label (Завтрак only on breakfast). */
   meal?: string | null;
   templateOrder?: readonly PlateRole[];
-  dish?: MenuSlotDishView | null;
+  dish?: MenuDishView | null;
   /** Non-recipe filled line (e.g. Перекус label). Ignored when dish has recipeId. */
   plainName?: string | null;
   plainValue?: RecipePerServingValue | null;
@@ -53,7 +54,7 @@ function DishMeta({
   plainValue,
 }: {
   hasRecipe: boolean;
-  dish: MenuSlotDishView | null;
+  dish: MenuDishView | null;
   slotServings: number;
   portionCount?: number;
   filledPlain: boolean;
@@ -98,12 +99,14 @@ function SheetRowBody({
   title,
   empty,
   meta,
+  cues,
 }: {
   roleCaption: string;
   accent: string;
   title: ReactNode;
   empty: boolean;
   meta: ReactNode;
+  cues?: ReactNode;
 }) {
   return (
     <>
@@ -124,8 +127,9 @@ function SheetRowBody({
             {empty ? (
               <p className="m-0 text-sm leading-5 text-slot-label">{title}</p>
             ) : (
-              <p className="m-0 text-sm font-semibold leading-5 text-foreground">
-                {title}
+              <p className="m-0 flex min-w-0 items-center gap-1.5 text-sm font-semibold leading-5 text-foreground">
+                <span className="min-w-0 truncate">{title}</span>
+                {cues}
               </p>
             )}
           </div>
@@ -157,6 +161,10 @@ export function SlotDishLine({
   const hasRecipe = Boolean(recipeId);
   const filledPlain = !hasRecipe && Boolean(plainName);
   const filled = hasRecipe || filledPlain;
+  const prepared = dish?.prepared === true;
+  const rating = dish?.rating ?? null;
+  const dishId =
+    dish && !dish.id.startsWith(`${slotId}-legacy-`) ? dish.id : null;
   const roleCaption = dishLineRoleLabel(
     plateRole,
     dish?.coversRoles,
@@ -174,6 +182,10 @@ export function SlotDishLine({
       plainValue={plainValue}
     />
   );
+  const cues =
+    filled && (prepared || rating) ? (
+      <CookFeedbackCues prepared={prepared} rating={rating} />
+    ) : null;
   const overflow =
     actions ??
     (sheetLayout ? (
@@ -181,6 +193,9 @@ export function SlotDishLine({
         menuId={menuId}
         slotId={slotId}
         hasRecipe={hasRecipe}
+        dishId={dishId}
+        prepared={prepared}
+        rating={rating}
         recipeId={recipeId}
         target={plateRole}
         canClear={canClear && hasRecipe}
@@ -191,6 +206,9 @@ export function SlotDishLine({
         menuId={menuId}
         slotId={slotId}
         hasRecipe={hasRecipe}
+        dishId={dishId}
+        prepared={prepared}
+        rating={rating}
         recipeId={recipeId}
         target={plateRole}
         canClear={canClear && hasRecipe}
@@ -237,6 +255,7 @@ export function SlotDishLine({
                 title={title}
                 empty={false}
                 meta={meta}
+                cues={cues}
               />
             </button>
           </RecipeTextPanel>
@@ -248,6 +267,7 @@ export function SlotDishLine({
               title={title}
               empty={!filled}
               meta={meta}
+              cues={cues}
             />
           </div>
         )}
@@ -268,19 +288,25 @@ export function SlotDishLine({
           {roleCaption}
         </p>
         {hasRecipe && recipeId && dish ? (
-          <RecipeTextPanel
-            recipeId={recipeId}
-            recipeName={dish.recipeName ?? "Рецепт недоступен"}
-            bodyText={dish.recipeBodyText ?? ""}
-            ingredients={dish.recipeIngredients}
-            value={dish.recipeValue}
-            totalServings={batch.totalServings}
-            peoplePerMeal={batch.peoplePerMeal}
-            dayCount={batch.dayCount}
-            triggerClassName="text-left text-sm font-semibold text-foreground underline decoration-border underline-offset-2 hover:text-primary"
-          />
+          <div className="flex min-w-0 items-center gap-1.5">
+            <RecipeTextPanel
+              recipeId={recipeId}
+              recipeName={dish.recipeName ?? "Рецепт недоступен"}
+              bodyText={dish.recipeBodyText ?? ""}
+              ingredients={dish.recipeIngredients}
+              value={dish.recipeValue}
+              totalServings={batch.totalServings}
+              peoplePerMeal={batch.peoplePerMeal}
+              dayCount={batch.dayCount}
+              triggerClassName="min-w-0 truncate text-left text-sm font-semibold text-foreground underline decoration-border underline-offset-2 hover:text-primary"
+            />
+            {cues}
+          </div>
         ) : filledPlain && plainName ? (
-          <p className="text-sm font-semibold text-foreground">{plainName}</p>
+          <p className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-foreground">
+            <span className="min-w-0 truncate">{plainName}</span>
+            {cues}
+          </p>
         ) : (
           <p className="text-sm text-slot-label">{emptyLabel}</p>
         )}

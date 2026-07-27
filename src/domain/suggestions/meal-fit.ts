@@ -18,7 +18,7 @@ export function mealsIncludeLunchOrDinner(
 }
 
 /**
- * Detect no-cook snack labels that belong in `menu_snacks`, not cookable slots.
+ * Detect no-cook snack labels that belong on snack Menu dishes, not cookable slots.
  * Cooked breakfast (каша, сырники, яичница) must not be rejected.
  */
 export function looksLikeNoCookSnack(name: string): boolean {
@@ -26,7 +26,7 @@ export function looksLikeNoCookSnack(name: string): boolean {
   if (!n) return false;
   if (n.includes("перекус")) return true;
   if (/(^|\s)(снек|snack)([ыа]|ов)?(\s|$)/.test(n)) return true;
-  // Plated salads belong on veg/main lines, not menu_snacks — even with fruit.
+  // Plated salads belong on veg/main lines, not snack dishes — even with fruit.
   if (/(^|\s)салат/.test(n)) return false;
   // Ready-to-eat / no-cook pantry snacks (not cooked breakfast).
   if (containsSnackWord(n)) {

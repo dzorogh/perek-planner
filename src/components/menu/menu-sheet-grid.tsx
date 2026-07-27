@@ -12,7 +12,7 @@ import {
   type MenuDayPair,
 } from "@/domain/menu/constants";
 import type {
-  MenuSlotDishView,
+  MenuDishView,
   MenuSlotView,
   MenuSnackView,
 } from "@/domain/menu/load-menu";
@@ -44,7 +44,7 @@ function shimDish(
   slot: MenuSlotView,
   plateRole: PlateRole,
   sortOrder: number,
-): MenuSlotDishView {
+): MenuDishView {
   return {
     id: `${slot.id}-legacy-${plateRole}`,
     plateRole,
@@ -56,13 +56,15 @@ function shimDish(
     recipeValue: slot.recipeValue,
     coversRoles: null,
     snackLabel: null,
+    prepared: false,
+    rating: null,
   };
 }
 
 function primaryShimDishes(
   slot: MenuSlotView,
   template: readonly PlateRole[],
-): MenuSlotDishView[] {
+): MenuDishView[] {
   if (!slot.recipeId) return [];
   const primaryRole: PlateRole = template.includes("protein")
     ? "protein"
@@ -72,7 +74,7 @@ function primaryShimDishes(
 
 function roleLinesForSlot(slot: MenuSlotView): Array<{
   role: PlateRole;
-  dish: MenuSlotDishView | null;
+  dish: MenuDishView | null;
   template: readonly PlateRole[];
 }> {
   const template: readonly PlateRole[] = isTemplateMeal(slot.meal)

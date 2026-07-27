@@ -55,8 +55,9 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Mutations: server actions in `src/domain/**/**-actions.ts` + `revalidatePath` for touched routes
 - Deps: `app/` + `src/components/` → `src/domain/` → `src/lib/supabase|openrouter` — never OpenRouter from Client Components
 - Browser Supabase client for auth/UI and Realtime (menu live sync: listen `postgres_changes` + Broadcast busy overlays; shopping live sync: same-browser `BroadcastChannel` after persist + listen-only `postgres_changes` on `shopping_lists`/menu tables → debounced `router.refresh()`); data writes + AI via server client/actions — never mutate menu/shopping rows from the browser
-- UI: Soft Workshop / light-only desktop; Russian copy; English glossary ids in domain (`Menu`, `Recipe`, `Snack`, …)
-- Suggestions: invent → persist → assign **persisted ids only**; eligibility = fridge-keep + refusal/dislike hard-suppress
+- Menu dish lines: single table `menu_dishes` (recipe XOR snack_label) under `menu_slots`; cook feedback = `prepared` + `rating` (`like`|`dislike`|null) on that row only
+- UI: Soft Workshop / light-only desktop; Russian copy; English glossary ids in domain (`Menu`, `MenuDish`, `Recipe`, `Snack`, …)
+- Suggestions: invent → persist → assign **persisted ids only**; eligibility = fridge-keep + `recipe_refusals` hard-suppress (ratings / menu cook feedback do not suppress or re-rank)
 - Plan routes: `/plan/{menuId}/menu` and `/plan/{menuId}/shopping-list` (gates without id: `/plan/menu`, `/plan/shopping-list`)
 - Shopping list: dish-grouped SOURCE via `buildShoppingSourceFromMenu(menu)`; curated cart persists `curated_product_keys` on `shopping_lists` (server actions, `user_id` denormalized for RLS/Realtime); hydrate qty from live SOURCE; copy curated lines only; live sync on scoped shopping-list route
 
@@ -94,7 +95,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **No live catalog:** do not reintroduce `stores` / `products` / `catalog_sync_runs` / `checked_matches`, store picker, or `sync/`
 - **Spine drift:** ADOPTED/SUPERSEDED + code win over stale ER diagrams still showing Product/Store/CheckedMatch
 - **AI:** never assign unpersisted invented recipes; never ship OpenRouter keys to the browser
-- **Hard suppress:** refusal + dislike on every suggest/assign path (generate, resuggest, snacks)
+- **Hard suppress:** `recipe_refusals` only on every suggest/assign path (generate, resuggest, snacks). History `recipe_ratings` / `snack_ratings` and menu dish `rating`/`prepared` must not suppress, re-rank, or taste-ban
 - **Fridge-keep:** `fridge_keep_days >= menu.day_count` (+ suppress); no SKU matching
 - **Auth:** session required for planning; bypass ignored when `NODE_ENV=production`
 - **Copy:** never advertise cut features («Без X», «MVP without…»)
@@ -120,4 +121,4 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Review quarterly for outdated rules
 - Remove rules that become obvious over time
 
-Last Updated: 2026-07-26
+Last Updated: 2026-07-28

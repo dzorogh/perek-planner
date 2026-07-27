@@ -3,7 +3,6 @@
 export { buildCandidates } from "@/domain/suggestions/candidates";
 export {
   LONG_IDLE_DAYS,
-  RATING_WEIGHT,
   RECENT_MENUS_COOLDOWN,
 } from "@/domain/suggestions/constants";
 export {
@@ -59,7 +58,6 @@ export {
   preferFreshCandidates,
   preferInventedCandidates,
   rankCandidates,
-  ratingWeight,
 } from "@/domain/suggestions/rank";
 export {
   emitRoleSlots,

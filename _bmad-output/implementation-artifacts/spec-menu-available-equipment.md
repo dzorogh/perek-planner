@@ -2,7 +2,7 @@
 title: 'Available kitchen equipment for menu creation'
 type: 'feature'
 created: '2026-07-25'
-status: 'review'
+status: 'done'
 baseline_commit: '303d05c49d9c107d46190af758485dec91b2c258'
 context:
   - '{project-root}/_bmad-output/project-context.md'

@@ -10,6 +10,10 @@ import {
 
 import { CommentDialog } from "@/components/feedback/comment-dialog";
 import { clearBodyPointerEvents } from "@/components/menu/clear-body-pointer-events";
+import {
+  CookFeedbackMenuItems,
+  planningLocked,
+} from "@/components/menu/cook-feedback-menu";
 import { useMenuSlotBusy } from "@/components/menu/menu-slot-busy";
 import { SlotGeneratingOverlay } from "@/components/menu/slot-generating-overlay";
 import { Button } from "@/components/ui/button";
@@ -20,6 +24,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { MIN_FEEDBACK_COMMENT_LENGTH } from "@/domain/history/constants";
+import {
+  setDishRatingAction,
+  togglePreparedAction,
+  type CookFeedbackActionState,
+} from "@/domain/menu/cook-feedback-actions";
+import type { MenuDishRating } from "@/domain/menu/load-menu";
 import type { PlateRole } from "@/domain/menu/meal-templates";
 import { plateRoleLabelRu } from "@/domain/menu/plate-role-labels";
 import {
@@ -38,6 +48,10 @@ type SlotCardActionsProps = {
   menuId: string;
   slotId: string;
   hasRecipe: boolean;
+  /** Menu dish id — required for cook feedback on filled lines. */
+  dishId?: string | null;
+  prepared?: boolean;
+  rating?: MenuDishRating | null;
   /** When set, across-menu replace/modify/refuse animates every card with this dish. */
   recipeId?: string | null;
   target?: SlotDishTarget;
@@ -47,7 +61,7 @@ type SlotCardActionsProps = {
   placement?: "overlay" | "inline";
 };
 
-function ActionError({ state }: { state: SlotActionState }) {
+function ActionError({ state }: { state: SlotActionState | CookFeedbackActionState }) {
   if (!state || state.ok) return null;
   return (
     <p className="mt-1 text-xs text-warning-fg" role="alert">
@@ -65,117 +79,13 @@ function generatingOverlayLabel(flags: {
   return "Заменяем…";
 }
 
-type SlotActionMenuProps = {
-  busy: boolean;
-  hasRecipe: boolean;
-  canClear: boolean;
-  suggestPending: boolean;
-  resuggestPending: boolean;
-  modifyPending: boolean;
-  clearPending: boolean;
-  onSuggest: () => void;
-  onResuggest: () => void;
-  onModify: () => void;
-  onClear: () => void;
-  onRefuse: () => void;
-};
-
-function FilledDishMenuItems({
-  busy,
-  resuggestPending,
-  modifyPending,
-  onResuggest,
-  onModify,
-  onRefuse,
-}: {
-  busy: boolean;
-  resuggestPending: boolean;
-  modifyPending: boolean;
-  onResuggest: () => void;
-  onModify: () => void;
-  onRefuse: () => void;
-}) {
-  return (
-    <>
-      <DropdownMenuItem
-        disabled={busy}
-        className="focus:bg-background focus:text-primary"
-        onSelect={onResuggest}
-      >
-        {resuggestPending ? "Заменяем…" : "Заменить"}
-      </DropdownMenuItem>
-      <DropdownMenuItem
-        disabled={busy}
-        className="focus:bg-background focus:text-primary"
-        onSelect={onModify}
-      >
-        {modifyPending ? "Изменяем…" : "Изменить"}
-      </DropdownMenuItem>
-      <DropdownMenuItem
-        disabled={busy}
-        className="text-warning-fg focus:bg-background focus:text-warning-fg"
-        onSelect={onRefuse}
-      >
-        Не предлагать
-      </DropdownMenuItem>
-    </>
-  );
-}
-
-function SlotActionMenu({
-  busy,
-  hasRecipe,
-  canClear,
-  suggestPending,
-  resuggestPending,
-  modifyPending,
-  clearPending,
-  onSuggest,
-  onResuggest,
-  onModify,
-  onClear,
-  onRefuse,
-}: SlotActionMenuProps) {
-  return (
-    <DropdownMenuContent
-      align="end"
-      className="min-w-[13rem] rounded-md border-border"
-    >
-      {hasRecipe ? (
-        <FilledDishMenuItems
-          busy={busy}
-          resuggestPending={resuggestPending}
-          modifyPending={modifyPending}
-          onResuggest={onResuggest}
-          onModify={onModify}
-          onRefuse={onRefuse}
-        />
-      ) : (
-        <DropdownMenuItem
-          disabled={busy}
-          className="focus:bg-background focus:text-primary"
-          onSelect={onSuggest}
-        >
-          {suggestPending ? "Подбираем…" : "Предложить"}
-        </DropdownMenuItem>
-      )}
-      {canClear ? (
-        <DropdownMenuItem
-          disabled={busy}
-          className="focus:bg-background focus:text-primary"
-          onSelect={onClear}
-        >
-          {clearPending ? "Убираем…" : "Убрать"}
-        </DropdownMenuItem>
-      ) : null}
-    </DropdownMenuContent>
-  );
-}
-
 export function SlotCardActions({
   menuId,
   slotId,
   hasRecipe,
+  dishId = null,
+  prepared = false,
+  rating = null,
   recipeId = null,
   target = "main",
   canClear = false,
@@ -206,6 +116,17 @@ export function SlotCardActions({
     SlotActionState,
     FormData
   >(clearCompanionAction, null);
+  const [preparedState, preparedFormAction, preparedPending] = useActionState<
+    CookFeedbackActionState,
+    FormData
+  >(togglePreparedAction, null);
+  const [ratingState, ratingFormAction, ratingPending] = useActionState<
+    CookFeedbackActionState,
+    FormData
+  >(setDishRatingAction, null);
+
+  const locked = planningLocked(prepared, rating);
+  const showCookFeedback = Boolean(hasRecipe && dishId);
 
   const acrossMenuPending =
     resuggestPending || modifyPending || refusePending;
@@ -223,7 +144,9 @@ export function SlotCardActions({
     resuggestPending ||
     modifyPending ||
     refusePending ||
-    clearPending;
+    clearPending ||
+    preparedPending ||
+    ratingPending;
 
   useLayoutEffect(() => {
     const key = `${slotId}:${target}`;
@@ -284,10 +207,27 @@ export function SlotCardActions({
     });
   }
 
+  function runCookFeedback(
+    action: (payload: FormData) => void,
+    extra?: Record<string, string>,
+  ) {
+    if (!dishId) return;
+    closeMenu();
+    const fd = new FormData();
+    fd.set("menuId", menuId);
+    fd.set("dishId", dishId);
+    if (extra) {
+      for (const [key, value] of Object.entries(extra)) {
+        fd.set(key, value);
+      }
+    }
+    startTransition(() => {
+      action(fd);
+    });
+  }
+
   const inline = placement === "inline";
 
-  // Inline: overlay is a fragment sibling of the ⋯ column so `absolute inset-0`
-  // covers the whole `relative` slot-dish-line row, not just the actions cell.
   const actionsChrome = (
     <>
       <div className={inline ? "relative z-10" : "absolute right-2 top-2 z-10"}>
@@ -311,20 +251,71 @@ export function SlotCardActions({
               <MoreHorizontal className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
-          <SlotActionMenu
-            busy={busy}
-            hasRecipe={hasRecipe}
-            canClear={canClear}
-            suggestPending={suggestPending}
-            resuggestPending={resuggestPending}
-            modifyPending={modifyPending}
-            clearPending={clearPending}
-            onSuggest={() => runAction(suggestFormAction)}
-            onResuggest={() => runAction(resuggestFormAction)}
-            onModify={() => openDialogAfterMenu(() => setModifyOpen(true))}
-            onClear={() => runAction(clearFormAction)}
-            onRefuse={() => openDialogAfterMenu(() => setRefuseOpen(true))}
-          />
+          <DropdownMenuContent
+            align="end"
+            className="min-w-[13rem] rounded-md border-border"
+            data-component="menu-dish-actions"
+          >
+            {hasRecipe ? (
+              <>
+                {!locked ? (
+                  <>
+                    <DropdownMenuItem
+                      disabled={busy}
+                      className="focus:bg-background focus:text-primary"
+                      onSelect={() => runAction(resuggestFormAction)}
+                    >
+                      {resuggestPending ? "Заменяем…" : "Заменить"}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={busy}
+                      className="focus:bg-background focus:text-primary"
+                      onSelect={() =>
+                        openDialogAfterMenu(() => setModifyOpen(true))
+                      }
+                    >
+                      {modifyPending ? "Изменяем…" : "Изменить"}
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
+                <DropdownMenuItem
+                  disabled={busy}
+                  className="text-warning-fg focus:bg-background focus:text-warning-fg"
+                  onSelect={() => openDialogAfterMenu(() => setRefuseOpen(true))}
+                >
+                  Не предлагать
+                </DropdownMenuItem>
+              </>
+            ) : (
+              <DropdownMenuItem
+                disabled={busy}
+                className="focus:bg-background focus:text-primary"
+                onSelect={() => runAction(suggestFormAction)}
+              >
+                {suggestPending ? "Подбираем…" : "Предложить"}
+              </DropdownMenuItem>
+            )}
+            {canClear && !locked ? (
+              <DropdownMenuItem
+                disabled={busy}
+                className="focus:bg-background focus:text-primary"
+                onSelect={() => runAction(clearFormAction)}
+              >
+                {clearPending ? "Убираем…" : "Убрать"}
+              </DropdownMenuItem>
+            ) : null}
+            {showCookFeedback ? (
+              <CookFeedbackMenuItems
+                prepared={prepared}
+                rating={rating}
+                busy={busy}
+                onTogglePrepared={() => runCookFeedback(preparedFormAction)}
+                onRate={(value) =>
+                  runCookFeedback(ratingFormAction, { rating: value })
+                }
+              />
+            ) : null}
+          </DropdownMenuContent>
         </DropdownMenu>
       </div>
 
@@ -341,6 +332,8 @@ export function SlotCardActions({
           <ActionError state={modifyState} />
           <ActionError state={refuseState} />
           <ActionError state={clearState} />
+          <ActionError state={preparedState} />
+          <ActionError state={ratingState} />
         </div>
       ) : null}
     </>

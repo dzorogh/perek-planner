@@ -9,6 +9,12 @@ import {
   menuDayPairForDay,
   menuDayPairsForCount,
 } from "@/domain/menu/constants";
+import {
+  ensureSnackSlots,
+  replaceMenuSnackDishes,
+  snackDraftNutrition,
+  upsertSnackDish,
+} from "@/domain/menu/menu-dishes";
 import { inventPriceToKopecks } from "@/domain/suggestions/invent-recipes";
 import {
   RECENT_SNACK_MENUS_COOLDOWN,
@@ -56,7 +62,7 @@ Rules:
 - HARD ban on fantasy / poetic / marketing / brand-like titles: never «солнечные…», «волшебные…», «райские…», «энергетические…», «бомба», invented product names, cute metaphors.
 - Invent varied everyday options — do not copy a fixed catalog; invent fresh labels each time.
 - Never repeat items from avoid. Never invent cooked dishes (no soups, no hot meals).
-- Honor likedSnacks (prefer that style) and operatorTasteNotes: constraint is PRIMARY (generalize the rule); exampleDish is secondary only; ban = hard never; wish = soft prefer.
+- Honor operatorTasteNotes: constraint is PRIMARY (generalize the rule); exampleDish is secondary only; ban = hard never; wish = soft prefer.
 - Consecutive menus must feel different: avoid recentlyUsed snacks and near-duplicates of them.
 - price_rub_per_serving: integer RUBLES for 1 adult portion (supermarket). Typical: fruit 30–80, dairy 40–100, nuts/cheese 80–180. NEVER above 250. NEVER send kopecks.
 - nutrition_per_serving: kcal (integer) and protein_g / fat_g / carbs_g for 1 adult snack portion (not a full meal / not a whole package). Typical snack ~100–350 kcal.
@@ -78,14 +84,12 @@ Rules:
   Pass: яблоко→кефир; йогурт→хумус с морковью; творог→горсть миндаля; банан→сырные кубики / хумус с хлебцами / груша.
 - NEVER echo or near-duplicate avoid, recentlyUsed, or replacedSnacks (including word-order / diminutive swaps).
 - Do NOT only reshuffle a tiny fixed set (yogurt/apple/banana/cottage cheese). Invent fresh everyday labels each call.
-- Never invent cooked dishes. Honor likedSnacks style when present but do not only repeat liked ones.
+- Never invent cooked dishes.
 - Honor operatorTasteNotes (constraint PRIMARY). price/nutrition rules same as usual; OMIT when uncertain.`;
 
 const SNACK_REPLACE_CANDIDATE_COUNT = 5;
 
 type SnackPreferences = {
-  liked: string[];
-  disliked: Set<string>;
   recent: Set<string>;
 };
 
@@ -94,29 +98,12 @@ async function loadSnackPreferences(
   userId: string,
   excludeMenuId?: string,
 ): Promise<SnackPreferences | null> {
-  const [ratingsRes, recent] = await Promise.all([
-    supabase
-      .from("snack_ratings")
-      .select("label, rating")
-      .eq("user_id", userId),
-    loadRecentSnackLabels(supabase, userId, {
-      excludeMenuId,
-      menuLimit: RECENT_SNACK_MENUS_COOLDOWN,
-    }),
-  ]);
-
-  if (ratingsRes.error || !recent) return null;
-
-  const liked: string[] = [];
-  const disliked = new Set<string>();
-  for (const row of ratingsRes.data ?? []) {
-    if (typeof row.label !== "string" || !row.label.trim()) continue;
-    const key = normalizeSnackLabel(row.label);
-    if (row.rating === "dislike") disliked.add(key);
-    if (row.rating === "like") liked.push(row.label.trim());
-  }
-
-  return { liked, disliked, recent };
+  const recent = await loadRecentSnackLabels(supabase, userId, {
+    excludeMenuId,
+    menuLimit: RECENT_SNACK_MENUS_COOLDOWN,
+  });
+  if (!recent) return null;
+  return { recent };
 }
 
 async function proposeSnacksViaOpenRouter(
@@ -126,11 +113,7 @@ async function proposeSnacksViaOpenRouter(
   tasteNotes: TasteNote[] = [],
   extraAvoid: Set<string> = new Set(),
 ): Promise<SnackDraft[]> {
-  const avoid = new Set([
-    ...prefs.disliked,
-    ...prefs.recent,
-    ...extraAvoid,
-  ]);
+  const avoid = new Set([...prefs.recent, ...extraAvoid]);
 
   const content = await chat({
     messages: [
@@ -140,11 +123,10 @@ async function proposeSnacksViaOpenRouter(
         content: JSON.stringify({
           count,
           avoid: [...avoid],
-          likedSnacks: prefs.liked.slice(0, 20),
           recentlyUsed: [...prefs.recent],
           operatorTasteNotes: tasteNotesForPrompt(tasteNotes),
           instruction:
-            "Invent that many distinct no-cook snacks (each snack is eaten on two consecutive menu days). Everyday grocery labels only — no fantasy/poetic/marketing names. Include price and nutrition when confident. Respect avoid and operatorTasteNotes (constraint PRIMARY, exampleDish secondary). Lean toward the style of likedSnacks when present, but invent new labels — do not only repeat liked ones. Do not reuse recentlyUsed. Capitalize the first letter of each name.",
+            "Invent that many distinct no-cook snacks (each snack is eaten on two consecutive menu days). Everyday grocery labels only — no fantasy/poetic/marketing names. Include price and nutrition when confident. Respect avoid and operatorTasteNotes (constraint PRIMARY, exampleDish secondary). Do not reuse recentlyUsed. Capitalize the first letter of each name.",
         }),
       },
     ],
@@ -167,7 +149,6 @@ async function proposeReplacementSnacksViaOpenRouter(
   temperature: number,
 ): Promise<SnackDraft[]> {
   const avoid = new Set([
-    ...prefs.disliked,
     ...prefs.recent,
     ...extraAvoid,
     ...replacedSnacks.map(normalizeSnackLabel),
@@ -182,7 +163,6 @@ async function proposeReplacementSnacksViaOpenRouter(
           count,
           replacedSnacks,
           avoid: [...avoid],
-          likedSnacks: prefs.liked.slice(0, 20),
           recentlyUsed: [...prefs.recent],
           operatorTasteNotes: tasteNotesForPrompt(tasteNotes),
           instruction:
@@ -198,22 +178,11 @@ async function proposeReplacementSnacksViaOpenRouter(
   return parseSnacksJson(content, count, avoid);
 }
 
-function snackRowPayload(draft: SnackDraft) {
-  return {
-    label: draft.label,
-    price_cents_per_serving: draft.priceCentsPerServing,
-    calories_kcal_per_serving: draft.caloriesKcalPerServing,
-    protein_g_per_serving: draft.proteinGPerServing,
-    fat_g_per_serving: draft.fatGPerServing,
-    carbs_g_per_serving: draft.carbsGPerServing,
-  };
-}
-
 /** Pure parser for snack JSON (objects preferred; legacy string labels accepted). */
 export function parseSnacksJson(
   content: string,
   count: number,
-  disliked: Set<string>,
+  avoid: Set<string>,
 ): SnackDraft[] {
   let parsed: unknown;
   try {
@@ -230,7 +199,7 @@ export function parseSnacksJson(
     const draft = parseSnackItem(item);
     if (!draft) continue;
     const key = normalizeSnackLabel(draft.label);
-    if (disliked.has(key) || seen.has(key)) continue;
+    if (avoid.has(key) || seen.has(key)) continue;
     seen.add(key);
     out.push(draft);
     if (out.length >= count) break;
@@ -389,38 +358,37 @@ export async function generateSnacksForMenu(
   }
 
   const pairDrafts = drafts.slice(0, pairCount);
-  await supabase.from("menu_snacks").delete().eq("menu_id", menuId);
+  const { data: menuRow } = await supabase
+    .from("menus")
+    .select("default_servings_per_meal")
+    .eq("id", menuId)
+    .maybeSingle();
+  const servings =
+    typeof menuRow?.default_servings_per_meal === "number"
+      ? menuRow.default_servings_per_meal
+      : 2;
 
-  const rows = dayPairs.flatMap((pair, pairIndex) => {
+  const byDay = new Map<number, SnackDraft>();
+  for (let pairIndex = 0; pairIndex < dayPairs.length; pairIndex += 1) {
     const draft = pairDrafts[pairIndex]!;
-    return pair.map((dayIndex) => ({
-      menu_id: menuId,
-      day_index: dayIndex,
-      ...snackRowPayload(draft),
-    }));
-  });
+    for (const dayIndex of dayPairs[pairIndex]!) {
+      byDay.set(dayIndex, draft);
+    }
+  }
 
-  const { error: insertError } = await supabase.from("menu_snacks").insert(rows);
-
-  if (insertError) {
+  const ok = await replaceMenuSnackDishes(
+    supabase,
+    menuId,
+    dayCount,
+    servings,
+    byDay,
+  );
+  if (!ok) {
     slogError("snacks", "fail", {
       reason: "insert",
-      message: insertError.message,
       ms: Date.now() - started,
     });
     return { ok: false, error: "Не удалось сохранить перекусы." };
-  }
-
-  try {
-    const { syncSnackDishesFromRows } = await import(
-      "@/domain/menu/sync-snack-dishes"
-    );
-    await syncSnackDishesFromRows(supabase, menuId, dayCount, rows);
-  } catch (err) {
-    slogError("snacks", "sync-dishes:warn", {
-      message: err instanceof Error ? err.message : String(err),
-    });
-    // Dual-write must not fail snack generation.
   }
 
   const labels = pairDrafts.map((d) => d.label);
@@ -462,15 +430,21 @@ async function proposeReplacementSnackDraft(
     return { ok: false, error: "Не удалось загрузить предпочтения по перекусам." };
   }
 
-  const { data: siblings } = await supabase
-    .from("menu_snacks")
-    .select("label")
-    .eq("menu_id", menuId);
+  const { data: siblingSlots } = await supabase
+    .from("menu_slots")
+    .select("menu_dishes(snack_label)")
+    .eq("menu_id", menuId)
+    .eq("meal", "snack");
 
   const extraAvoid = new Set<string>();
-  for (const row of siblings ?? []) {
-    if (typeof row.label === "string") {
-      extraAvoid.add(normalizeSnackLabel(row.label));
+  for (const row of siblingSlots ?? []) {
+    const dishes = (
+      row as { menu_dishes?: Array<{ snack_label?: unknown }> | null }
+    ).menu_dishes;
+    for (const d of dishes ?? []) {
+      if (typeof d.snack_label === "string") {
+        extraAvoid.add(normalizeSnackLabel(d.snack_label));
+      }
     }
   }
   const replacedKey = normalizeSnackLabel(replacedLabel);
@@ -543,24 +517,17 @@ export async function resuggestSnackForMenu(
     };
   }
 
-  const { data: snack, error: snackError } = await supabase
-    .from("menu_snacks")
-    .select("id, label, day_index")
-    .eq("id", snackId)
-    .eq("menu_id", menuId)
-    .maybeSingle();
-
-  if (snackError || !snack) {
+  const snack = await loadOwnedSnackDish(supabase, menuId, snackId);
+  if (!snack) {
     return { ok: false, error: "Перекус не найден." };
   }
 
-  const dayPair = menuDayPairForDay(snack.day_index);
+  const dayPair = menuDayPairForDay(snack.dayIndex);
   if (!dayPair) {
     return { ok: false, error: "Перекус не найден." };
   }
 
-  const replacedLabel =
-    typeof snack.label === "string" ? snack.label.trim() : "";
+  const replacedLabel = snack.label;
   const chat = options.chat ?? openRouterChatCompletions;
   const proposed = await proposeReplacementSnackDraft(
     supabase,
@@ -580,34 +547,73 @@ export async function resuggestSnackForMenu(
     return { ok: false, error: "Не удалось предложить другой перекус." };
   }
 
-  const { error: updateError } = await supabase
-    .from("menu_snacks")
-    .update(snackRowPayload(proposed.draft))
-    .eq("menu_id", menuId)
-    .in("day_index", [...dayPair]);
-
-  if (updateError) {
-    if (updateError.code === "23505") {
-      return { ok: false, error: "Такой перекус уже есть в меню." };
-    }
-    return { ok: false, error: "Не удалось заменить перекус." };
+  const { data: menuRow } = await supabase
+    .from("menus")
+    .select("day_count, default_servings_per_meal")
+    .eq("id", menuId)
+    .maybeSingle();
+  const dayCount =
+    typeof menuRow?.day_count === "number" ? menuRow.day_count : 0;
+  const servings =
+    typeof menuRow?.default_servings_per_meal === "number"
+      ? menuRow.default_servings_per_meal
+      : 2;
+  if (dayCount < 1) {
+    return { ok: false, error: "Меню не найдено." };
   }
 
-  try {
-    const { syncSnackDishesForDays } = await import(
-      "@/domain/menu/sync-snack-dishes"
-    );
-    await syncSnackDishesForDays(
+  const slots = await ensureSnackSlots(supabase, menuId, dayCount, servings);
+  for (const dayIndex of dayPair) {
+    const slotId = slots.get(dayIndex);
+    if (!slotId) {
+      return { ok: false, error: "Не удалось заменить перекус." };
+    }
+    const ok = await upsertSnackDish(
       supabase,
-      menuId,
-      dayPair,
+      slotId,
       proposed.draft.label,
+      snackDraftNutrition(proposed.draft),
     );
-  } catch {
-    // best-effort dual-write
+    if (!ok) {
+      return { ok: false, error: "Не удалось заменить перекус." };
+    }
   }
 
   return { ok: true, label: proposed.draft.label };
+}
+
+type OwnedSnackDish = {
+  id: string;
+  label: string;
+  dayIndex: number;
+};
+
+async function loadOwnedSnackDish(
+  supabase: SupabaseClient,
+  menuId: string,
+  dishId: string,
+): Promise<OwnedSnackDish | null> {
+  const { data, error } = await supabase
+    .from("menu_dishes")
+    .select(
+      `id, snack_label,
+       menu_slots!inner(id, menu_id, day_index, meal)`,
+    )
+    .eq("id", dishId)
+    .eq("plate_role", "snack")
+    .eq("menu_slots.menu_id", menuId)
+    .eq("menu_slots.meal", "snack")
+    .maybeSingle();
+
+  if (error || !data) return null;
+  const slot = Array.isArray(data.menu_slots)
+    ? data.menu_slots[0]
+    : data.menu_slots;
+  if (!slot || typeof slot.day_index !== "number") return null;
+  const label =
+    typeof data.snack_label === "string" ? data.snack_label.trim() : "";
+  if (!label) return null;
+  return { id: data.id, label, dayIndex: slot.day_index };
 }
 
 /**
@@ -628,22 +634,13 @@ export async function refuseAndReplaceSnackAcrossMenu(
     };
   }
 
-  const { data: snack, error: snackError } = await supabase
-    .from("menu_snacks")
-    .select("id, label")
-    .eq("id", snackId)
-    .eq("menu_id", menuId)
-    .maybeSingle();
-
-  if (snackError || !snack) {
+  const snack = await loadOwnedSnackDish(supabase, menuId, snackId);
+  if (!snack) {
     return { ok: false, error: "Перекус не найден." };
   }
 
-  const refusedLabel = snack.label.trim();
-  if (!refusedLabel) {
-    return { ok: false, error: "У перекуса нет названия." };
-  }
-
+  const refusedLabel = snack.label;
+  // History table only — ratings do not steer future snack AI.
   const { error: refuseError } = await supabase.from("snack_ratings").upsert(
     {
       user_id: userId,

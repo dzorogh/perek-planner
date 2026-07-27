@@ -1,5 +1,5 @@
 /**
- * Persist helpers for menu_slot_dishes (Story 6.1 dual-write).
+ * Persist helpers for menu_dishes (universal Menu dish lines).
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -12,9 +12,18 @@ import {
   type PlateRole,
 } from "@/domain/menu/meal-templates";
 
-export type SlotDishWrite =
+export type MenuDishWrite =
   | { plateRole: PlateRole; recipeId: string; snackLabel?: never }
   | { plateRole: "snack"; snackLabel: string; recipeId?: never };
+
+export type SnackDishDraft = {
+  label: string;
+  priceCentsPerServing: number | null;
+  caloriesKcalPerServing: number | null;
+  proteinGPerServing: number | null;
+  fatGPerServing: number | null;
+  carbsGPerServing: number | null;
+};
 
 /**
  * Upsert full cookable dish set for a slot; delete stale template roles not
@@ -24,7 +33,7 @@ export async function replaceSlotDishes(
   supabase: SupabaseClient,
   slotId: string,
   meal: MealSlot,
-  dishes: ReadonlyArray<Extract<SlotDishWrite, { recipeId: string }>>,
+  dishes: ReadonlyArray<Extract<MenuDishWrite, { recipeId: string }>>,
 ): Promise<boolean> {
   if (!isTemplateMeal(meal) || meal === "snack") return false;
   const template = rolesForMeal(meal);
@@ -39,16 +48,19 @@ export async function replaceSlotDishes(
   }
 
   if (writes.length > 0) {
+    // Content change clears cook feedback — never inherit prepared/rating.
     const rows = writes.map((w) => ({
       menu_slot_id: slotId,
       plate_role: w.plateRole,
       recipe_id: w.recipeId,
       snack_label: null as string | null,
       sort_order: sortOrderForRole(meal, w.plateRole),
+      prepared: false,
+      rating: null as string | null,
       updated_at: new Date().toISOString(),
     }));
     const { error: insError } = await supabase
-      .from("menu_slot_dishes")
+      .from("menu_dishes")
       .upsert(rows, { onConflict: "menu_slot_id,plate_role" });
     if (insError) return false;
   }
@@ -57,7 +69,7 @@ export async function replaceSlotDishes(
   const stale = template.filter((r) => !keep.has(r));
   if (stale.length > 0) {
     const { error: delError } = await supabase
-      .from("menu_slot_dishes")
+      .from("menu_dishes")
       .delete()
       .eq("menu_slot_id", slotId)
       .in("plate_role", stale);
@@ -66,28 +78,52 @@ export async function replaceSlotDishes(
   return true;
 }
 
-/** Upsert snack label dish on a snack meal slot. */
+/** Upsert snack label (+ optional nutrition) on a snack meal slot. */
 export async function upsertSnackDish(
   supabase: SupabaseClient,
   slotId: string,
   snackLabel: string,
+  nutrition?: Partial<{
+    price_cents_per_serving: number | null;
+    calories_kcal_per_serving: number | null;
+    protein_g_per_serving: number | null;
+    fat_g_per_serving: number | null;
+    carbs_g_per_serving: number | null;
+  }>,
 ): Promise<boolean> {
   const label = snackLabel.trim();
   if (!label) return false;
 
-  const { error } = await supabase.from("menu_slot_dishes").upsert(
+  const { error } = await supabase.from("menu_dishes").upsert(
     {
       menu_slot_id: slotId,
       plate_role: "snack",
       recipe_id: null,
       snack_label: label,
       sort_order: 0,
+      prepared: false,
+      rating: null,
+      price_cents_per_serving: nutrition?.price_cents_per_serving ?? null,
+      calories_kcal_per_serving: nutrition?.calories_kcal_per_serving ?? null,
+      protein_g_per_serving: nutrition?.protein_g_per_serving ?? null,
+      fat_g_per_serving: nutrition?.fat_g_per_serving ?? null,
+      carbs_g_per_serving: nutrition?.carbs_g_per_serving ?? null,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "menu_slot_id,plate_role" },
   );
 
   return !error;
+}
+
+export function snackDraftNutrition(draft: SnackDishDraft) {
+  return {
+    price_cents_per_serving: draft.priceCentsPerServing,
+    calories_kcal_per_serving: draft.caloriesKcalPerServing,
+    protein_g_per_serving: draft.proteinGPerServing,
+    fat_g_per_serving: draft.fatGPerServing,
+    carbs_g_per_serving: draft.carbsGPerServing,
+  };
 }
 
 /** Ensure snack slots exist for each day; return slot ids by day_index. */
@@ -138,4 +174,37 @@ export async function ensureSnackSlots(
   }
 
   return byDay;
+}
+
+/** Replace all snack dishes for a menu from day→draft map. */
+export async function replaceMenuSnackDishes(
+  supabase: SupabaseClient,
+  menuId: string,
+  dayCount: number,
+  servings: number,
+  byDay: ReadonlyMap<number, SnackDishDraft>,
+): Promise<boolean> {
+  const slots = await ensureSnackSlots(supabase, menuId, dayCount, servings);
+  const slotIds = [...slots.values()];
+  if (slotIds.length > 0) {
+    const { error: delError } = await supabase
+      .from("menu_dishes")
+      .delete()
+      .in("menu_slot_id", slotIds)
+      .eq("plate_role", "snack");
+    if (delError) return false;
+  }
+
+  for (const [dayIndex, draft] of byDay) {
+    const slotId = slots.get(dayIndex);
+    if (!slotId) return false;
+    const ok = await upsertSnackDish(
+      supabase,
+      slotId,
+      draft.label,
+      snackDraftNutrition(draft),
+    );
+    if (!ok) return false;
+  }
+  return true;
 }

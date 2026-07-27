@@ -230,17 +230,7 @@ export function ShoppingLiveSync({
           {
             event: "*",
             schema: "public",
-            table: "menu_snacks",
-            filter: `menu_id=eq.${menuId}`,
-          },
-          onMenuScoped,
-        )
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "menu_slot_dishes",
+            table: "menu_dishes",
           },
           onDish,
         )
